@@ -138,28 +138,74 @@
   (set-face-attribute 'variable-pitch nil
                       :family "Roboto" :height 1.0 :weight 'regular))
 
+(set-display-table-slot standard-display-table 'truncation (make-glyph-code ?…))
+(set-display-table-slot standard-display-table 'wrap (make-glyph-code ?–))
+
 ;; Themes ================================================= ;;
 
-(use-package uwu-theme
-  :config
-  (setq
-   uwu-distinct-line-numbers 'nil
-   uwu-scale-org-headlines t
-   uwu-use-variable-pitch t)
-  (load-theme 'uwu t))
+;; (use-package uwu-theme
+;;   :config
+;;   (setq
+;;    uwu-distinct-line-numbers 'nil
+;;    uwu-scale-org-headlines t
+;;    uwu-use-variable-pitch t)
+;;   (load-theme 'uwu t))
 
 (use-package acme-theme)
 
 (use-package standard-themes)
 
+(use-package neofusion-theme
+  :vc (:url "https://github.com/konrad1977/neofusion-emacs" :rev :newest))
+
 ;; UI Enhancements ======================================== ;;
 
-(use-package spacious-padding
-  :custom
-  (line-spacing 3)
-  (spacious-padding-subtle-mode-line t)
-  :init
-  (spacious-padding-mode 1))
+;; --- Frame / windows layout & behavior --------------------------------------
+(setq default-frame-alist
+      '((height . 44) (width  . 81) (left-fringe . 0) (right-fringe . 0)
+        (internal-border-width . 32) (vertical-scroll-bars . nil)
+        (bottom-divider-width . 0) (right-divider-width . 0)
+        (undecorated-round . t)))
+(modify-frame-parameters nil default-frame-alist)
+(setq-default pop-up-windows nil)
+
+;; --- Header & mode lines ----------------------------------------------------
+(setq-default mode-line-format "")
+(setq-default header-line-format
+  '(:eval
+    (let ((prefix (cond (buffer-read-only     '("RO" . nano-default-i))
+                        ((buffer-modified-p)  '("**" . nano-critical-i))
+                        (t                    '("RW" . nano-faded-i))))
+          (mode (concat "(" (downcase (cond ((consp mode-name) (car mode-name))
+                                            ((stringp mode-name) mode-name)
+                                            (t "unknow")))
+                        " mode)"))
+          (coords (format-mode-line "%c:%l ")))
+      (list
+       (propertize " " 'face (cdr prefix)  'display '(raise -0.25))
+       (propertize (car prefix) 'face (cdr prefix))
+       (propertize " " 'face (cdr prefix) 'display '(raise +0.25))
+       (propertize (format-mode-line " %b "))
+       (propertize mode 'face 'header-line)
+       (propertize " " 'display `(space :align-to (- right ,(length coords))))
+       ))))
+
+;; --- Minibuffer setup -------------------------------------------------------
+(defun nano-minibuffer--setup ()
+  (set-window-margins nil 3 0) 
+  (let ((inhibit-read-only t))
+    (add-text-properties (point-min) (+ (point-min) 1)
+      `(display ((margin left-margin)
+                 ,(format "# %s" (substring (minibuffer-prompt) 0 1))))))
+  (setq truncate-lines t))
+(add-hook 'minibuffer-setup-hook #'nano-minibuffer--setup)
+
+;; (use-package spacious-padding
+;;   :custom
+;;   (line-spacing 3)
+;;   (spacious-padding-subtle-mode-line t)
+;;   :init
+;;   (spacious-padding-mode 1))
 
 ;; Custom Functions ======================================= ;;
 
@@ -292,6 +338,16 @@ If point is at the end of the line, kill the whole line including the newline."
     (keyboard-quit))))
 
 (define-key global-map (kbd "C-g") #'kdb/keyboard-quit-dwim)
+
+
+;; OSX ============================================= ;;
+(when (eq system-type 'darwin)
+  (select-frame-set-input-focus (selected-frame))
+  (setq mac-option-modifier nil
+        ns-function-modifier 'super
+        mac-right-command-modifier 'hyper
+        mac-right-option-modifier 'alt
+        mac-command-modifier 'meta))
 
 ;; Ansi-term ====================================== ;;
 
@@ -533,8 +589,19 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq icomplete-tidy-shadowed-file-names t
         icomplete-show-matches-on-no-input t
         icomplete-compute-delay 0
-        icomplete-delay-completions-threshold 50)
+        icomplete-delay-completions-threshold 0
+        icomplete-show-matches-on-no-input t
+        icomplete-hide-common-prefix nil
+        icomplete-prospects-height 9
+        icomplete-separator " . "
+        icomplete-with-completion-tables t
+        icomplete-in-buffer t
+        icomplete-max-delay-chars 0
+        icomplete-scroll t)
   (global-set-key (kbd "C-=") 'fido-vertical-mode))
+
+(bind-key "TAB" #'icomplete-force-complete icomplete-minibuffer-map)
+(bind-key "RET" #'icomplete-force-complete-and-exit icomplete-minibuffer-map)
 
 ;; Minibuffer ======================================== ;;
 
@@ -780,20 +847,20 @@ If point is at the end of the line, kill the whole line including the newline."
 
 ;; Corfu ============================================== ;;
 
-(use-package corfu
-  :ensure t
-  :hook (after-init . global-corfu-mode)
-  :bind (:map corfu-map ("<tab>" . corfu-complete))
-  :config
-  (setq corfu-preview-current nil
-        corfu-min-width 20
-        corfu-popupinfo-delay '(1.25 . 0.5))
-  (corfu-popupinfo-mode 1) ; shows documentation after `corfu-popupinfo-delay'
+;; (use-package corfu
+;;   :ensure t
+;;   :hook (after-init . global-corfu-mode)
+;;   :bind (:map corfu-map ("<tab>" . corfu-complete))
+;;   :config
+;;   (setq corfu-preview-current nil
+;;         corfu-min-width 20
+;;         corfu-popupinfo-delay '(1.25 . 0.5))
+;;   (corfu-popupinfo-mode 1) ; shows documentation after `corfu-popupinfo-delay'
 
-  ;; Sort by input history (no need to modify `corfu-sort-function').
-  (with-eval-after-load 'savehist
-    (corfu-history-mode 1)
-    (add-to-list 'savehist-additional-variables 'corfu-history)))
+;;   ;; Sort by input history (no need to modify `corfu-sort-function').
+;;   (with-eval-after-load 'savehist
+;;     (corfu-history-mode 1)
+;;     (add-to-list 'savehist-additional-variables 'corfu-history)))
 
 ;; Cape ================================================ ;;
 
@@ -989,29 +1056,14 @@ If point is at the end of the line, kill the whole line including the newline."
   :after org
   :hook (org-mode . org-modern-mode))
 
-;; Denote ===================================== ;;
+;; Scroll ======================================= ;;
 
-(use-package denote
-  :defer t
-  :custom
-  (denote-directory (expand-file-name "~/Notes/"))
-  (denote-sort-keywords t)
-  :hook
-  (dired-mode . denote-dired-mode)
-  :custom-face
-  (denote-faces-link ((t (:slant italic))))
-  :init
-  (require 'denote-org-extras)
-  :bind
-  (("C-c d b" . denote-find-backlink)
-   ("C-c d d" . denote-date)
-   ("C-c d l" . denote-find-link)
-   ("C-c d h" . denote-org-extras-link-to-heading)
-   ("C-c d i" . denote-link-or-create)
-   ("C-c d k" . denote-rename-file-keywords)
-   ("C-c d n" . denote)
-   ("C-c d r" . denote-rename-file)
-   ("C-c d R" . denote-rename-file-using-front-matter)))
+;; (use-package ultra-scroll :vc (:url  "https://github.com/jdtsmith/ultra-scroll" :rev :newest)
+;;   :init
+;;   (setq scroll-conservatively 101
+;;         scroll-margin 0)
+;;   :config
+;;   (ultra-scroll-mode 1))
 
 ;; Redacted ===================================== ;;
 
@@ -1019,8 +1071,8 @@ If point is at the end of the line, kill the whole line including the newline."
   :vc (:url "https://github.com/kborling/obfuscate-mode.el" :rev :newest)
   :ensure t
   :config
- (global-set-key (kbd "C-c t r") 'obfuscate-mode)
- 
+  (global-set-key (kbd "C-c t r") 'obfuscate-mode)
+
   (defvar kdb-idle-timer nil
     "Timer to toggle `obfuscate-mode` on inactivity for all windows.")
 
@@ -1071,91 +1123,89 @@ If point is at the end of the line, kill the whole line including the newline."
 ;; Meow ========================================= ;;
 
 (use-package meow
-  :hook ((after-init . meow-global-mode)
-         (meow-mode . meow-setup))
-  :config
-  (global-set-key (kbd "C-c t m") 'meow-global-mode)
-  (defun meow-setup ()
-    (setq meow-cheatsheet-layout meow-cheatsheet-layout-dvorak)
-    (meow-leader-define-key
-     '("1" . meow-digit-argument)
-     '("2" . meow-digit-argument)
-     '("3" . meow-digit-argument)
-     '("4" . meow-digit-argument)
-     '("5" . meow-digit-argument)
-     '("6" . meow-digit-argument)
-     '("7" . meow-digit-argument)
-     '("8" . meow-digit-argument)
-     '("9" . meow-digit-argument)
-     '("0" . meow-digit-argument)
-     '("/" . meow-keypad-describe-key)
-     '("?" . meow-cheatsheet))
-    (meow-motion-overwrite-define-key
-     '("<escape>" . ignore))
-    ;; custom keybinding for motion state
-    (meow-normal-define-key
-     '("0" . meow-expand-0)
-     '("9" . meow-expand-9)
-     '("8" . meow-expand-8)
-     '("7" . meow-expand-7)
-     '("6" . meow-expand-6)
-     '("5" . meow-expand-5)
-     '("4" . meow-expand-4)
-     '("3" . meow-expand-3)
-     '("2" . meow-expand-2)
-     '("1" . meow-expand-1)
-     '("-" . negative-argument)
-     '(";" . meow-reverse)
-     '("," . meow-inner-of-thing)
-     '("." . meow-bounds-of-thing)
-     '("<" . meow-beginning-of-thing)
-     '(">" . meow-end-of-thing)
-     '("a" . meow-append)
-     '("A" . meow-open-below)
-     '("b" . meow-back-word)
-     '("B" . meow-back-symbol)
-     '("c" . meow-change)
-     '("d" . meow-delete)
-     '("D" . meow-backward-delete)
-     '("e" . meow-line)
-     '("E" . meow-goto-line)
-     '("f" . meow-find)
-     '("g" . meow-cancel-selection)
-     '("G" . meow-grab)
-     '("h" . meow-left)
-     '("H" . meow-left-expand)
-     '("i" . meow-insert)
-     '("I" . meow-open-above)
-     '("j" . meow-join)
-     '("k" . meow-kill)
-     '("l" . meow-till)
-     '("m" . meow-mark-word)
-     '("M" . meow-mark-symbol)
-     '("n" . meow-next)
-     '("N" . meow-next-expand)
-     '("o" . meow-block)
-     '("O" . meow-to-block)
-     '("p" . meow-prev)
-     '("P" . meow-prev-expand)
-     '("q" . meow-quit)
-     '("Q" . meow-goto-line)
-     '("r" . meow-replace)
-     '("R" . meow-swap-grab)
-     '("s" . meow-search)
-     '("t" . meow-right)
-     '("T" . meow-right-expand)
-     '("u" . meow-undo)
-     '("U" . meow-undo-in-selection)
-     '("v" . meow-visit)
-     '("w" . meow-next-word)
-     '("W" . meow-next-symbol)
-     '("x" . meow-save)
-     '("X" . meow-sync-grab)
-     '("y" . meow-yank)
-     '("z" . meow-pop-selection)
-     '("'" . repeat)
-     '("<escape>" . ignore))))
-
+  :hook ((meow-mode . meow-setup)
+         :config
+         (global-set-key (kbd "C-c t m") 'meow-global-mode)
+         (defun meow-setup ()
+           (setq meow-cheatsheet-layout meow-cheatsheet-layout-dvorak)
+           (meow-leader-define-key
+            '("1" . meow-digit-argument)
+            '("2" . meow-digit-argument)
+            '("3" . meow-digit-argument)
+            '("4" . meow-digit-argument)
+            '("5" . meow-digit-argument)
+            '("6" . meow-digit-argument)
+            '("7" . meow-digit-argument)
+            '("8" . meow-digit-argument)
+            '("9" . meow-digit-argument)
+            '("0" . meow-digit-argument)
+            '("/" . meow-keypad-describe-key)
+            '("?" . meow-cheatsheet))
+           (meow-motion-overwrite-define-key
+            '("<escape>" . ignore))
+           ;; custom keybinding for motion state
+           (meow-normal-define-key
+            '("0" . meow-expand-0)
+            '("9" . meow-expand-9)
+            '("8" . meow-expand-8)
+            '("7" . meow-expand-7)
+            '("6" . meow-expand-6)
+            '("5" . meow-expand-5)
+            '("4" . meow-expand-4)
+            '("3" . meow-expand-3)
+            '("2" . meow-expand-2)
+            '("1" . meow-expand-1)
+            '("-" . negative-argument)
+            '(";" . meow-reverse)
+            '("," . meow-inner-of-thing)
+            '("." . meow-bounds-of-thing)
+            '("<" . meow-beginning-of-thing)
+            '(">" . meow-end-of-thing)
+            '("a" . meow-append)
+            '("A" . meow-open-below)
+            '("b" . meow-back-word)
+            '("B" . meow-back-symbol)
+            '("c" . meow-change)
+            '("d" . meow-delete)
+            '("D" . meow-backward-delete)
+            '("e" . meow-line)
+            '("E" . meow-goto-line)
+            '("f" . meow-find)
+            '("g" . meow-cancel-selection)
+            '("G" . meow-grab)
+            '("h" . meow-left)
+            '("H" . meow-left-expand)
+            '("i" . meow-insert)
+            '("I" . meow-open-above)
+            '("j" . meow-join)
+            '("k" . meow-kill)
+            '("l" . meow-till)
+            '("m" . meow-mark-word)
+            '("M" . meow-mark-symbol)
+            '("n" . meow-next)
+            '("N" . meow-next-expand)
+            '("o" . meow-block)
+            '("O" . meow-to-block)
+            '("p" . meow-prev)
+            '("P" . meow-prev-expand)
+            '("q" . meow-quit)
+            '("Q" . meow-goto-line)
+            '("r" . meow-replace)
+            '("R" . meow-swap-grab)
+            '("s" . meow-search)
+            '("t" . meow-right)
+            '("T" . meow-right-expand)
+            '("u" . meow-undo)
+            '("U" . meow-undo-in-selection)
+            '("v" . meow-visit)
+            '("w" . meow-next-word)
+            '("W" . meow-next-symbol)
+            '("x" . meow-save)
+            '("X" . meow-sync-grab)
+            '("y" . meow-yank)
+            '("z" . meow-pop-selection)
+            '("'" . repeat)
+            '("<escape>" . ignore)))))
 
 ;; Local Variables:
 ;; no-byte-compile: t
