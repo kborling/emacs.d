@@ -143,69 +143,28 @@
 
 ;; Themes ================================================= ;;
 
-;; (use-package uwu-theme
-;;   :config
-;;   (setq
-;;    uwu-distinct-line-numbers 'nil
-;;    uwu-scale-org-headlines t
-;;    uwu-use-variable-pitch t)
-;;   (load-theme 'uwu t))
+(use-package uwu-theme
+  :config
+  (setq
+   uwu-distinct-line-numbers 'nil
+   uwu-scale-org-headlines t
+   uwu-use-variable-pitch t)
+  (load-theme 'uwu t))
 
 (use-package acme-theme)
 
 (use-package standard-themes)
 
-(use-package neofusion-theme
-  :vc (:url "https://github.com/konrad1977/neofusion-emacs" :rev :newest))
+(use-package ef-themes)
 
 ;; UI Enhancements ======================================== ;;
 
-;; --- Frame / windows layout & behavior --------------------------------------
-(setq default-frame-alist
-      '((height . 44) (width  . 81) (left-fringe . 0) (right-fringe . 0)
-        (internal-border-width . 32) (vertical-scroll-bars . nil)
-        (bottom-divider-width . 0) (right-divider-width . 0)
-        (undecorated-round . t)))
-(modify-frame-parameters nil default-frame-alist)
-(setq-default pop-up-windows nil)
-
-;; --- Header & mode lines ----------------------------------------------------
-(setq-default mode-line-format "")
-(setq-default header-line-format
-  '(:eval
-    (let ((prefix (cond (buffer-read-only     '("RO" . nano-default-i))
-                        ((buffer-modified-p)  '("**" . nano-critical-i))
-                        (t                    '("RW" . nano-faded-i))))
-          (mode (concat "(" (downcase (cond ((consp mode-name) (car mode-name))
-                                            ((stringp mode-name) mode-name)
-                                            (t "unknow")))
-                        " mode)"))
-          (coords (format-mode-line "%c:%l ")))
-      (list
-       (propertize " " 'face (cdr prefix)  'display '(raise -0.25))
-       (propertize (car prefix) 'face (cdr prefix))
-       (propertize " " 'face (cdr prefix) 'display '(raise +0.25))
-       (propertize (format-mode-line " %b "))
-       (propertize mode 'face 'header-line)
-       (propertize " " 'display `(space :align-to (- right ,(length coords))))
-       ))))
-
-;; --- Minibuffer setup -------------------------------------------------------
-(defun nano-minibuffer--setup ()
-  (set-window-margins nil 3 0) 
-  (let ((inhibit-read-only t))
-    (add-text-properties (point-min) (+ (point-min) 1)
-      `(display ((margin left-margin)
-                 ,(format "# %s" (substring (minibuffer-prompt) 0 1))))))
-  (setq truncate-lines t))
-(add-hook 'minibuffer-setup-hook #'nano-minibuffer--setup)
-
-;; (use-package spacious-padding
-;;   :custom
-;;   (line-spacing 3)
-;;   (spacious-padding-subtle-mode-line t)
-;;   :init
-;;   (spacious-padding-mode 1))
+(use-package spacious-padding
+  :custom
+  (line-spacing 3)
+  (spacious-padding-subtle-mode-line t)
+  :init
+  (spacious-padding-mode 1))
 
 ;; Custom Functions ======================================= ;;
 
@@ -287,7 +246,7 @@ If point is at the end of the line, kill the whole line including the newline."
                      ("C-c C-d" . duplicate-line)
                      ("C-x C-r" . recentf)
                      ("C-x f" . project-find-file)
-                     ("C-c C-r" . query-replace)
+                     ("C-c C-r" . replace-regexp)
                      ("M-z" . zap-up-to-char)
                      ("C-z" . zap-to-char)
                      ("C-M-s" . isearch-forward-symbol-at-point)))
@@ -589,14 +548,14 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq icomplete-tidy-shadowed-file-names t
         icomplete-show-matches-on-no-input t
         icomplete-compute-delay 0
+        icomplete-max-delay-chars 0
         icomplete-delay-completions-threshold 0
         icomplete-show-matches-on-no-input t
         icomplete-hide-common-prefix nil
-        icomplete-prospects-height 9
+        icomplete-prospects-height 1
         icomplete-separator " . "
         icomplete-with-completion-tables t
         icomplete-in-buffer t
-        icomplete-max-delay-chars 0
         icomplete-scroll t)
   (global-set-key (kbd "C-=") 'fido-vertical-mode))
 
@@ -783,9 +742,9 @@ If point is at the end of the line, kill the whole line including the newline."
    eldoc-echo-area-use-multiline-p t
    eldoc-idle-delay 0.75))
 
-(use-package eldoc-box
-  :after eldoc
-  :hook (eglot-managed-mode-hook . eldoc-box-hover-mode))
+;; (use-package eldoc-box
+;;   :after eldoc
+;;   :hook (eglot-managed-mode-hook . eldoc-box-hover-mode))
 
 ;; Exec Path ========================================= ;;
 
@@ -847,20 +806,20 @@ If point is at the end of the line, kill the whole line including the newline."
 
 ;; Corfu ============================================== ;;
 
-;; (use-package corfu
-;;   :ensure t
-;;   :hook (after-init . global-corfu-mode)
-;;   :bind (:map corfu-map ("<tab>" . corfu-complete))
-;;   :config
-;;   (setq corfu-preview-current nil
-;;         corfu-min-width 20
-;;         corfu-popupinfo-delay '(1.25 . 0.5))
-;;   (corfu-popupinfo-mode 1) ; shows documentation after `corfu-popupinfo-delay'
+(use-package corfu
+  :ensure t
+  :hook (after-init . global-corfu-mode)
+  :bind (:map corfu-map ("<tab>" . corfu-complete))
+  :config
+  (setq corfu-preview-current nil
+        corfu-min-width 20
+        corfu-popupinfo-delay '(1.25 . 0.5))
+  (corfu-popupinfo-mode 1) ; shows documentation after `corfu-popupinfo-delay'
 
-;;   ;; Sort by input history (no need to modify `corfu-sort-function').
-;;   (with-eval-after-load 'savehist
-;;     (corfu-history-mode 1)
-;;     (add-to-list 'savehist-additional-variables 'corfu-history)))
+  ;; Sort by input history (no need to modify `corfu-sort-function').
+  (with-eval-after-load 'savehist
+    (corfu-history-mode 1)
+    (add-to-list 'savehist-additional-variables 'corfu-history)))
 
 ;; Cape ================================================ ;;
 
