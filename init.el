@@ -926,24 +926,6 @@ If point is at the end of the line, kill the whole line including the newline."
   :ensure t
   :hook (eshell-load-hook . eat-eshell-mode))
 
-
-;; Dape =========================================== ;;
-(use-package dape
-  :preface
-  :hook
-  (kill-emacs . dape-breakpoint-save)
-  (after-init . dape-breakpoint-load)
-  :config
-  (dape-breakpoint-global-mode)
-  (setq dape-buffer-window-arrangement 'right)
-  (setq dape-buffer-window-arrangement 'gud)
-  (setq dape-info-hide-mode-line nil)
-  (setq dape-inlay-hints t)
-  ;; Save buffers on startup, useful for interpreted languages
-  (add-hook 'dape-start-hook (lambda () (save-some-buffers t t)))
-  ;; Kill compile buffer on build success
-  (add-hook 'dape-compile-hook 'kill-buffer))
-
 ;; Org Mode ===================================== ;;
 
 ;;; Org Mode
