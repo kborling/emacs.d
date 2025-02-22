@@ -1,7 +1,7 @@
 ;;; init.el --- My personal emacs config  -*- lexical-binding: t; -*-
 
 ;; Author: Kevin Borling <https://github.com/kborling>
-;; Version: 1.5.0
+;; Version: 1.6.0
 ;; Keywords: configuration
 ;; URL: https://github.com/kborling/emacs.d
 ;; Homepage: https://github.com/kborling/emacs.d
@@ -926,22 +926,23 @@ If point is at the end of the line, kill the whole line including the newline."
   :ensure t
   :hook (eshell-load-hook . eat-eshell-mode))
 
-;; Copilot ======================================== ;;
 
-(use-package copilot
-  :vc (:url "https://github.com/zerolfx/copilot.el" :rev :newest)
+;; Dape =========================================== ;;
+(use-package dape
+  :preface
+  :hook
+  (kill-emacs . dape-breakpoint-save)
+  (after-init . dape-breakpoint-load)
   :config
-  (global-set-key (kbd "C-c c p") 'copilot-mode)
-  :bind (:map copilot-completion-map
-              ("C-g" . 'copilot-clear-overlay)
-              ("<right>" . 'copilot-accept-completion)
-              ("C-f" . 'copilot-accept-completion)
-              ("M-<right>" . 'copilot-accept-completion-by-word)
-              ("M-f" . 'copilot-accept-completion-by-word)
-              ("C-e" . 'copilot-accept-completion-by-line)
-              ("<end>" . 'copilot-accept-completion-by-line)
-              ("M-n" . 'copilot-next-completion)
-              ("M-p" . 'copilot-previous-completion)))
+  (dape-breakpoint-global-mode)
+  (setq dape-buffer-window-arrangement 'right)
+  (setq dape-buffer-window-arrangement 'gud)
+  (setq dape-info-hide-mode-line nil)
+  (setq dape-inlay-hints t)
+  ;; Save buffers on startup, useful for interpreted languages
+  (add-hook 'dape-start-hook (lambda () (save-some-buffers t t)))
+  ;; Kill compile buffer on build success
+  (add-hook 'dape-compile-hook 'kill-buffer))
 
 ;; Org Mode ===================================== ;;
 
@@ -1014,15 +1015,6 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package org-modern
   :after org
   :hook (org-mode . org-modern-mode))
-
-;; Scroll ======================================= ;;
-
-;; (use-package ultra-scroll :vc (:url  "https://github.com/jdtsmith/ultra-scroll" :rev :newest)
-;;   :init
-;;   (setq scroll-conservatively 101
-;;         scroll-margin 0)
-;;   :config
-;;   (ultra-scroll-mode 1))
 
 ;; Redacted ===================================== ;;
 
@@ -1165,7 +1157,6 @@ If point is at the end of the line, kill the whole line including the newline."
      '("z" . meow-pop-selection)
      '("'" . repeat)
      '("<escape>" . ignore))))
-
 (global-set-key (kbd "C-c t m") 'meow-global-mode)
 
 ;; Local Variables:
