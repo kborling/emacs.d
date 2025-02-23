@@ -300,13 +300,13 @@ If point is at the end of the line, kill the whole line including the newline."
 
 
 ;; OSX ============================================= ;;
-(when (eq system-type 'darwin)
-  (select-frame-set-input-focus (selected-frame))
-  (setq mac-option-modifier nil
-        ns-function-modifier 'super
-        mac-right-command-modifier 'hyper
-        mac-right-option-modifier 'alt
-        mac-command-modifier 'meta))
+;; (when (eq system-type 'darwin)
+;;   (select-frame-set-input-focus (selected-frame))
+;;   (setq mac-option-modifier nil
+;;         ns-function-modifier 'super
+;;         mac-right-command-modifier 'hyper
+;;         mac-right-option-modifier 'alt
+;;         mac-command-modifier 'meta))
 
 ;; Ansi-term ====================================== ;;
 
@@ -920,11 +920,59 @@ If point is at the end of the line, kill the whole line including the newline."
                                 (forward-line 1)))))))
   (setq-local indent-line-function 'js-indent-line))
 
+;; XML Mode ======================================= ;;
+
+(use-package xml-mode
+  :ensure nil
+  :config
+  (add-to-list 'auto-mode-alist '("\\.csproj\\'" . xml-mode)))
+
+;; Conf Mode ====================================== ;;
+
+(use-package conf-mode
+  :ensure nil
+  :config
+  (add-to-list 'auto-mode-alist '("\\.sln\\'" . conf-mode)))
+
+;; .NET ============================================ ;;
+
+(use-package dotnet
+  :hook (csharp-mode)
+  :bind ((("C-c n n" . dotnet-new)
+          ("C-c n c" . dotnet-clean)
+          ("C-c n t" . dotnet-test)
+          ("C-c n r" . dotnet-run)
+          ("C-c n b" . dotnet-build))))
+
+;; Sharper ======================================== ;;
+
+(use-package sharper
+  :demand t
+  :bind
+  ("C-c s" . sharper-main-transient))
+
 ;; EAT ============================================ ;;
 
 (use-package eat
   :ensure t
   :hook (eshell-load-hook . eat-eshell-mode))
+
+;; Dape =========================================== ;;
+
+(use-package dape
+  :preface
+  :hook
+  (kill-emacs . dape-breakpoint-save)
+  (after-init . dape-breakpoint-load)
+  :config
+  (dape-breakpoint-global-mode)
+  (setq dape-buffer-window-arrangement 'right)
+  (setq dape-info-hide-mode-line nil)
+  (setq dape-inlay-hints t)
+  ;; Save buffers on startup, useful for interpreted languages
+  (add-hook 'dape-start-hook (lambda () (save-some-buffers t t)))
+  ;; Kill compile buffer on build success
+  (add-hook 'dape-compile-hook 'kill-buffer))
 
 ;; Org Mode ===================================== ;;
 
