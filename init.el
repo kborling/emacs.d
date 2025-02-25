@@ -944,13 +944,6 @@ If point is at the end of the line, kill the whole line including the newline."
           ("C-c n r" . dotnet-run)
           ("C-c n b" . dotnet-build))))
 
-;; Sharper ======================================== ;;
-
-(use-package sharper
-  :demand t
-  :bind
-  ("C-c s" . sharper-main-transient))
-
 ;; EAT ============================================ ;;
 
 (use-package eat
