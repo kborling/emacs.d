@@ -55,6 +55,11 @@
 (when (fboundp 'horizontal-scroll-bar-mode)
   (horizontal-scroll-bar-mode -1))
 
+(setq default-frame-alist '(
+(background-color . "#131A1C")
+(ns-appearance . dark)
+(ns-transparent-titlebar . t)))
+
 (setq frame-resize-pixelwise t
       frame-inhibit-implied-resize t
       frame-title-format '("%b")

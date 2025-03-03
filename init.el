@@ -126,9 +126,9 @@
 ;; Fonts ================================================ ;;
 
 (let* ((settings (cond
-                  ((eq system-type 'windows-nt) '(:size 100 :family "Cascadia Code"))
+                  ((eq system-type 'windows-nt) '(:size 110 :family "Consolas"))
                   ((eq system-type 'gnu/linux)  '(:size 120 :family "Inconsolata"))
-                  ((eq system-type 'darwin)     '(:size 160 :family "Inconsolata"))))
+                  ((eq system-type 'darwin)     '(:size 130 :family "Comic Code"))))
        (default-font-size (plist-get settings :size))
        (default-font-family (plist-get settings :family)))
   (set-face-attribute 'default nil
@@ -242,11 +242,14 @@ If point is at the end of the line, kill the whole line including the newline."
                      ("C-;" . comment-line)
                      ("C-a" . kdb-move-to-beginning-of-line)
                      ("C-k" . kdb-kill-line)
+                     ("C-<return>" . open-line)
+                     ("C-o" . occur)
                      ("C-c b" . copy-whole-buffer)
                      ("C-c C-d" . duplicate-line)
                      ("C-x C-r" . recentf)
                      ("C-x f" . project-find-file)
                      ("C-c C-r" . replace-regexp)
+                     ("C-\\" . hippie-expand)
                      ("M-z" . zap-up-to-char)
                      ("C-z" . zap-to-char)
                      ("C-M-s" . isearch-forward-symbol-at-point)))
@@ -297,7 +300,6 @@ If point is at the end of the line, kill the whole line including the newline."
     (keyboard-quit))))
 
 (define-key global-map (kbd "C-g") #'kdb/keyboard-quit-dwim)
-
 
 ;; OSX ============================================= ;;
 ;; (when (eq system-type 'darwin)
@@ -501,7 +503,7 @@ If point is at the end of the line, kill the whole line including the newline."
    vc-directory-exclusion-list (nconc vc-directory-exclusion-list '("node_modules" "elpa" ".sl"))
    project-vc-extra-root-markers '(".envrc" "package.json" ".project" ".sl")))
 
-;; Orderless ========================================= ;;
+;; Orderless ========================================== ;;
 
 (use-package orderless
   :ensure t
@@ -637,7 +639,7 @@ If point is at the end of the line, kill the whole line including the newline."
                                        :documentHighlightProvider))
 
   ;; Language Servers
-  (add-to-list 'eglot-server-programs '(csharp-mode . ("omnisharp" "-lsp")))
+  (add-to-list 'eglot-server-programs '(csharp-mode . ("csharp-ls")))
   (add-to-list 'eglot-server-programs '(typescript-ts-mode . ("typescript-language-server" "--stdio")))
   ;; See https://github.com/olrtg/emmet-language-server
   (add-to-list 'eglot-server-programs '(html-ts-mode . ("emmet-language-server" "--stdio")))
@@ -862,17 +864,10 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package combobulate
   :vc (:url "https://github.com/mickeynp/combobulate" :rev :newest)
-  :preface
-  (setq combobulate-key-prefix "C-c b")
-  :hook ((python-ts-mode . combobulate-mode)
-         (js-ts-mode . combobulate-mode)
-         (css-ts-mode . combobulate-mode)
-         (html-ts-mode . combobulate-mode)
-         (angular-template-mode . combobulate-mode)
-         (yaml-ts-mode . combobulate-mode)
-         (json-ts-mode . combobulate-mode)
-         (typescript-ts-mode . combobulate-mode)
-         (tsx-ts-mode . combobulate-mode)))
+  :custom
+  ;; (combobulate-key-prefix "C-c ,")
+  (combobulate-key-prefix "C-c o")
+  :hook ((prog-mode . combobulate-mode)))
 
 ;; Multiple Cursors ================================== ;;
 
@@ -942,13 +937,15 @@ If point is at the end of the line, kill the whole line including the newline."
           ("C-c n c" . dotnet-clean)
           ("C-c n t" . dotnet-test)
           ("C-c n r" . dotnet-run)
+          ("C-c n a" . dotnet-run-with-args)
           ("C-c n b" . dotnet-build))))
 
 ;; EAT ============================================ ;;
 
 (use-package eat
   :ensure t
-  :hook (eshell-load-hook . eat-eshell-mode))
+  :config
+  (add-hook 'eshell-load-hook #'eat-eshell-mode))
 
 ;; Dape =========================================== ;;
 
@@ -959,9 +956,10 @@ If point is at the end of the line, kill the whole line including the newline."
   (after-init . dape-breakpoint-load)
   :config
   (dape-breakpoint-global-mode)
-  (setq dape-buffer-window-arrangement 'right)
-  (setq dape-info-hide-mode-line nil)
-  (setq dape-inlay-hints t)
+  (setq dape-buffer-window-arrangement 'right
+        dape-info-hide-mode-line nil
+   dape-inlay-hints t)
+ 
   ;; Save buffers on startup, useful for interpreted languages
   (add-hook 'dape-start-hook (lambda () (save-some-buffers t t)))
   ;; Kill compile buffer on build success
