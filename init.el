@@ -352,6 +352,14 @@ If point is at the end of the line, kill the whole line including the newline."
    history-length 10000
    history-delete-duplicates t))
 
+;; Grep ============================================== ;;
+
+(use-package grep
+  :ensure nil
+  :config
+  (setq grep-command "rg -nS --no-heading "
+        grep-use-null-device nil))
+
 ;; Xref ============================================== ;;
 
 (use-package xref
@@ -943,6 +951,7 @@ If point is at the end of the line, kill the whole line including the newline."
 ;; EAT ============================================ ;;
 
 (use-package eat
+  :vc (:url "https://codeberg.org/akib/emacs-eat" :rev :newest)
   :ensure t
   :config
   (add-hook 'eshell-load-hook #'eat-eshell-mode))
@@ -958,8 +967,8 @@ If point is at the end of the line, kill the whole line including the newline."
   (dape-breakpoint-global-mode)
   (setq dape-buffer-window-arrangement 'right
         dape-info-hide-mode-line nil
-   dape-inlay-hints t)
- 
+        dape-inlay-hints t)
+
   ;; Save buffers on startup, useful for interpreted languages
   (add-hook 'dape-start-hook (lambda () (save-some-buffers t t)))
   ;; Kill compile buffer on build success
