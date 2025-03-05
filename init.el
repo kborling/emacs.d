@@ -360,6 +360,13 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq grep-command "rg -nS --no-heading "
         grep-use-null-device nil))
 
+;; Deadgrep ========================================== ;;
+
+(use-package deadgrep
+  :ensure t
+  :config
+  (global-set-key (kbd "C-x g") #'deadgrep))
+
 ;; Xref ============================================== ;;
 
 (use-package xref
@@ -568,9 +575,6 @@ If point is at the end of the line, kill the whole line including the newline."
         ;; icomplete-in-buffer t
         icomplete-scroll t)
   (global-set-key (kbd "C-=") 'fido-vertical-mode))
-
-(bind-key "TAB" #'icomplete-force-complete icomplete-minibuffer-map)
-(bind-key "RET" #'icomplete-force-complete-and-exit icomplete-minibuffer-map)
 
 ;; Minibuffer ======================================== ;;
 
