@@ -89,6 +89,10 @@
  global-mark-ring-max 50000
  bookmark-save-flag 1)
 
+;; Contextual menu with right mouse button
+(when (display-graphic-p)
+  (context-menu-mode))
+
 ;; Remember cursor place
 (setq
  save-place-file (locate-user-emacs-file "saveplace")
@@ -136,7 +140,7 @@
   (set-face-attribute 'fixed-pitch nil
                       :family default-font-family :height 1.0)
   (set-face-attribute 'variable-pitch nil
-                      :family "Roboto" :height 1.0 :weight 'regular))
+                      :family "FreeSans" :height 1.2 :weight 'regular))
 
 (set-display-table-slot standard-display-table 'truncation (make-glyph-code ?…))
 (set-display-table-slot standard-display-table 'wrap (make-glyph-code ?–))
@@ -144,27 +148,37 @@
 ;; Themes ================================================= ;;
 
 (use-package uwu-theme
+  :vc (:url "https://github.com/kborling/uwu-theme" :rev :newest)
   :config
   (setq
    uwu-distinct-line-numbers 'nil
    uwu-scale-org-headlines t
    uwu-use-variable-pitch t)
-  (load-theme 'uwu t))
+(load-theme 'uwu t))
 
 (use-package acme-theme)
 
 (use-package standard-themes)
-
-(use-package ef-themes)
 
 ;; UI Enhancements ======================================== ;;
 
 (use-package spacious-padding
   :custom
   (line-spacing 3)
-  (spacious-padding-subtle-mode-line t)
+  ;; (spacious-padding-subtle-mode-line t)
   :init
-  (spacious-padding-mode 1))
+ (spacious-padding-mode 1))
+
+(use-package balanced-windows
+  :config
+  (balanced-windows-mode))
+
+(use-package helpful
+  :bind
+  (("C-h f" . helpful-function)
+   ("C-h x" . helpful-command)
+   ("C-h k" . helpful-key)
+   ("C-h v" . helpful-variable)))
 
 ;; Custom Functions ======================================= ;;
 
@@ -244,6 +258,7 @@ If point is at the end of the line, kill the whole line including the newline."
                      ("C-k" . kdb-kill-line)
                      ("C-<return>" . open-line)
                      ("C-o" . occur)
+                     ("C-z" . undo)
                      ("C-c b" . copy-whole-buffer)
                      ("C-c C-d" . duplicate-line)
                      ("C-x C-r" . recentf)
@@ -251,7 +266,6 @@ If point is at the end of the line, kill the whole line including the newline."
                      ("C-c C-r" . replace-regexp)
                      ("C-\\" . hippie-expand)
                      ("M-z" . zap-up-to-char)
-                     ("C-z" . zap-to-char)
                      ("C-M-s" . isearch-forward-symbol-at-point)))
     (define-key map (kbd (car binding)) (cdr binding)))
 
@@ -357,7 +371,11 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package grep
   :ensure nil
   :config
-  (setq grep-command "rg -nS --no-heading "
+  ;; Use ripgrep for grep-command
+  (setq grep-command "rg --color=never --no-heading --line-number --smart-case "
+        ;; grep-find-command
+        ;; (concat "fd --type f --hidden --follow --exclude .git | "
+        ;;         "xargs rg --color=never --no-heading --line-number --smart-case ")
         grep-use-null-device nil))
 
 ;; Deadgrep ========================================== ;;
@@ -365,6 +383,7 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package deadgrep
   :ensure t
   :config
+  (setq deadgrep-extra-arguments '("--no-config" "--multiline"))
   (global-set-key (kbd "C-x g") #'deadgrep))
 
 ;; Xref ============================================== ;;
@@ -984,7 +1003,7 @@ If point is at the end of the line, kill the whole line including the newline."
 (defun kdb/org-mode-setup ()
   "Setup org mode."
   (org-indent-mode)
-  (variable-pitch-mode 1)
+  ;; (variable-pitch-mode 1)
   (visual-line-mode 1)
   (electric-indent-local-mode -1)
   ;; (auto-fill-mode 1)
