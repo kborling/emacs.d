@@ -154,7 +154,7 @@
    uwu-distinct-line-numbers 'nil
    uwu-scale-org-headlines t
    uwu-use-variable-pitch t)
-(load-theme 'uwu t))
+  (load-theme 'uwu t))
 
 (use-package acme-theme)
 
@@ -167,7 +167,7 @@
   (line-spacing 3)
   ;; (spacious-padding-subtle-mode-line t)
   :init
- (spacious-padding-mode 1))
+  (spacious-padding-mode 1))
 
 (use-package balanced-windows
   :config
@@ -832,10 +832,9 @@ If point is at the end of the line, kill the whole line including the newline."
   :ensure t
   :hook (after-init . global-hl-todo-mode)
   :bind (:map hl-todo-mode-map
-              ("C-c p" . hl-todo-previous)
-              ("C-c n" . hl-todo-next)
-              ("C-c o" . hl-todo-occur)
-              ("C-c i" . hl-todo-insert)))
+              ("C-c t p" . hl-todo-previous)
+              ("C-c t n" . hl-todo-next)
+              ("C-c o" . hl-todo-occur)))
 
 ;; Corfu ============================================== ;;
 
@@ -1068,6 +1067,25 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package org-modern
   :after org
   :hook (org-mode . org-modern-mode))
+
+(use-package org-gnosis
+  :init
+  (define-prefix-command 'kb/notes-map)
+  (define-prefix-command 'kb/journal-map)
+  :config
+  (setf org-gnosis-dir "~/Notes"
+        org-gnosis-show-tags t)
+  :bind (("C-c n" . kb/notes-map)
+         ("C-c j" . kb/journal-map)
+         :map kb/notes-map
+         ("f" . org-gnosis-find)
+         ("i" . org-gnosis-insert)
+         :map kb/journal-map
+         ("j" . org-gnosis-journal)
+         ("f" . org-gnosis-journal-find)
+         ("i" . org-gnosis-journal-insert)
+         :map org-mode-map
+         ("C-c i" . org-id-get-create)))
 
 ;; Meow ========================================= ;;
 
