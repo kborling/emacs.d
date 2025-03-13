@@ -9,7 +9,7 @@
 
 ;;; Commentary:
 
-;; Copyright (C) 2024 Kevin Borling
+;; Copyright (C) 2025 Kevin Borling
 ;; My personal Emacs config.
 
 ;;; Code:
@@ -927,23 +927,6 @@ If point is at the end of the line, kill the whole line including the newline."
 (define-derived-mode angular-template-mode html-ts-mode "Angular Template"
   "A major mode derived from 'html-ts-mode', for editing angular template files with LSP support.")
 (add-to-list 'auto-mode-alist '("\\.component\\.html\\'" . angular-template-mode))
-
-;; Typescript ===================================== ;;
-
-(use-package typescript-ts-mode
-  :ensure nil
-  :config
-  (add-hook 'typescript-ts-mode-hook
-            (lambda ()
-              (setq-local indent-line-function 'js-indent-line)
-              (setq-local indent-region-function
-                          (lambda (start end)
-                            (save-excursion
-                              (goto-char start)
-                              (while (< (point) end)
-                                (js-indent-line)
-                                (forward-line 1)))))))
-  (setq-local indent-line-function 'js-indent-line))
 
 ;; XML Mode ======================================= ;;
 
