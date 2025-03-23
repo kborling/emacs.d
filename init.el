@@ -129,10 +129,12 @@
 
 ;; Fonts ================================================ ;;
 
+(setopt line-spacing 6)
+
 (let* ((settings (cond
-                  ((eq system-type 'windows-nt) '(:size 110 :family "Consolas"))
+                  ((eq system-type 'windows-nt) '(:size 110 :family "Rec Mono Semicasual"))
                   ((eq system-type 'gnu/linux)  '(:size 120 :family "Inconsolata"))
-                  ((eq system-type 'darwin)     '(:size 130 :family "Comic Code"))))
+                  ((eq system-type 'darwin)     '(:size 140 :family "Rec Mono Semicasual"))))
        (default-font-size (plist-get settings :size))
        (default-font-family (plist-get settings :family)))
   (set-face-attribute 'default nil
@@ -160,14 +162,9 @@
 
 (use-package standard-themes)
 
-;; UI Enhancements ======================================== ;;
+(use-package distinguished-theme)
 
-(use-package spacious-padding
-  :custom
-  (line-spacing 3)
-  ;; (spacious-padding-subtle-mode-line t)
-  :init
-  (spacious-padding-mode 1))
+;; UI Enhancements ======================================== ;;
 
 (use-package balanced-windows
   :config
@@ -675,8 +672,8 @@ If point is at the end of the line, kill the whole line including the newline."
   ;; See https://github.com/olrtg/emmet-language-server
   (add-to-list 'eglot-server-programs '(html-ts-mode . ("emmet-language-server" "--stdio")))
   (add-to-list 'eglot-server-programs '(css-ts-mode . ("emmet-language-server" "--stdio")))
-  (add-to-list 'eglot-server-programs '(rust-mode . ("rls" "--stdio")))
-  (add-to-list 'eglot-server-programs '(rustic-mode . ("rls" "--stdio")))
+  (add-to-list 'eglot-server-programs '(rust-mode . ("rust-analyzer")))
+  (add-to-list 'eglot-server-programs '(rustic-mode . ("rust-analyzer")))
   (add-to-list 'eglot-server-programs '((c++-mode c-mode)
                                         . ("clangd"
                                            "-j=8"
@@ -712,6 +709,9 @@ If point is at the end of the line, kill the whole line including the newline."
               "Make sure Eldoc will show us all of the feedback at point."
               (setq-local eldoc-documentation-strategy
                           #'eldoc-documentation-compose)))
+
+  ;; Remove inlay hints
+  (add-hook 'eglot-managed-mode-hook (lambda () (eglot-inlay-hints-mode -1)))
 
   (dolist (mode '(html-ts-mode
                   angular-template-mode
@@ -941,6 +941,12 @@ If point is at the end of the line, kill the whole line including the newline."
   :ensure nil
   :config
   (add-to-list 'auto-mode-alist '("\\.sln\\'" . conf-mode)))
+
+;; Rust ============================================ ;;
+
+(use-package rust-mode
+  :init
+  (setq rust-mode-treesitter-derive t))
 
 ;; .NET ============================================ ;;
 
