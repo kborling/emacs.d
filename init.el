@@ -806,7 +806,19 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package magit
   :ensure t
-  :bind ("C-c g" . magit-status)
+  :bind (("C-c g g" . magit-status)
+         ("C-c g s" . magit-status)
+         ("C-c g i" . magit-init)
+         ("C-c g c" . magit-clone)
+         ("C-c g l" . magit-pull)
+         ("C-c g p" . magit-push)
+         ("C-c g f" . magit-fetch-all)
+         ("C-c g b" . magit-branch)
+         ("C-c g B" . magit-blame)
+         ("C-c g d" . magit-diff)
+         ("C-c g r" . magit-remote)
+         ("C-c g z" . magit-stash)
+         ("C-c g Z" . magit-apply))
   :init
   (setq magit-define-global-key-bindings nil)
   :config
