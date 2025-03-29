@@ -792,10 +792,97 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package vc
   :ensure nil
+  :bind
+  (:map global-map
+   ("C-x v B" . vc-annotate) ; Blame mnemonic
+   ("C-x v e" . vc-ediff)
+   ("C-x v k" . vc-delete-file) ; 'k' for kill==>delete is more common
+   ("C-x v G" . vc-log-search)  ; git log --grep
+   ("C-x v t" . vc-create-tag)
+   ("C-x v c" . vc-clone) ; Emacs 31
+   ("C-x v d" . vc-diff)
+   ("C-x v s" . vc-dir)
+   ("C-x v ." . vc-dir-root)
+   ("C-x v <return>" . vc-dir-root)
+   :map vc-dir-mode-map
+   ("t" . vc-create-tag)
+   ("O" . vc-log-outgoing)
+   ("o" . vc-dir-find-file-other-window)
+   ("d" . vc-diff)         ; parallel to D: `vc-root-diff'
+   ("k" . vc-dir-delete-file)
+   ("G" . vc-revert)
+   :map vc-git-stash-shared-map
+   ("a" . vc-git-stash-apply-at-point)
+   ("c" . vc-git-stash) ; "create" named stash
+   ("k" . vc-git-stash-delete-at-point) ; symmetry with `vc-dir-delete-file'
+   ("p" . vc-git-stash-pop-at-point)
+   ("s" . vc-git-stash-snapshot)
+   :map vc-annotate-mode-map
+   ("M-q" . vc-annotate-toggle-annotation-visibility)
+   ("C-c C-c" . vc-annotate-goto-line)
+   ("<return>" . vc-annotate-find-revision-at-line)
+   ;; :map log-edit-mode-map
+   ;; ("M-s" . nil)
+   ;; ("M-r" . nil)
+   :map log-view-mode-map
+   ("<tab>" . log-view-toggle-entry-display)
+   ("<return>" . log-view-find-revision)
+   ("s" . vc-log-search)
+   ("o" . vc-log-outgoing)
+   ("f" . vc-log-incoming)
+   ("F" . vc-update)
+   ("P" . vc-push))
   :init
   (setq vc-follow-symlinks t)
   :config
-  (setq vc-handled-backends '(Git)))
+  ;; Those offer various types of functionality, such as blaming,
+  ;; viewing logs, showing a dedicated buffer with changes to affected
+  ;; files.
+  (require 'vc-annotate)
+  (require 'vc-dir)
+  (require 'vc-git)
+  (require 'add-log)
+  (require 'log-view)
+
+  ;; I only use Git.  If I ever need another, I will include it here.
+  ;; This may have an effect on performance, as Emacs will not try to
+  ;; check for a bunch of backends.
+  (setq vc-handled-backends '(Git))
+
+  ;; This one is for editing commit messages.
+  (require 'log-edit)
+  (setq log-edit-confirm 'changed)
+  (setq log-edit-keep-buffer nil)
+  (setq log-edit-require-final-newline t)
+  (setq log-edit-setup-add-author nil)
+  ;; I can see the files from the Diff with C-c C-d
+  (remove-hook 'log-edit-hook #'log-edit-show-files)
+
+  (setq vc-find-revision-no-save t)
+  (setq vc-annotate-display-mode 'scale) ; scale to oldest
+  ;; I use a different account for git commits
+  (setq add-log-keep-changes-together t)
+  (setq vc-git-diff-switches '("--patch-with-stat" "--histogram"))
+  (setq vc-git-log-switches '("--stat"))
+  (setq vc-git-print-log-follow t)
+  (setq vc-git-revision-complete-only-branches nil) ; Emacs 28
+  (setq vc-git-root-log-format
+        `("%d %h %ai %an: %s"
+          ;; The first shy group matches the characters drawn by --graph.
+          ;; We use numbered groups because `log-view-message-re' wants the
+          ;; revision number to be group 1.
+          ,(concat "^\\(?:[*/\\|]+\\)\\(?:[*/\\| ]+\\)?"
+                   "\\(?2: ([^)]+) \\)?\\(?1:[0-9a-z]+\\) "
+                   "\\(?4:[0-9]\\{4\\}-[0-9-]\\{4\\}[0-9\s+:-]\\{16\\}\\) "
+                   "\\(?3:.*?\\):")
+          ((1 'log-view-message)
+           (2 'change-log-list nil lax)
+           (3 'change-log-name)
+           (4 'change-log-date))))
+
+  ;; These two are from Emacs 29
+  (setq vc-git-log-edit-summary-target-len 50)
+  (setq vc-git-log-edit-summary-max-len 70))
 
 (use-package ssh-agency
   :if (eq system-type 'windows-nt)
@@ -836,7 +923,10 @@ If point is at the end of the line, kill the whole line including the newline."
   :ensure t
   :hook (after-init . marginalia-mode)
   :config
-  (setq marginalia-max-relative-age 0))
+  (setq marginalia-max-relative-age 0
+        marginalia-align-offset 10))
+
+
 
 ;; Highlight TODOs ===================================== ;;
 
