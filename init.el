@@ -129,16 +129,16 @@
 
 ;; Fonts ================================================ ;;
 
-(setopt line-spacing 6)
+(setopt line-spacing 4)
 
 (let* ((settings (cond
                   ((eq system-type 'windows-nt) '(:size 110 :family "Rec Mono Semicasual"))
                   ((eq system-type 'gnu/linux)  '(:size 120 :family "Inconsolata"))
-                  ((eq system-type 'darwin)     '(:size 140 :family "Rec Mono Semicasual"))))
+                  ((eq system-type 'darwin)     '(:size 150 :family "Overpass Mono"))))
        (default-font-size (plist-get settings :size))
        (default-font-family (plist-get settings :family)))
   (set-face-attribute 'default nil
-                      :family default-font-family :weight 'regular :height default-font-size)
+                      :family default-font-family :weight 'light :height default-font-size)
   (set-face-attribute 'fixed-pitch nil
                       :family default-font-family :height 1.0)
   (set-face-attribute 'variable-pitch nil
@@ -240,6 +240,14 @@ If point is at the end of the line, kill the whole line including the newline."
   (if (eolp)
       (kill-whole-line)
     (kill-line)))
+
+;; TAGS ============================================== ;;
+
+(defun kdb/create-tags (dir-name)
+  "Create tags file using DIR-NAME."
+  (interactive "DDirectory: ")
+  (shell-command
+   (format "%s -f TAGS -e -R %s" (locate-file "ctags" exec-path) (directory-file-name dir-name))))
 
 ;; Keybindings ======================================= ;;
 
@@ -935,7 +943,7 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq vc-git-log-edit-summary-max-len 70))
 
 (use-package ssh-agency
-  :if (eq system-type 'windows-nt)
+  ;; :if (eq system-type 'windows-nt)
   :vc (:url "https://github.com/magit/ssh-agency" :rev :newest))
 
 (use-package transient
@@ -975,8 +983,6 @@ If point is at the end of the line, kill the whole line including the newline."
   :config
   (setq marginalia-max-relative-age 0
         marginalia-align-offset 10))
-
-
 
 ;; Highlight TODOs ===================================== ;;
 
