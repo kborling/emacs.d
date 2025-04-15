@@ -243,7 +243,7 @@ If point is at the end of the line, kill the whole line including the newline."
 
 ;; TAGS ============================================== ;;
 
-(defun kdb/create-tags (dir-name)
+(defun kdb-create-tags (dir-name)
   "Create tags file using DIR-NAME."
   (interactive "DDirectory: ")
   (shell-command
@@ -446,12 +446,12 @@ If point is at the end of the line, kill the whole line including the newline."
    isearch-lazy-count t
    lazy-count-prefix-format nil
    lazy-count-suffix-format " (%s/%s)"
+   isearch-wrap-pause 'no
    isearch-yank-on-move 'shift
    isearch-allow-scroll 'unlimited
    isearch-repeat-on-direction-change t
    lazy-highlight-initial-delay 0.5
-   lazy-highlight-no-delay-length 3
-   isearch-wrap-pause t)
+   lazy-highlight-no-delay-length 3)
   (define-key minibuffer-local-isearch-map (kbd "M-/") #'isearch-complete-edit))
 
 ;; Dabbrev =========================================== ;;
@@ -850,11 +850,15 @@ If point is at the end of the line, kill the whole line including the newline."
   :ensure nil
   :bind
   (:map global-map
-        ("C-x v B" . vc-annotate)
+        ("C-x v B" . vc-annotate) ; blame
         ("C-x v e" . vc-ediff)
         ("C-x v k" . vc-delete-file)
         ("C-x v g" . vc-log-search)
+        ("C-x v i" . vc-create-repo) ; initialize
+        ("C-x v a" . vc-register) ; add
         ("C-x v t" . vc-create-tag)
+        ("C-x v f" . vc-update) ; pull
+        ("C-x v p" . vc-push)
         ("C-x v c" . vc-clone)
         ("C-x v d" . vc-diff)
         ("C-x v s" . vc-dir)
@@ -902,9 +906,6 @@ If point is at the end of the line, kill the whole line including the newline."
   (require 'add-log)
   (require 'log-view)
 
-  ;; I only use Git.  If I ever need another, I will include it here.
-  ;; This may have an effect on performance, as Emacs will not try to
-  ;; check for a bunch of backends.
   (setq vc-handled-backends '(Git))
 
   ;; This one is for editing commit messages.
@@ -1085,6 +1086,34 @@ If point is at the end of the line, kill the whole line including the newline."
 (define-derived-mode angular-template-mode html-ts-mode "Angular Template"
   "A major mode derived from 'html-ts-mode', for editing angular template files with LSP support.")
 (add-to-list 'auto-mode-alist '("\\.component\\.html\\'" . angular-template-mode))
+
+;; HTML Mode ======================================= ;;
+
+(use-package html-mode
+  :ensure nil
+  :bind (:map html-mode-map
+              ;; ("C-<tab>" . kdb-expand-html-tag-from-word)
+              ("C-c C-d" . nil))
+  :config
+  ;; (defun kdb-expand-html-tag-from-word ()
+  ;;   "Expand the symbol at point into an HTML tag and place the cursor between the tags."
+  ;;   (interactive)
+  ;;   (let* ((symbol-chars "-A-Za-z0-9") ; include dash for kebab-case
+  ;;          (start (progn (skip-chars-backward symbol-chars) (point)))
+  ;;          (end (progn (skip-chars-forward symbol-chars) (point)))
+  ;;          (tag (buffer-substring-no-properties start end)))
+  ;;     (when (and tag (not (string-empty-p tag)))
+  ;;       (delete-region start end)
+  ;;       (insert (format "<%s></%s>" tag tag))
+  ;;       (backward-char (+ 3 (length tag))))))
+
+  (add-to-list 'auto-mode-alist '("\\.cshtml\\'" . html-mode)))
+
+;; Memmet Mode ======================================= ;;
+
+(use-package memmet-mode
+  :vc (:url "https://github.com/kborling/memmet-mode" :rev :newest)
+  :hook (html-mode . memmet-mode))
 
 ;; XML Mode ======================================= ;;
 
