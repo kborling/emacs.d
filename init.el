@@ -1081,9 +1081,10 @@ If point is at the end of the line, kill the whole line including the newline."
     "Open an Angular interface file in the project."
     (interactive)
     (angular-open-file "interface"))
-  (global-set-key (kbd "C-c a o f") 'angular-open-interface))
+  :bind (:map angular-mode-map
+              ("C-c a o f" . angular-open-interface)))
 
-(define-derived-mode angular-template-mode html-ts-mode "Angular Template"
+(define-derived-mode angular-template-mode html-ts-mode "Angular Template "
   "A major mode derived from 'html-ts-mode', for editing angular template files with LSP support.")
 (add-to-list 'auto-mode-alist '("\\.component\\.html\\'" . angular-template-mode))
 
@@ -1092,27 +1093,15 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package html-mode
   :ensure nil
   :bind (:map html-mode-map
-              ;; ("C-<tab>" . kdb-expand-html-tag-from-word)
               ("C-c C-d" . nil))
   :config
-  ;; (defun kdb-expand-html-tag-from-word ()
-  ;;   "Expand the symbol at point into an HTML tag and place the cursor between the tags."
-  ;;   (interactive)
-  ;;   (let* ((symbol-chars "-A-Za-z0-9") ; include dash for kebab-case
-  ;;          (start (progn (skip-chars-backward symbol-chars) (point)))
-  ;;          (end (progn (skip-chars-forward symbol-chars) (point)))
-  ;;          (tag (buffer-substring-no-properties start end)))
-  ;;     (when (and tag (not (string-empty-p tag)))
-  ;;       (delete-region start end)
-  ;;       (insert (format "<%s></%s>" tag tag))
-  ;;       (backward-char (+ 3 (length tag))))))
-
   (add-to-list 'auto-mode-alist '("\\.cshtml\\'" . html-mode)))
 
 ;; Memmet Mode ======================================= ;;
 
 (use-package memmet-mode
   :vc (:url "https://github.com/kborling/memmet-mode" :rev :newest)
+  :bind (("C-<tab>" . memmet-expand))
   :hook (html-mode . memmet-mode))
 
 ;; XML Mode ======================================= ;;
