@@ -93,6 +93,8 @@
 (when (display-graphic-p)
   (context-menu-mode))
 
+(blink-cursor-mode -1)
+
 ;; Remember cursor place
 (setq
  save-place-file (locate-user-emacs-file "saveplace")
@@ -161,6 +163,9 @@
 (use-package acme-theme)
 
 (use-package standard-themes)
+
+(use-package fleury-theme
+  :vc (:url "https://github.com/ShamsParvezArka/fleury-theme.el" :rev :newest))
 
 (use-package distinguished-theme)
 
@@ -674,53 +679,63 @@ If point is at the end of the line, kill the whole line including the newline."
    eglot-ignored-server-capabilities '(:hoverProvider
                                        :documentHighlightProvider))
 
+  ;; (require 'eglot)
+  ;; (require 'jsonrpc)
+  ;; (require 'cl-lib)
+
+  ;; Display results buffer
   (add-to-list 'display-buffer-alist
                '("\\*sqls\\*"
                  (display-buffer-reuse-window display-buffer-at-bottom)
                  (reusable-frames . visible)
                  (window-height . 0.3)))
 
-  (defclass eglot-sqls (eglot-lsp-server) () :documentation "SQL's Language Server")
-  (add-to-list 'eglot-server-programs '(sql-mode . (eglot-sqls "sqls")))
+  (defclass eglot-sqltools (eglot-lsp-server) ()
+    :documentation "Eglot LSP client for SQLToolsService.")
+
+  (add-to-list 'eglot-server-programs
+               '(sql-mode . (eglot-sqltools "~/sqltoolsservice/MicrosoftSqlToolsServiceLayer" "--logLevel" "Debug")))
+
+  (defun eglot-sqltools--owner-uri ()
+    "Return a file:// URI identifying the SQL buffer (required by SQLToolsService)."
+    (concat "file://" (or buffer-file-name (buffer-name))))
+
   (cl-defmethod eglot-execute-command
-    ((server eglot-sqls) (command (eql executeQuery)) arguments)
-    "For executeQuery."
-    ;; (ignore-errors
-    (let* ((beg (eglot--pos-to-lsp-position (if (use-region-p) (region-beginning) (point-min))))
-           (end (eglot--pos-to-lsp-position (if (use-region-p) (region-end) (point-max))))
-           (res (jsonrpc-request server :workspace/executeCommand
-                                 `(:command ,(format "%s" command) :arguments ,arguments
-                                            :timeout 0.5 :range (:start ,beg :end ,end))))
+    ((server eglot-sqltools) (command (eql Microsoft.SqlTools.Management.ExecuteQuery)) arguments)
+    "Execute a query and display results."
+    (let* ((owner-uri (eglot-sqltools--owner-uri))
+           (range `(:start ,(eglot--pos-to-lsp-position (if (use-region-p) (region-beginning) (point-min)))
+                           :end ,(eglot--pos-to-lsp-position (if (use-region-p) (region-end) (point-max)))))
+           (res (ignore-errors
+                  (jsonrpc-request server
+                                   :workspace/executeCommand
+                                   `(:command "Microsoft.SqlTools.Management.ExecuteQuery"
+                                              :arguments [(:ownerUri ,owner-uri :querySelection ,range)]))))
            (buffer (generate-new-buffer "*sqls*")))
-      (with-current-buffer buffer
-        (eglot--apply-text-edits `[
-                                   (:range
-                                    (:start
-                                     (:line 0 :character 0)
-                                     :end
-                                     (:line 0 :character 0))
-                                    :newText ,res)
-                                   ]
-                                 )
-        (org-mode))
-      (pop-to-buffer buffer))
-    )
+      (if res
+          (with-current-buffer buffer
+            (let ((result (json-encode res)))
+              (insert (format "#+TITLE: Query Results\n\n%s" result))
+              (org-mode))
+            (pop-to-buffer buffer))
+        (message "[eglot-sqltools] Query execution failed or timed out."))))
+
   (cl-defmethod eglot-execute-command
-    ((server eglot-sqls) (_cmd (eql switchDatabase)) arguments)
-    "For switchDatabase."
-    (let* ((res (jsonrpc-request server :workspace/executeCommand
-                                 `(:command "showDatabases" :arguments ,arguments :timeout 0.5)))
-           (menu-items (split-string res "\n"))
-           (menu `("Eglot code actions:" ("dummy" ,@menu-items)))
-           (db (if (listp last-nonmenu-event)
-                   (x-popup-menu last-nonmenu-event menu)
-                 (completing-read "[eglot] Pick an database: "
-                                  menu-items nil t
-                                  nil nil (car menu-items))
-                 ))
-           )
-      (jsonrpc-request server :workspace/executeCommand
-                       `(:command "switchDatabase" :arguments [,db] :timeout 0.5))))
+    ((server eglot-sqltools) (_cmd (eql Microsoft.SqlTools.Management.SwitchDatabase)) arguments)
+    "Switch database using the built-in command."
+    (let* ((owner-uri (eglot-sqltools--owner-uri))
+           (res (ignore-errors
+                  (jsonrpc-request server :workspace/executeCommand
+                                   `(:command "Microsoft.SqlTools.Management.ListDatabases"
+                                              :arguments [(:ownerUri ,owner-uri)]))))
+           (menu-items (when res
+                         (mapcar (lambda (item) (alist-get 'name item)) (alist-get 'databases res))))
+           (db (when menu-items
+                 (completing-read "[eglot] Pick a database: " menu-items nil t))))
+      (when db
+        (jsonrpc-request server :workspace/executeCommand
+                         `(:command "Microsoft.SqlTools.Management.ChangeDatabase"
+                                    :arguments [(:ownerUri ,owner-uri :newDatabase ,db)])))))
 
   ;; Language Servers
   (add-to-list 'eglot-server-programs '(csharp-mode . ("csharp-ls")))
@@ -1181,21 +1196,19 @@ If point is at the end of the line, kill the whole line including the newline."
 ;; Org Mode ===================================== ;;
 
 ;;; Org Mode
-(defun kdb/org-mode-setup ()
-  "Setup org mode."
-  (org-indent-mode)
-  ;; (variable-pitch-mode 1)
-  (visual-line-mode 1)
-  (electric-indent-local-mode -1)
-  ;; (auto-fill-mode 1)
-  (setq cursor-type 'bar))
+;; (defun kdb-org-mode-setup ()
+;;   "Setup org mode."
+;;   (org-indent-mode)
+;;   ;; (variable-pitch-mode 1)
+;;   ;; (auto-fill-mode 1)
+;;   (visual-line-mode 1)
+;;   (electric-indent-local-mode -1))
 
 (use-package org
-  :ensure nil
-  :commands (org-capture org-agenda)
-  :hook (org-mode . kdb/org-mode-setup)
+  ;; :ensure nil
+  ;; :commands (org-capture org-agenda)
+  ;; :hook (org-mode . kdb-org-mode-setup)
   :config
-
   (setq
    org-ellipsis "…"
    org-use-sub-superscripts "{}"
