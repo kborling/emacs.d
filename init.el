@@ -93,8 +93,6 @@
 (when (display-graphic-p)
   (context-menu-mode))
 
-(blink-cursor-mode -1)
-
 ;; Remember cursor place
 (setq
  save-place-file (locate-user-emacs-file "saveplace")
@@ -158,14 +156,19 @@
    uwu-distinct-line-numbers 'nil
    uwu-scale-org-headlines t
    uwu-use-variable-pitch t)
-  (load-theme 'uwu t))
+  ;; (load-theme 'uwu t)
+  )
 
 (use-package acme-theme)
 
 (use-package standard-themes)
 
 (use-package fleury-theme
-  :vc (:url "https://github.com/ShamsParvezArka/fleury-theme.el" :rev :newest))
+  :vc (:url "https://github.com/ShamsParvezArka/fleury-theme.el" :rev :newest)
+  :config
+  (global-hl-line-mode +1)
+  (setq-default cursor-type '(bar . 3))
+  (load-theme 'fleury-theme t))
 
 (use-package distinguished-theme)
 
@@ -266,7 +269,9 @@ If point is at the end of the line, kill the whole line including the newline."
                      ("C-;" . comment-line)
                      ("C-a" . kdb-move-to-beginning-of-line)
                      ("C-k" . kdb-kill-line)
-                     ("C-<return>" . open-line)
+                     ("C-<return>" . electric-newline-and-maybe-indent)
+                     ("M-<return>" . open-line)
+                     ("C-j" . delete-indentation)
                      ("C-o" . occur)
                      ("C-z" . undo)
                      ("C-c b" . copy-whole-buffer)
@@ -306,7 +311,7 @@ If point is at the end of the line, kill the whole line including the newline."
     (define-key map (kbd (car binding)) (cdr binding)))
 
   ;; Toggling features
-  (dolist (binding '(("C-c t t" . toggle-theme)
+  (dolist (binding '(("C-c t t" . -theme)
                      ("C-c t f" . toggle-frame-fullscreen)))
     (define-key map (kbd (car binding)) (cdr binding))))
 
@@ -601,8 +606,9 @@ If point is at the end of the line, kill the whole line including the newline."
         icomplete-prospects-height 2
         ;; icomplete-separator " . "
         icomplete-with-completion-tables t
-        ;; icomplete-in-buffer t
+        icomplete-in-buffer t
         icomplete-scroll t)
+  
   (global-set-key (kbd "C-=") 'fido-vertical-mode))
 
 ;; Minibuffer ======================================== ;;
@@ -795,7 +801,7 @@ If point is at the end of the line, kill the whole line including the newline."
                   csharp-mode))
     (add-hook (intern (concat (symbol-name mode) "-hook")) #'eglot-ensure)))
 
-;; NOTE: Be sure to grab the laotest release 'https://github.com/blahgeek/emacs-lsp-booster/releases'
+;; NOTE: Be sure to grab the latest release 'https://github.com/blahgeek/emacs-lsp-booster/releases'
 ;; and place in PATH
 (use-package eglot-booster
   :after eglot
@@ -1151,7 +1157,8 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package memmet-mode
   :vc (:url "https://github.com/kborling/memmet-mode" :rev :newest)
-  :bind (("C-<tab>" . memmet-expand))
+  :bind (:map html-mode-map
+              ("C-<tab>" . memmet-expand))
   :hook (html-mode . memmet-mode))
 
 ;; XML Mode ======================================= ;;
