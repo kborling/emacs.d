@@ -168,7 +168,7 @@
   :config
   (global-hl-line-mode +1)
   (setq-default cursor-type '(bar . 3))
-  (load-theme 'fleury-theme t))
+  (load-theme 'fleury t))
 
 (use-package distinguished-theme)
 
@@ -965,7 +965,7 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq vc-git-log-edit-summary-max-len 70))
 
 (use-package ssh-agency
-  ;; :if (eq system-type 'windows-nt)
+  :if (eq system-type 'windows-nt)
   :vc (:url "https://github.com/magit/ssh-agency" :rev :newest))
 
 (use-package transient
