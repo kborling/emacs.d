@@ -174,10 +174,6 @@
 
 ;; UI Enhancements ======================================== ;;
 
-(use-package balanced-windows
-  :config
-  (balanced-windows-mode))
-
 (use-package helpful
   :bind
   (("C-h f" . helpful-function)
@@ -311,7 +307,7 @@ If point is at the end of the line, kill the whole line including the newline."
     (define-key map (kbd (car binding)) (cdr binding)))
 
   ;; Toggling features
-  (dolist (binding '(("C-c t t" . -theme)
+  (dolist (binding '(("C-c t t" . toggle-theme)
                      ("C-c t f" . toggle-frame-fullscreen)))
     (define-key map (kbd (car binding)) (cdr binding))))
 
@@ -608,7 +604,7 @@ If point is at the end of the line, kill the whole line including the newline."
         icomplete-with-completion-tables t
         icomplete-in-buffer t
         icomplete-scroll t)
-  
+
   (global-set-key (kbd "C-=") 'fido-vertical-mode))
 
 ;; Minibuffer ======================================== ;;
@@ -1270,113 +1266,11 @@ If point is at the end of the line, kill the whole line including the newline."
   :after org
   :hook (org-mode . org-modern-mode))
 
-(use-package org-gnosis
-  :init
-  (define-prefix-command 'kb/notes-map)
-  (define-prefix-command 'kb/journal-map)
-  :config
-  (setf org-gnosis-dir "~/Notes"
-        org-gnosis-show-tags t)
-  :bind (("C-c n" . kb/notes-map)
-         ("C-c j" . kb/journal-map)
-         :map kb/notes-map
-         ("f" . org-gnosis-find)
-         ("i" . org-gnosis-insert)
-         :map kb/journal-map
-         ("j" . org-gnosis-journal)
-         ("f" . org-gnosis-journal-find)
-         ("i" . org-gnosis-journal-insert)
-         :map org-mode-map
-         ("C-c i" . org-id-get-create)))
+;; Hyperbole ========================================= ;;
 
-;; Meow ========================================= ;;
-
-(use-package meow
+(use-package hyperbole
   :ensure t
-  :hook (meow-mode . meow-setup)
-  :config
-  (defun meow-setup ()
-    (setq meow-cheatsheet-layout meow-cheatsheet-layout-dvorak)
-    (setq meow-use-enhanced-selection-effect t)
-    (meow-leader-define-key
-     '("1" . meow-digit-argument)
-     '("2" . meow-digit-argument)
-     '("3" . meow-digit-argument)
-     '("4" . meow-digit-argument)
-     '("5" . meow-digit-argument)
-     '("6" . meow-digit-argument)
-     '("7" . meow-digit-argument)
-     '("8" . meow-digit-argument)
-     '("9" . meow-digit-argument)
-     '("0" . meow-digit-argument)
-     '("/" . meow-keypad-describe-key)
-     '("?" . meow-cheatsheet))
-    (meow-motion-overwrite-define-key
-     '("<escape>" . ignore))
-    ;; custom keybinding for motion state
-    (meow-normal-define-key
-     '("0" . meow-expand-0)
-     '("9" . meow-expand-9)
-     '("8" . meow-expand-8)
-     '("7" . meow-expand-7)
-     '("6" . meow-expand-6)
-     '("5" . meow-expand-5)
-     '("4" . meow-expand-4)
-     '("3" . meow-expand-3)
-     '("2" . meow-expand-2)
-     '("1" . meow-expand-1)
-     '("-" . negative-argument)
-     '(";" . meow-reverse)
-     '("," . meow-inner-of-thing)
-     '("." . meow-bounds-of-thing)
-     '("<" . meow-beginning-of-thing)
-     '(">" . meow-end-of-thing)
-     '("a" . meow-append)
-     '("A" . meow-open-below)
-     '("b" . meow-back-word)
-     '("B" . meow-back-symbol)
-     '("c" . meow-change)
-     '("d" . meow-delete)
-     '("D" . meow-backward-delete)
-     '("e" . meow-line)
-     '("E" . meow-goto-line)
-     '("f" . meow-find)
-     '("g" . meow-cancel-selection)
-     '("G" . meow-grab)
-     '("h" . meow-left)
-     '("H" . meow-left-expand)
-     '("i" . meow-insert)
-     '("I" . meow-open-above)
-     '("j" . meow-join)
-     '("k" . meow-kill)
-     '("l" . meow-till)
-     '("m" . meow-mark-word)
-     '("M" . meow-mark-symbol)
-     '("n" . meow-next)
-     '("N" . meow-next-expand)
-     '("o" . meow-block)
-     '("O" . meow-to-block)
-     '("p" . meow-prev)
-     '("P" . meow-prev-expand)
-     '("q" . meow-quit)
-     '("Q" . meow-goto-line)
-     '("r" . meow-replace)
-     '("R" . meow-swap-grab)
-     '("s" . meow-search)
-     '("t" . meow-right)
-     '("T" . meow-right-expand)
-     '("u" . meow-undo)
-     '("U" . meow-undo-in-selection)
-     '("v" . meow-visit)
-     '("w" . meow-next-word)
-     '("W" . meow-next-symbol)
-     '("x" . meow-save)
-     '("X" . meow-sync-grab)
-     '("y" . meow-yank)
-     '("z" . meow-pop-selection)
-     '("'" . repeat)
-     '("<escape>" . ignore))))
-(global-set-key (kbd "C-c t m") 'meow-global-mode)
+  :hook (after-init . hyperbole-mode))
 
 ;; Local Variables:
 ;; no-byte-compile: t
