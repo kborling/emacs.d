@@ -548,6 +548,18 @@ If point is at the end of the line, kill the whole line including the newline."
    vc-directory-exclusion-list (nconc vc-directory-exclusion-list '("node_modules" "elpa" ".sl"))
    project-vc-extra-root-markers '(".envrc" "package.json" ".project" ".sl")))
 
+;; Async ============================================== ;;
+
+(use-package async
+  :ensure t
+  :defer t
+  :init
+  ;; Load async byte compilation for packages if desired
+  (with-eval-after-load 'dired
+    (require 'dired-async))  ;; Optional: enables async in dired
+  :config
+  (async-bytecomp-package-mode 1))  ;; Optional: enables async compilation of packages
+
 ;; Orderless ========================================== ;;
 
 (use-package orderless
