@@ -72,7 +72,6 @@
  version-control t
  delete-old-versions t
  kept-new-versions 6
- kept-old-versions 2
  create-lockfiles nil)
 
 ;; Defaults ========================================= ;;
@@ -86,8 +85,7 @@
  require-final-newline t
  load-prefer-newer t
  set-mark-command-repeat-pop t
- global-mark-ring-max 50000
- bookmark-save-flag 1)
+ global-mark-ring-max 50000)
 
 ;; Contextual menu with right mouse button
 (when (display-graphic-p)
@@ -95,10 +93,13 @@
 
 ;; Remember cursor place
 (setq
- save-place-file (locate-user-emacs-file "saveplace")
- save-place-forget-unreadable-files t)
-
+ save-place-file (locate-user-emacs-file "saveplace"))
 (save-place-mode 1)
+
+;; Undo/redo
+(setq undo-limit (* 13 160000)
+      undo-strong-limit (* 13 240000)
+      undo-outer-limit (* 13 24000000))
 
 ;; Enable indentation+completion using the TAB key.
 (setq tab-always-indent 'complete)
@@ -363,9 +364,7 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package autorevert
   :ensure nil
-  :hook (after-init . global-auto-revert-mode)
-  :config
-  (setq auto-revert-verbose t))
+  :hook (after-init . global-auto-revert-mode))
 
 ;; Save History ====================================== ;;
 
@@ -405,7 +404,6 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq
    xref-show-definitions-function #'xref-show-definitions-completing-read
    xref-show-xrefs-function #'xref-show-definitions-buffer
-   xref-file-name-display 'project-relative
    xref-search-program 'ripgrep))
 
 ;; Recent Files ====================================== ;;
@@ -425,8 +423,7 @@ If point is at the end of the line, kill the whole line including the newline."
   :ensure nil
   :defer 0
   :config
-  (which-key-mode)
-  (setq which-key-idle-delay 1))
+  (which-key-mode))
 
 ;; EditorConfig ======================================== ;;
 
@@ -444,11 +441,7 @@ If point is at the end of the line, kill the whole line including the newline."
               ("M-/" . isearch-complete))
   :config
   (setq
-   search-highlight t
    search-whitespace-regexp ".*?"
-   isearch-lax-whitespace t
-   isearch-regexp-lax-whitespace nil
-   isearch-lazy-highlight t
    isearch-lazy-count t
    lazy-count-prefix-format nil
    lazy-count-suffix-format " (%s/%s)"
@@ -456,8 +449,7 @@ If point is at the end of the line, kill the whole line including the newline."
    isearch-yank-on-move 'shift
    isearch-allow-scroll 'unlimited
    isearch-repeat-on-direction-change t
-   lazy-highlight-initial-delay 0.5
-   lazy-highlight-no-delay-length 3)
+   lazy-highlight-initial-delay 0.5)
   (define-key minibuffer-local-isearch-map (kbd "M-/") #'isearch-complete-edit))
 
 ;; Dabbrev =========================================== ;;
@@ -486,8 +478,6 @@ If point is at the end of the line, kill the whole line including the newline."
   :defer t
   :config
   (setq
-   diff-advance-after-apply-hunk t
-   diff-update-on-the-fly t
    diff-refine nil
    diff-font-lock-prettify t
    diff-font-lock-syntax 'hunk-also))
@@ -554,11 +544,11 @@ If point is at the end of the line, kill the whole line including the newline."
   :ensure t
   :defer t
   :init
-  ;; Load async byte compilation for packages if desired
   (with-eval-after-load 'dired
-    (require 'dired-async))  ;; Optional: enables async in dired
+    (require 'dired-async)
+    (dired-async-mode 1))
   :config
-  (async-bytecomp-package-mode 1))  ;; Optional: enables async compilation of packages
+  (async-bytecomp-package-mode 1))
 
 ;; Orderless ========================================== ;;
 
@@ -614,7 +604,7 @@ If point is at the end of the line, kill the whole line including the newline."
         icomplete-prospects-height 2
         ;; icomplete-separator " . "
         icomplete-with-completion-tables t
-        icomplete-in-buffer t
+        ;; icomplete-in-buffer t
         icomplete-scroll t)
 
   (global-set-key (kbd "C-=") 'fido-vertical-mode))
@@ -635,9 +625,7 @@ If point is at the end of the line, kill the whole line including the newline."
    completion-ignore-case t
    read-buffer-completion-ignore-case t
    completions-max-height 20
-   completion-flex-nospace nil
    completions-header-format nil
-   completions-highlight-face 'completions-highlight
    minibuffer-visible-completions nil
    enable-recursive-minibuffers t
    completions-sort 'historical
@@ -690,66 +678,9 @@ If point is at the end of the line, kill the whole line including the newline."
    eglot-sync-connect 0
    eglot-send-changes-idle-time 0
    eglot-autoshutdown t
+   eglot-extend-to-xref t
    eglot-ignored-server-capabilities '(:hoverProvider
                                        :documentHighlightProvider))
-
-  ;; (require 'eglot)
-  ;; (require 'jsonrpc)
-  ;; (require 'cl-lib)
-
-  ;; Display results buffer
-  (add-to-list 'display-buffer-alist
-               '("\\*sqls\\*"
-                 (display-buffer-reuse-window display-buffer-at-bottom)
-                 (reusable-frames . visible)
-                 (window-height . 0.3)))
-
-  (defclass eglot-sqltools (eglot-lsp-server) ()
-    :documentation "Eglot LSP client for SQLToolsService.")
-
-  (add-to-list 'eglot-server-programs
-               '(sql-mode . (eglot-sqltools "~/sqltoolsservice/MicrosoftSqlToolsServiceLayer" "--logLevel" "Debug")))
-
-  (defun eglot-sqltools--owner-uri ()
-    "Return a file:// URI identifying the SQL buffer (required by SQLToolsService)."
-    (concat "file://" (or buffer-file-name (buffer-name))))
-
-  (cl-defmethod eglot-execute-command
-    ((server eglot-sqltools) (command (eql Microsoft.SqlTools.Management.ExecuteQuery)) arguments)
-    "Execute a query and display results."
-    (let* ((owner-uri (eglot-sqltools--owner-uri))
-           (range `(:start ,(eglot--pos-to-lsp-position (if (use-region-p) (region-beginning) (point-min)))
-                           :end ,(eglot--pos-to-lsp-position (if (use-region-p) (region-end) (point-max)))))
-           (res (ignore-errors
-                  (jsonrpc-request server
-                                   :workspace/executeCommand
-                                   `(:command "Microsoft.SqlTools.Management.ExecuteQuery"
-                                              :arguments [(:ownerUri ,owner-uri :querySelection ,range)]))))
-           (buffer (generate-new-buffer "*sqls*")))
-      (if res
-          (with-current-buffer buffer
-            (let ((result (json-encode res)))
-              (insert (format "#+TITLE: Query Results\n\n%s" result))
-              (org-mode))
-            (pop-to-buffer buffer))
-        (message "[eglot-sqltools] Query execution failed or timed out."))))
-
-  (cl-defmethod eglot-execute-command
-    ((server eglot-sqltools) (_cmd (eql Microsoft.SqlTools.Management.SwitchDatabase)) arguments)
-    "Switch database using the built-in command."
-    (let* ((owner-uri (eglot-sqltools--owner-uri))
-           (res (ignore-errors
-                  (jsonrpc-request server :workspace/executeCommand
-                                   `(:command "Microsoft.SqlTools.Management.ListDatabases"
-                                              :arguments [(:ownerUri ,owner-uri)]))))
-           (menu-items (when res
-                         (mapcar (lambda (item) (alist-get 'name item)) (alist-get 'databases res))))
-           (db (when menu-items
-                 (completing-read "[eglot] Pick a database: " menu-items nil t))))
-      (when db
-        (jsonrpc-request server :workspace/executeCommand
-                         `(:command "Microsoft.SqlTools.Management.ChangeDatabase"
-                                    :arguments [(:ownerUri ,owner-uri :newDatabase ,db)])))))
 
   ;; Language Servers
   (add-to-list 'eglot-server-programs '(csharp-mode . ("csharp-ls")))
@@ -821,11 +752,8 @@ If point is at the end of the line, kill the whole line including the newline."
   :ensure nil
   :config
   (setq
-   flymake-fringe-indicator-position 'left-fringe
    flymake-suppress-zero-counters t
-   flymake-start-on-flymake-mode t
    flymake-no-changes-timeout 0
-   ;; flymake-start-on-save-buffer t
    flymake-wrap-around nil
    flymake-mode-line-format
    '("" flymake-mode-line-exception flymake-mode-line-counters)
@@ -857,8 +785,7 @@ If point is at the end of the line, kill the whole line including the newline."
   :config
   (global-eldoc-mode 1)
   (setq
-   eldoc-echo-area-use-multiline-p t
-   eldoc-idle-delay 0.75))
+   eldoc-echo-area-use-multiline-p t))
 
 ;; (use-package eldoc-box
 ;;   :after eldoc
@@ -995,15 +922,12 @@ If point is at the end of the line, kill the whole line including the newline."
          ("C-c g z" . magit-stash)
          ("C-c g Z" . magit-apply))
   :init
-  (setq magit-define-global-key-bindings nil)
+  (setq magit-define-global-key-bindings nil))
+
+(use-package magit-prime
+  :ensure t
   :config
-  (setq
-   magit-status-headers-hook nil
-   magit-status-sections-hook'(magit-insert-error-header
-                               magit-insert-head-branch-header
-                               magit-insert-unstaged-changes
-                               magit-insert-staged-changes
-                               magit-insert-unpushed-to-pushremote)))
+  (add-hook 'magit-pre-refresh-hook 'magit-prime-refresh-cache))
 
 ;; Marginalia ======================================== ;;
 
@@ -1210,29 +1134,16 @@ If point is at the end of the line, kill the whole line including the newline."
 
 ;; Org Mode ===================================== ;;
 
-;;; Org Mode
-;; (defun kdb-org-mode-setup ()
-;;   "Setup org mode."
-;;   (org-indent-mode)
-;;   ;; (variable-pitch-mode 1)
-;;   ;; (auto-fill-mode 1)
-;;   (visual-line-mode 1)
-;;   (electric-indent-local-mode -1))
-
 (use-package org
   ;; :ensure nil
-  ;; :commands (org-capture org-agenda)
-  ;; :hook (org-mode . kdb-org-mode-setup)
   :config
   (setq
    org-ellipsis "…"
    org-use-sub-superscripts "{}"
    org-pretty-entities t
-   org-src-fontify-natively t
-   org-src-tab-acts-natively t
    org-hide-emphasis-markers t
+   org-hide-leading-stars t
    org-confirm-babel-evaluate nil
-   org-export-with-smart-quotes t
    org-src-window-setup 'current-window
    org-directory "~/org/"
    org-todo-keyword
@@ -1249,24 +1160,14 @@ If point is at the end of the line, kill the whole line including the newline."
    org-confirm-babel-evaluate nil
    org-src-window-setup 'current-window
    org-edit-src-persistent-message nil
+   org-startup-indented t
    org-src-preserve-indentation t
-   org-src-tab-acts-natively t
    org-edit-src-content-indentation 0
    org-auto-align-tags nil
    org-tags-column 0
    org-catch-invisible-edits 'show-and-error
    org-special-ctrl-a/e t
    org-insert-heading-respect-content t
-   org-export-with-drawers nil
-   org-export-with-todo-keywords nil
-   org-export-with-broken-links t
-   org-export-with-toc nil
-   org-export-with-smart-quotes t
-   org-export-headline-levels 8
-   org-export-dispatch-use-expert-ui nil
-   org-html-htmlize-output-type nil
-   org-html-head-include-default-style nil
-   org-html-head-include-scripts nil
    (org-babel-do-load-languages
     'org-babel-load-languages
     '((emacs-lisp . t)

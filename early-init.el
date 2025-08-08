@@ -31,8 +31,8 @@
 
 (add-hook 'emacs-startup-hook
           (lambda ()
-            (setq gc-cons-threshold (* 100 1024 1024)
-                  gc-cons-percentage 0.1)))
+            (setq gc-cons-threshold (* 128 1024 1024)
+                  gc-cons-percentage 0.5)))
 
 (setq large-file-warning-threshold 200000000)
 
@@ -54,11 +54,6 @@
   (scroll-bar-mode -1))
 (when (fboundp 'horizontal-scroll-bar-mode)
   (horizontal-scroll-bar-mode -1))
-
-(setq default-frame-alist '(
-(background-color . "#131A1C")
-(ns-appearance . dark)
-(ns-transparent-titlebar . t)))
 
 (setq frame-resize-pixelwise t
       frame-inhibit-implied-resize t
