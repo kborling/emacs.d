@@ -74,6 +74,13 @@
  kept-new-versions 6
  create-lockfiles nil)
 
+;; Performance Optimizations ====================== ;;
+
+;; Windows-specific performance improvements
+(when (eq system-type 'windows-nt)
+  (setq gc-cons-threshold 100000000)  ; 100mb during startup
+  (run-with-idle-timer 2 nil (lambda () (setq gc-cons-threshold 800000))))
+
 ;; Defaults ========================================= ;;
 
 (setq
@@ -374,7 +381,9 @@ If point is at the end of the line, kill the whole line including the newline."
   :config
   (setq
    history-length 10000
-   history-delete-duplicates t))
+   history-delete-duplicates t
+   savehist-save-minibuffer-history t
+   savehist-autosave-interval 60))
 
 ;; Grep ============================================== ;;
 
@@ -579,7 +588,7 @@ If point is at the end of the line, kill the whole line including the newline."
 
   (add-hook 'corfu-mode-hook
             (lambda ()
-              (setq-local fussy-max-candidate-limit 5000
+              (setq-local fussy-max-candidate-limit (if (eq system-type 'windows-nt) 3000 5000)
                           fussy-default-regex-fn 'fussy-pattern-first-letter
                           fussy-prefer-prefix nil))))
 
@@ -680,7 +689,9 @@ If point is at the end of the line, kill the whole line including the newline."
    eglot-autoshutdown t
    eglot-extend-to-xref t
    eglot-ignored-server-capabilities '(:hoverProvider
-                                       :documentHighlightProvider))
+                                       :documentHighlightProvider)
+   ;; Windows-specific optimization
+   eglot-events-buffer-size (if (eq system-type 'windows-nt) 0 2000000))
 
   ;; Language Servers
   (add-to-list 'eglot-server-programs '(csharp-mode . ("csharp-ls")))
@@ -1007,8 +1018,7 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package combobulate
   :vc (:url "https://github.com/mickeynp/combobulate" :rev :newest)
   :custom
-  ;; (combobulate-key-prefix "C-c ,")
-  (combobulate-key-prefix "C-c o")
+  (combobulate-key-prefix "C-c ,")
   :hook ((prog-mode . combobulate-mode)))
 
 ;; Multiple Cursors ================================== ;;
@@ -1016,7 +1026,7 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package multiple-cursors
   :bind (("C->" . mc/mark-next-like-this)
          ("C-<" . mc/mark-previous-like-this)
-         ("C-c m" . mc/mark-all-like-this)
+         ("C-m" . mc/mark-all-like-this)
          ("C-S-c C-S-c" . mc/mark-edit-lines)))
 
 ;; So Long =========================================== ;;
