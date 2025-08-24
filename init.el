@@ -616,7 +616,7 @@ If point is at the end of the line, kill the whole line including the newline."
         ;; icomplete-in-buffer t
         icomplete-scroll t)
 
-  (global-set-key (kbd "C-=") 'fido-vertical-mode))
+  (global-set-key (kbd "C-`") 'fido-vertical-mode))
 
 ;; Minibuffer ======================================== ;;
 
@@ -1020,6 +1020,16 @@ If point is at the end of the line, kill the whole line including the newline."
   :custom
   (combobulate-key-prefix "C-c ,")
   :hook ((prog-mode . combobulate-mode)))
+
+;; Treesit Expand ==================================== ;;
+
+(use-package treesit-expand
+  :ensure nil
+  :load-path "elisp/treesit-expand"
+  :bind (("C-=" . treesit-expand-dwim)
+         ("C--" . treesit-contract-region)
+         ("C-c e e" . treesit-expand-region)
+         ("C-c e r" . treesit-expand-reset)))
 
 ;; Multiple Cursors ================================== ;;
 
