@@ -957,7 +957,7 @@ If point is at the end of the line, kill the whole line including the newline."
   :bind (:map hl-todo-mode-map
               ("C-c t p" . hl-todo-previous)
               ("C-c t n" . hl-todo-next)
-              ("C-c o" . hl-todo-occur)))
+              ("C-c t o" . hl-todo-occur)))
 
 ;; Corfu ============================================== ;;
 
@@ -1018,8 +1018,51 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package combobulate
   :vc (:url "https://github.com/mickeynp/combobulate" :rev :newest)
   :custom
-  (combobulate-key-prefix "C-c ,")
-  :hook ((prog-mode . combobulate-mode)))
+  ;; Change the prefix key to something more convenient
+  (combobulate-key-prefix "C-c o")
+  (combobulate-flash-node t)
+  (combobulate-dimmer-mode t)
+  ;; Auto-expand region to meaningful boundaries
+  (combobulate-envelope-indent-region-function #'indent-region)
+  :hook 
+  ;; Enable for specific modes that have tree-sitter support
+  ((python-ts-mode . combobulate-mode)
+   (js-ts-mode . combobulate-mode)
+   (tsx-ts-mode . combobulate-mode)
+   (typescript-ts-mode . combobulate-mode)
+   (json-ts-mode . combobulate-mode)
+   (css-ts-mode . combobulate-mode)
+   (yaml-ts-mode . combobulate-mode)
+   (html-ts-mode . combobulate-mode)
+   (toml-ts-mode . combobulate-mode)
+   (go-ts-mode . combobulate-mode)
+   (rust-ts-mode . combobulate-mode))
+  :bind
+  ;; Override some default keybindings for easier access
+  (:map combobulate-key-map
+        ;; Navigation
+        ("C-M-f" . combobulate-navigate-next)
+        ("C-M-b" . combobulate-navigate-previous)
+        ("C-M-u" . combobulate-navigate-up)
+        ("C-M-d" . combobulate-navigate-down)
+        ("C-M-n" . combobulate-navigate-sequence-next)
+        ("C-M-p" . combobulate-navigate-sequence-previous)
+        ;; Logical navigation (beginning/end of blocks)
+        ("C-M-a" . combobulate-navigate-logical-previous)
+        ("C-M-e" . combobulate-navigate-logical-next)
+        ;; Marking and selection
+        ("C-M-SPC" . combobulate-mark-node-dwim)
+        ;; Editing
+        ("C-M-k" . combobulate-kill-node-dwim)
+        ("C-M-y" . combobulate-yank)
+        ("C-M-/" . combobulate-comment-dwim)
+        ;; Manipulation
+        ("M-<up>" . combobulate-drag-up)
+        ("M-<down>" . combobulate-drag-down)
+        ("M-<left>" . combobulate-splice-self)
+        ("M-<right>" . combobulate-splice-parent)
+        ;; Envelopes (wrapping)
+        ("C-c o e" . combobulate-envelope-dwim)))
 
 ;; Treesit Expand ==================================== ;;
 
