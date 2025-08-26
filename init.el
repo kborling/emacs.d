@@ -1068,7 +1068,7 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package treesit-expand
   :ensure nil
-  :load-path "elisp/treesit-expand"
+  :vc (:url "https://github.com/kborling/treesit-expand" :rev :newest)
   :bind (("C-=" . treesit-expand-dwim)
          ("C--" . treesit-contract-region)
          ("C-c e e" . treesit-expand-region)
@@ -1079,7 +1079,7 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package multiple-cursors
   :bind (("C->" . mc/mark-next-like-this)
          ("C-<" . mc/mark-previous-like-this)
-         ("C-m" . mc/mark-all-like-this)
+         ("C-'" . mc/mark-all-like-this)
          ("C-S-c C-S-c" . mc/mark-edit-lines)))
 
 ;; So Long =========================================== ;;
