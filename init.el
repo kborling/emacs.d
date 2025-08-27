@@ -1275,11 +1275,171 @@ If point is at the end of the line, kill the whole line including the newline."
   (require 'hywconfig) ; Window configuration management
   (require 'hyrolo)    ; HyRolo contact/note management
 
+  ;; Integrated Contact & Task Management System
+  ;; ============================================
+  ;; Combines Hyperbole (navigation/search) with Org-mode (agenda/capture)
+  ;;
+  ;; Quick Reference:
+  ;; - C-c c       → Capture: t=Task, m=Meeting, f=Follow-up, n=Note, w=Win, i=Issue, p=Project
+  ;; - C-c a       → Agenda (view all TODOs, schedule, deadlines)
+  ;; - C-c h r f   → Search contacts/notes (HyRolo)
+  ;; - C-c h r c   → Jump to contacts.org
+  ;; - C-c h r o   → Jump to notes.org
+  ;; - M-RET       → Smart key (activate links, buttons, etc)
+  ;;
+  ;; Files:
+  ;; - ~/contacts.org  → Contacts, meetings, accomplishments
+  ;; - ~/notes.org     → General tasks, notes, reminders
+  
   ;; Set up HyRolo for contact management
   ;; Use valid file extensions that HyRolo can process
   (setq hyrolo-file-list '("~/contacts.org" "~/notes.org"))
   (setq hyrolo-highlight-matches-flag t) ; Highlight search matches
   (setq hyrolo-kill-buffers-after-use t) ; Clean up after searching
+  
+  ;; Configure Org agenda to include HyRolo files
+  (setq org-agenda-files '("~/contacts.org" "~/notes.org"))
+  (setq org-todo-keywords
+        '((sequence "TODO(t)" "WAITING(w)" "FOLLOWUP(f)" "|" "DONE(d)" "CANCELLED(c)")))
+  (setq org-log-done 'time) ; Add timestamp when marking DONE
+  (setq org-agenda-include-diary nil) ; Don't include diary
+  (setq org-agenda-start-on-weekday nil) ; Start on today
+  (setq org-agenda-span 7) ; Show week view by default
+  (setq org-agenda-skip-scheduled-if-done t) ; Hide completed items
+  (setq org-agenda-skip-deadline-if-done t)
+  
+  ;; Custom agenda views for work
+  (setq org-agenda-custom-commands
+        '(("w" "Work Overview"
+           ((agenda "" ((org-agenda-span 7)
+                       (org-agenda-start-on-weekday 1)))
+            (tags-todo "@work"
+                       ((org-agenda-overriding-header "Work TODOs")))
+            (tags "PROJECT={.+}"
+                  ((org-agenda-overriding-header "Active Projects")))))
+          ("p" "People Focus"
+           ((tags-todo "@.*:"
+                       ((org-agenda-overriding-header "People-related TODOs")))
+            (agenda "" ((org-agenda-span 3)
+                       (org-agenda-entry-types '(:scheduled))
+                       (org-agenda-overriding-header "Upcoming Meetings/Reviews")))))
+          ("r" "Weekly Review"
+           ((tags "LEVEL=2+Weekly Review"
+                  ((org-agenda-overriding-header "Recent Reviews")))
+            (todo "DONE"
+                  ((org-agenda-overriding-header "This Week's Accomplishments")
+                   (org-agenda-skip-function 
+                    '(org-agenda-skip-entry-if 'notregexp "\\[2025-.*\\]"))))))))
+  
+  ;; Simple, focused org-capture templates
+  (setq org-capture-templates
+        '(;; === TASKS & TODOS ===
+          ("t" "Task" entry (file+headline "~/notes.org" "Tasks")
+           "** TODO %?\n   Added: %U")
+          
+          ;; === MEETINGS & PEOPLE ===
+          ("m" "Meeting" entry (file+function "~/contacts.org" my/org-capture-meeting)
+           "** Meeting - %u\n   Notes: %?\n   Action Items: ")
+          
+          ("f" "Follow-up" entry (file+headline "~/notes.org" "Follow-ups")  
+           "** FOLLOWUP %? with %^{Person}\n   SCHEDULED: %^{When}t")
+          
+          ;; === QUICK CAPTURE ===
+          ("n" "Note" entry (file+headline "~/notes.org" "Quick Notes")
+           "** %u - %?")
+          
+          ("w" "Win" entry (file+function "~/contacts.org" my/org-capture-accomplishment)
+           "*** Win - %u (%?)")
+          
+          ("i" "Issue" entry (file+function "~/contacts.org" my/org-capture-issue)
+           "*** Issue - %u (%?)\n    Action Needed: ")
+          
+          ;; === PROJECT WORK ===  
+          ("p" "Project Update" entry (file+headline "~/notes.org" "Projects")
+           "** %^{Project} - %u\n   %?")))
+  
+  ;; Helper function to position cursor at contact for org-capture
+  (defun my/org-capture-contact-todo ()
+    "Move to or create contact heading for TODO capture."
+    (let ((contact (read-string "Contact name: ")))
+      (goto-char (point-min))
+      (if (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote contact)) nil t)
+          (end-of-line)
+        ;; Create new contact
+        (goto-char (point-max))
+        (insert (format "\n* %s\n  Added: %s\n" contact (format-time-string "%Y-%m-%d"))))
+      (point)))
+  
+  (defun my/org-capture-meeting ()
+    "Move to or create contact heading for meeting capture."
+    (let ((contact (read-string "Contact name (or empty for general): ")))
+      (if (string-empty-p contact)
+          (goto-char (point-max))
+        (goto-char (point-min))
+        (if (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote contact)) nil t)
+            (end-of-line)
+          (goto-char (point-max))
+          (insert (format "\n* %s\n  Added: %s\n" contact (format-time-string "%Y-%m-%d")))))
+      (point)))
+  
+  (defun my/org-capture-accomplishment ()
+    "Move to contact's accomplishments section."
+    (let ((contact (read-string "Contact name: ")))
+      (goto-char (point-min))
+      (if (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote contact)) nil t)
+          (progn
+            (if (re-search-forward "^\\*\\* Accomplishments" nil t)
+                (end-of-line)
+              (end-of-line)
+              (insert "\n** Accomplishments")))
+        ;; Create new contact with accomplishments
+        (goto-char (point-max))
+        (insert (format "\n* %s\n  Added: %s\n** Accomplishments\n" 
+                       contact (format-time-string "%Y-%m-%d"))))
+      (point)))
+  
+  (defun my/org-capture-issue ()
+    "Move to employee's issues section."
+    (let ((contact (read-string "Employee name: ")))
+      (goto-char (point-min))
+      (if (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote contact)) nil t)
+          (progn
+            (if (re-search-forward "^\\*\\* Issues" nil t)
+                (end-of-line)
+              (end-of-line)
+              (insert "\n** Issues")))
+        ;; Create new contact with issues section
+        (goto-char (point-max))
+        (insert (format "\n* %s\n  Added: %s\n** Issues\n" 
+                       contact (format-time-string "%Y-%m-%d"))))
+      (point)))
+  
+  (defun my/org-capture-review ()
+    "Move to or create contact for review capture."
+    (let ((contact (read-string "Employee name: ")))
+      (goto-char (point-min))
+      (if (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote contact)) nil t)
+          (end-of-line)
+        (goto-char (point-max))
+        (insert (format "\n* %s\n  Added: %s\n" contact (format-time-string "%Y-%m-%d"))))
+      (point)))
+
+  ;; Wrapper for hyrolo-edit to ensure proper initialization
+  (defun my/hyrolo-edit-safe ()
+    "Edit HyRolo file with proper initialization."
+    (interactive)
+    (require 'hyperbole)
+    (require 'hyrolo)
+    ;; Ensure files exist with proper headers
+    (dolist (file hyrolo-file-list)
+      (unless (file-exists-p file)
+        (with-temp-buffer
+          (insert "-*- mode: org -*-\n")
+          (insert "#+TITLE: " (file-name-base file) "\n")
+          (insert "#+STARTUP: overview\n\n")
+          (write-file file))))
+    ;; Now call hyrolo-edit
+    (call-interactively 'hyrolo-edit))
 
   ;; Custom HyRolo entry template for contacts
   (defun my/hyrolo-add-contact ()
@@ -1350,21 +1510,24 @@ If point is at the end of the line, kill the whole line including the newline."
 
   ;; Quick daily standup/meeting notes
   (defun my/hyrolo-daily-notes ()
-    "Add quick daily notes or standup notes."
+    "Add quick daily notes or standup notes to notes.org."
     (interactive)
     (let* ((note-type (completing-read "Note type: "
                                        '("Daily Standup" "Team Meeting" "1-on-1" "Project Update" "Quick Note")))
            (notes (read-string "Notes: "))
            (date-only (format-time-string "%Y-%m-%d"))
-           (timestamp (format-time-string "%Y-%m-%d %H:%M")))
+           (timestamp (format-time-string "%Y-%m-%d %H:%M"))
+           (notes-file (if (> (length hyrolo-file-list) 1)
+                          (nth 1 hyrolo-file-list)  ; Use second file (notes.org)
+                        (car hyrolo-file-list))))   ; Fallback to first if only one file
 
-      (with-current-buffer (find-file-noselect (car hyrolo-file-list))
+      (with-current-buffer (find-file-noselect notes-file)
         (goto-char (point-max))
         (insert (format "\n* %s - %s\n" note-type date-only))
         (insert (format "  Time: %s\n" timestamp))
         (insert (format "  Notes: %s\n" notes))
         (save-buffer)
-        (message "Daily note added: %s" note-type))))
+        (message "Daily note added to %s: %s" (file-name-nondirectory notes-file) note-type))))
 
   ;; Function to quickly find and jump to a contact
   (defun my/hyrolo-jump-to-contact ()
@@ -1372,6 +1535,65 @@ If point is at the end of the line, kill the whole line including the newline."
     (interactive)
     (let ((contact-name (read-string "Find contact: ")))
       (hyrolo-fgrep contact-name))))
+  
+  ;; Quick jump to contacts file
+  (defun my/hyrolo-open-contacts ()
+    "Open the contacts.org file."
+    (interactive)
+    (find-file (expand-file-name (car hyrolo-file-list))))
+  
+  ;; Quick jump to notes file  
+  (defun my/hyrolo-open-notes ()
+    "Open the notes.org file."
+    (interactive)
+    (if (> (length hyrolo-file-list) 1)
+        (find-file (expand-file-name (nth 1 hyrolo-file-list)))
+      (message "No notes file configured")))
+  
+  ;; Weekly review function
+  (defun my/weekly-review ()
+    "Create weekly review entry."
+    (interactive)
+    (let* ((week-date (format-time-string "%Y-W%U"))
+           (review-file (nth 1 hyrolo-file-list)))
+      (with-current-buffer (find-file-noselect review-file)
+        (goto-char (point-max))
+        (insert (format "\n* Weekly Review - %s\n" week-date))
+        (insert "** Accomplishments\n- \n\n")
+        (insert "** Challenges\n- \n\n") 
+        (insert "** Next Week Focus\n- \n\n")
+        (insert "** Team/People Updates\n- \n\n")
+        (save-buffer)
+        (message "Weekly review created"))))
+  
+  ;; Project dashboard view
+  (defun my/project-dashboard ()
+    "Show project overview from notes."
+    (interactive)
+    (let ((notes-file (nth 1 hyrolo-file-list)))
+      (with-current-buffer (find-file-noselect notes-file)
+        (occur "^\\*\\* .* - .*Status:")
+        (rename-buffer "*Project Dashboard*")
+        (message "Project dashboard created"))))
+  
+  ;; Create a project button for a contact
+  (defun my/hyrolo-add-project-button ()
+    "Add a project link button to current contact."
+    (interactive)
+    (let ((project-path (read-file-name "Project path: "))
+          (project-name (read-string "Project name: ")))
+      (insert (format "  Project: <%s> - <(find-file \"%s\")>\n" 
+                     project-name project-path))))
+  
+  ;; Create a meeting recording button
+  (defun my/hyrolo-add-meeting-link ()
+    "Add a meeting recording or document link."
+    (interactive)
+    (let ((url (read-string "URL or file path: "))
+          (description (read-string "Description: ")))
+      (if (string-match "^http" url)
+          (insert (format "  %s: <(browse-url \"%s\")>\n" description url))
+        (insert (format "  %s: <(find-file \"%s\")>\n" description url)))))
 
   ;; Quick accomplishment/win tracking function
   (defun my/hyrolo-add-accomplishment ()
@@ -1467,8 +1689,47 @@ If point is at the end of the line, kill the whole line including the newline."
   (defun my/hyrolo-view-accomplishments ()
     "View all accomplishments for a specific contact."
     (interactive)
-    (let ((contact-name (read-string "View accomplishments for: ")))
-      (hyrolo-fgrep (format "%s.*Accomplishments" contact-name))))
+    (require 'org)
+    (let* ((contact-name (read-string "View accomplishments for: "))
+           (files hyrolo-file-list)
+           (found nil))
+      ;; Search through HyRolo files for the contact
+      (dolist (file files)
+        (when (file-exists-p file)
+          (with-current-buffer (find-file-noselect file)
+            (save-excursion
+              (goto-char (point-min))
+              (when (search-forward (format "* %s" contact-name) nil t)
+                (setq found t)
+                (let ((start (point)))
+                  ;; Find accomplishments section
+                  (if (search-forward "** Accomplishments" nil t)
+                      (progn
+                        (beginning-of-line)
+                        ;; Display in a read-only buffer
+                        (let* ((acc-start (point))
+                               (acc-end (or (save-excursion
+                                            (when (re-search-forward "^\\*\\* " nil t)
+                                              (beginning-of-line)
+                                              (point)))
+                                          (save-excursion
+                                            (when (re-search-forward "^\\* " nil t)
+                                              (beginning-of-line)
+                                              (point)))
+                                          (point-max)))
+                               (content (buffer-substring-no-properties acc-start acc-end)))
+                          (with-current-buffer (get-buffer-create "*Accomplishments*")
+                            (read-only-mode -1)
+                            (erase-buffer)
+                            (insert (format "Accomplishments for %s:\n\n" contact-name))
+                            (insert content)
+                            (org-mode)
+                            (goto-char (point-min))
+                            (read-only-mode 1)
+                            (pop-to-buffer (current-buffer)))))
+                    (message "No accomplishments found for %s" contact-name))))))))
+      (unless found
+        (message "Contact '%s' not found" contact-name))))
 
   ;; The main keybindings will be set by hyperbole-mode
   ;; Let's add our custom keybindings in hyperbole-mode-hook
@@ -1477,6 +1738,10 @@ If point is at the end of the line, kill the whole line including the newline."
               ;; Core Hyperbole keys
               (global-set-key (kbd "M-<return>") 'hkey-either)
               (global-set-key (kbd "C-h h") 'hyperbole)
+              
+              ;; Org integration keys (using standard org bindings)
+              (global-set-key (kbd "C-c a") 'org-agenda)
+              (global-set-key (kbd "C-c c") 'org-capture)
 
               ;; Window configurations
               (global-set-key (kbd "C-c h w s") 'hywconfig-add-by-name)
@@ -1485,7 +1750,7 @@ If point is at the end of the line, kill the whole line including the newline."
 
               ;; HyRolo - contact and note management
               (global-set-key (kbd "C-c h r f") 'hyrolo-fgrep)
-              (global-set-key (kbd "C-c h r e") 'hyrolo-edit)
+              (global-set-key (kbd "C-c h r e") 'my/hyrolo-edit-safe)
               (global-set-key (kbd "C-c h r a") 'my/hyrolo-add-contact)
               (global-set-key (kbd "C-c h r n") 'hyrolo-add)
               (global-set-key (kbd "C-c h r s") 'hyrolo-sort)
@@ -1496,6 +1761,14 @@ If point is at the end of the line, kill the whole line including the newline."
               (global-set-key (kbd "C-c h r m") 'my/hyrolo-add-meeting-note)
               (global-set-key (kbd "C-c h r d") 'my/hyrolo-daily-notes)
               (global-set-key (kbd "C-c h r j") 'my/hyrolo-jump-to-contact)
+              
+              ;; Quick file jumps
+              (global-set-key (kbd "C-c h r c") 'my/hyrolo-open-contacts)
+              (global-set-key (kbd "C-c h r o") 'my/hyrolo-open-notes)
+              
+              ;; Review and dashboard functions
+              (global-set-key (kbd "C-c h r W") 'my/weekly-review)
+              (global-set-key (kbd "C-c h r P") 'my/project-dashboard)
 
               ;; Accomplishments and key events tracking
               (global-set-key (kbd "C-c h r A") 'my/hyrolo-add-accomplishment)
