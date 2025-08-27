@@ -1373,6 +1373,103 @@ If point is at the end of the line, kill the whole line including the newline."
     (let ((contact-name (read-string "Find contact: ")))
       (hyrolo-fgrep contact-name))))
 
+  ;; Quick accomplishment/win tracking function
+  (defun my/hyrolo-add-accomplishment ()
+    "Add an accomplishment or key event for a contact."
+    (interactive)
+    (let* ((contact-name (read-string "Contact name: "))
+           (accomplishment-type (completing-read "Type: " 
+                                               '("Win" "Promotion" "Award" "Milestone" "Achievement" "Event" "Success")))
+           (accomplishment (read-string (format "%s: " accomplishment-type)))
+           (impact (read-string "Impact/Significance (optional): "))
+           (contact-file (car hyrolo-file-list))
+           (date-only (format-time-string "%Y-%m-%d")))
+      
+      (with-current-buffer (find-file-noselect contact-file)
+        ;; Search for existing contact
+        (goto-char (point-min))
+        (if (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote contact-name)) nil t)
+            ;; Found existing contact - look for accomplishments section or create it
+            (let ((contact-end (save-excursion
+                                 (if (re-search-forward "^\\* " nil t)
+                                     (line-beginning-position)
+                                   (point-max)))))
+              ;; Look for existing Accomplishments section
+              (if (re-search-forward "^\\*\\* Accomplishments\\s-*$" contact-end t)
+                  ;; Found accomplishments section - add to it
+                  (progn
+                    (end-of-line)
+                    (insert (format "\n*** %s - %s (%s)" accomplishment-type date-only accomplishment))
+                    (when (not (string-empty-p impact))
+                      (insert (format "\n    Impact: %s" impact))))
+                ;; No accomplishments section - create it
+                (goto-char contact-end)
+                (when (not (eq contact-end (point-max)))
+                  (forward-line -1))
+                (end-of-line)
+                (insert (format "\n** Accomplishments"))
+                (insert (format "\n*** %s - %s (%s)" accomplishment-type date-only accomplishment))
+                (when (not (string-empty-p impact))
+                  (insert (format "\n    Impact: %s" impact))))
+              (message "Accomplishment added for %s" contact-name))
+          ;; Contact not found - create new contact with accomplishment
+          (goto-char (point-max))
+          (insert (format "\n* %s\n" contact-name))
+          (insert (format "  Added: %s\n" date-only))
+          (insert (format "** Accomplishments\n"))
+          (insert (format "*** %s - %s (%s)\n" accomplishment-type date-only accomplishment))
+          (when (not (string-empty-p impact))
+            (insert (format "    Impact: %s\n" impact)))
+          (message "New contact '%s' created with accomplishment" contact-name))
+        (save-buffer))))
+
+  ;; Quick wins tracker - super fast for logging small wins
+  (defun my/hyrolo-quick-win ()
+    "Quickly log a win for a contact - minimal prompts for speed."
+    (interactive)
+    (let* ((contact-name (read-string "Contact: "))
+           (win (read-string "Quick win: "))
+           (contact-file (car hyrolo-file-list))
+           (date-only (format-time-string "%Y-%m-%d")))
+      
+      (with-current-buffer (find-file-noselect contact-file)
+        ;; Search for existing contact
+        (goto-char (point-min))
+        (if (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote contact-name)) nil t)
+            ;; Found existing contact - look for accomplishments section
+            (let ((contact-end (save-excursion
+                                 (if (re-search-forward "^\\* " nil t)
+                                     (line-beginning-position)
+                                   (point-max)))))
+              (if (re-search-forward "^\\*\\* Accomplishments\\s-*$" contact-end t)
+                  ;; Add to existing accomplishments
+                  (progn
+                    (end-of-line)
+                    (insert (format "\n*** Win - %s (%s)" date-only win)))
+                ;; Create accomplishments section
+                (goto-char contact-end)
+                (when (not (eq contact-end (point-max)))
+                  (forward-line -1))
+                (end-of-line)
+                (insert (format "\n** Accomplishments"))
+                (insert (format "\n*** Win - %s (%s)" date-only win)))
+              (message "✓ Win logged for %s" contact-name))
+          ;; Create new contact with win
+          (goto-char (point-max))
+          (insert (format "\n* %s\n" contact-name))
+          (insert (format "  Added: %s\n" date-only))
+          (insert (format "** Accomplishments\n"))
+          (insert (format "*** Win - %s (%s)\n" date-only win))
+          (message "✓ New contact '%s' created with win" contact-name))
+        (save-buffer))))
+
+  ;; View accomplishments for a contact
+  (defun my/hyrolo-view-accomplishments ()
+    "View all accomplishments for a specific contact."
+    (interactive)
+    (let ((contact-name (read-string "View accomplishments for: ")))
+      (hyrolo-fgrep (format "%s.*Accomplishments" contact-name))))
+
   ;; The main keybindings will be set by hyperbole-mode
   ;; Let's add our custom keybindings in hyperbole-mode-hook
   (add-hook 'hyperbole-mode-hook
@@ -1399,6 +1496,11 @@ If point is at the end of the line, kill the whole line including the newline."
               (global-set-key (kbd "C-c h r m") 'my/hyrolo-add-meeting-note)
               (global-set-key (kbd "C-c h r d") 'my/hyrolo-daily-notes)
               (global-set-key (kbd "C-c h r j") 'my/hyrolo-jump-to-contact)
+
+              ;; Accomplishments and key events tracking
+              (global-set-key (kbd "C-c h r A") 'my/hyrolo-add-accomplishment)
+              (global-set-key (kbd "C-c h r w") 'my/hyrolo-quick-win)
+              (global-set-key (kbd "C-c h r v") 'my/hyrolo-view-accomplishments)
 
               ;; Explicit Buttons
               (global-set-key (kbd "C-c h e c") 'hui:ebut-create)
