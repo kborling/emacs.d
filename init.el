@@ -817,22 +817,30 @@ If point is at the end of the line, kill the whole line including the newline."
   :ensure nil
   :bind
   (:map global-map
-        ("C-x v B" . vc-annotate) ; blame
+        ;; Git-friendly aliases
+        ("C-x v B" . vc-annotate) ; git blame
         ("C-x v e" . vc-ediff)
-        ("C-x v k" . vc-delete-file)
-        ("C-x v g" . vc-log-search)
-        ("C-x v i" . vc-create-repo) ; initialize
-        ("C-x v a" . vc-register) ; add
-        ("C-x v t" . vc-create-tag)
-        ("C-x v f" . vc-update) ; pull
-        ("C-x v p" . vc-push)
-        ("C-x v c" . vc-clone)
-        ("C-x v d" . vc-diff)
-        ("C-x v s" . vc-dir)
+        ("C-x v k" . vc-delete-file) ; git rm
+        ("C-x v g" . vc-log-search) ; git log --grep
+        ("C-x v i" . vc-create-repo) ; git init
+        ("C-x v a" . vc-register) ; git add
+        ("C-x v t" . vc-create-tag) ; git tag
+        ("C-x v f" . vc-update) ; git pull
+        ("C-x v p" . vc-push) ; git push
+        ("C-x v c" . vc-clone) ; git clone
+        ("C-x v d" . vc-diff) ; git diff
+        ("C-x v s" . vc-dir) ; git status (in vc-dir buffer)
         ("C-x v ." . vc-dir-root)
         ("C-x v <return>" . vc-dir-root)
-        ("C-x v b b" . vc-switch-branch)
-        ("C-x v b n" . vc-create-branch)
+        ("C-x v b b" . vc-switch-branch) ; git checkout
+        ("C-x v b n" . vc-create-branch) ; git checkout -b
+        ;; Additional git commands
+        ("C-x v m m" . vc-merge) ; git merge
+        ("C-x v m r" . vc-resolve-conflicts) ; resolve merge conflicts
+        ("C-x v r r" . vc-revert) ; git revert/reset
+        ("C-x v r b" . vc-rollback) ; git reset --hard
+        ("C-x v S" . vc-log-mergebase) ; show merge base
+        ("C-x v x" . vc-delete-file) ; git rm
         :map vc-dir-mode-map
         ("t" . vc-create-tag)
         ("O" . vc-log-outgoing)
@@ -1024,7 +1032,7 @@ If point is at the end of the line, kill the whole line including the newline."
   (combobulate-dimmer-mode t)
   ;; Auto-expand region to meaningful boundaries
   (combobulate-envelope-indent-region-function #'indent-region)
-  :hook 
+  :hook
   ;; Enable for specific modes that have tree-sitter support
   ((python-ts-mode . combobulate-mode)
    (js-ts-mode . combobulate-mode)
@@ -1072,7 +1080,7 @@ If point is at the end of the line, kill the whole line including the newline."
   :bind (("C-=" . treesit-expand-dwim)
          ("C--" . treesit-contract-region)
          ("C-c e e" . treesit-expand-region)
-         ("C-c e r" . treesit-expand-reset)))
+         ("C-c e q" . treesit-expand-reset)))
 
 ;; Multiple Cursors ================================== ;;
 
@@ -1246,8 +1254,194 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package hyperbole
   :ensure t
-  :hook (after-init . hyperbole-mode))
+  :hook (after-init . hyperbole-mode)
+  :custom
+  ;; Smart Key behavior
+  (hkey-init nil) ; Prevent key rebinding at startup
+  (hpath:find-file-urls-mode t) ; Enable URL recognition
+  (hsys-org-enable-smart-keys t) ; Better Org mode integration
 
+  ;; Window and Frame control
+  (hywconfig-ring-max 10) ; Store up to 10 window configurations
+  (hycontrol-windows-grid-cols 3) ; 3x3 grid for window control
+  (hycontrol-windows-grid-rows 3)
+
+  ;; Implicit button types to recognize
+  (hibut:max-len 2000) ; Max length for implicit button recognition
+
+  :config
+  ;; Enable helpful Hyperbole features
+  (require 'hycontrol) ; Window control features
+  (require 'hywconfig) ; Window configuration management
+  (require 'hyrolo)    ; HyRolo contact/note management
+
+  ;; Set up HyRolo for contact management
+  ;; Use valid file extensions that HyRolo can process
+  (setq hyrolo-file-list '("~/contacts.org" "~/notes.org"))
+  (setq hyrolo-highlight-matches-flag t) ; Highlight search matches
+  (setq hyrolo-kill-buffers-after-use t) ; Clean up after searching
+
+  ;; Custom HyRolo entry template for contacts
+  (defun my/hyrolo-add-contact ()
+    "Add a new contact to HyRolo."
+    (interactive)
+    (let ((name (read-string "Name: "))
+          (email (read-string "Email: "))
+          (phone (read-string "Phone: "))
+          (notes (read-string "Initial note: ")))
+      (with-current-buffer (find-file-noselect (car hyrolo-file-list))
+        (goto-char (point-max))
+        (insert (format "\n* %s\n" name))
+        (when (not (string-empty-p email))
+          (insert (format "  Email: %s\n" email)))
+        (when (not (string-empty-p phone))
+          (insert (format "  Phone: %s\n" phone)))
+        (when (not (string-empty-p notes))
+          (insert (format "  Notes:\n  - %s\n" notes)))
+        (insert "  Added: " (format-time-string "%Y-%m-%d") "\n")
+        (save-buffer)
+        (message "Contact '%s' added to HyRolo" name))))
+
+  ;; Quick meeting note function
+  (defun my/hyrolo-add-meeting-note ()
+    "Add a meeting note for an existing contact or create a new one."
+    (interactive)
+    (let* ((contact-name (read-string "Contact name: "))
+           (meeting-type (completing-read "Meeting type: "
+                                          '("Meeting" "Call" "Email" "Coffee" "Interview" "Follow-up")))
+           (meeting-notes (read-string "Quick notes: "))
+           (action-items (read-string "Action items (optional): "))
+           (follow-up (read-string "Follow-up needed (optional): "))
+           (contact-file (car hyrolo-file-list))
+           (timestamp (format-time-string "%Y-%m-%d %H:%M"))
+           (date-only (format-time-string "%Y-%m-%d")))
+
+      (with-current-buffer (find-file-noselect contact-file)
+        ;; Search for existing contact
+        (goto-char (point-min))
+        (if (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote contact-name)) nil t)
+            ;; Found existing contact - add meeting note under it
+            (progn
+              (end-of-line)
+              (insert (format "\n** %s - %s" meeting-type date-only))
+              (insert (format "\n   Time: %s" timestamp))
+              (when (not (string-empty-p meeting-notes))
+                (insert (format "\n   Notes: %s" meeting-notes)))
+              (when (not (string-empty-p action-items))
+                (insert (format "\n   Action Items:\n   - %s" action-items)))
+              (when (not (string-empty-p follow-up))
+                (insert (format "\n   Follow-up: %s" follow-up)))
+              (insert "\n")
+              (message "Meeting note added for %s" contact-name))
+          ;; Contact not found - create new contact with meeting note
+          (goto-char (point-max))
+          (insert (format "\n* %s\n" contact-name))
+          (insert (format "  Added: %s\n" date-only))
+          (insert (format "** %s - %s\n" meeting-type date-only))
+          (insert (format "   Time: %s\n" timestamp))
+          (when (not (string-empty-p meeting-notes))
+            (insert (format "   Notes: %s\n" meeting-notes)))
+          (when (not (string-empty-p action-items))
+            (insert (format "   Action Items:\n   - %s\n" action-items)))
+          (when (not (string-empty-p follow-up))
+            (insert (format "   Follow-up: %s\n" follow-up)))
+          (message "New contact '%s' created with meeting note" contact-name))
+        (save-buffer))))
+
+  ;; Quick daily standup/meeting notes
+  (defun my/hyrolo-daily-notes ()
+    "Add quick daily notes or standup notes."
+    (interactive)
+    (let* ((note-type (completing-read "Note type: "
+                                       '("Daily Standup" "Team Meeting" "1-on-1" "Project Update" "Quick Note")))
+           (notes (read-string "Notes: "))
+           (date-only (format-time-string "%Y-%m-%d"))
+           (timestamp (format-time-string "%Y-%m-%d %H:%M")))
+
+      (with-current-buffer (find-file-noselect (car hyrolo-file-list))
+        (goto-char (point-max))
+        (insert (format "\n* %s - %s\n" note-type date-only))
+        (insert (format "  Time: %s\n" timestamp))
+        (insert (format "  Notes: %s\n" notes))
+        (save-buffer)
+        (message "Daily note added: %s" note-type))))
+
+  ;; Function to quickly find and jump to a contact
+  (defun my/hyrolo-jump-to-contact ()
+    "Quickly find and jump to a contact entry."
+    (interactive)
+    (let ((contact-name (read-string "Find contact: ")))
+      (hyrolo-fgrep contact-name))))
+
+  ;; The main keybindings will be set by hyperbole-mode
+  ;; Let's add our custom keybindings in hyperbole-mode-hook
+  (add-hook 'hyperbole-mode-hook
+            (lambda ()
+              ;; Core Hyperbole keys
+              (global-set-key (kbd "M-<return>") 'hkey-either)
+              (global-set-key (kbd "C-h h") 'hyperbole)
+
+              ;; Window configurations
+              (global-set-key (kbd "C-c h w s") 'hywconfig-add-by-name)
+              (global-set-key (kbd "C-c h w r") 'hywconfig-restore-by-name)
+              (global-set-key (kbd "C-c h w d") 'hywconfig-delete-by-name)
+
+              ;; HyRolo - contact and note management
+              (global-set-key (kbd "C-c h r f") 'hyrolo-fgrep)
+              (global-set-key (kbd "C-c h r e") 'hyrolo-edit)
+              (global-set-key (kbd "C-c h r a") 'my/hyrolo-add-contact)
+              (global-set-key (kbd "C-c h r n") 'hyrolo-add)
+              (global-set-key (kbd "C-c h r s") 'hyrolo-sort)
+              (global-set-key (kbd "C-c h r y") 'hyrolo-yank)
+              (global-set-key (kbd "C-c h r k") 'hyrolo-kill)
+
+              ;; Quick meeting and note functions
+              (global-set-key (kbd "C-c h r m") 'my/hyrolo-add-meeting-note)
+              (global-set-key (kbd "C-c h r d") 'my/hyrolo-daily-notes)
+              (global-set-key (kbd "C-c h r j") 'my/hyrolo-jump-to-contact)
+
+              ;; Explicit Buttons
+              (global-set-key (kbd "C-c h e c") 'hui:ebut-create)
+              (global-set-key (kbd "C-c h e r") 'hui:ebut-rename)
+              (global-set-key (kbd "C-c h e d") 'hui:ebut-delete)
+
+              ;; Help and utilities
+              (global-set-key (kbd "C-c h @") 'hkey-help)
+              (global-set-key (kbd "C-c h d") 'hyperbole-demo)
+              
+              ;; Custom implicit buttons (define after Hyperbole is loaded)
+              (defib my-project-file ()
+                "Jump to project files like package.json, Cargo.toml, etc."
+                (when (looking-at "\\(package\\.json\\|Cargo\\.toml\\|pom\\.xml\\|.*\\.csproj\\)")
+                  (hact 'find-file (match-string 0))))
+
+              (defib github-reference ()
+                "Open GitHub issue or PR references like #123"
+                (when (looking-at "#\\([0-9]+\\)")
+                  (let* ((issue-num (match-string 1))
+                         (remote-url (shell-command-to-string "git config --get remote.origin.url"))
+                         (github-url (replace-regexp-in-string
+                                      "\\.git$" ""
+                                      (replace-regexp-in-string
+                                       "^git@github.com:" "https://github.com/"
+                                       (string-trim remote-url)))))
+                    (when (string-match "github.com" github-url)
+                      (hact 'www-url (format "%s/issues/%s" github-url issue-num))))))))
+
+  ;; Additional configuration for better integration
+  (with-eval-after-load 'org
+    ;; Make Hyperbole work better with Org links
+    (add-to-list 'org-link-frame-setup '(file . find-file)))
+
+  ;; Make path references more intelligent (after hpath is loaded)
+  (with-eval-after-load 'hpath
+    (dolist (suffix '(".rs" ".tsx" ".jsx" ".vue"))
+      (add-to-list 'hpath:suffixes suffix)))
+
+  ;; Customize Smart Mouse Key behavior (optional)
+  ;; (global-set-key [S-mouse-2] 'hkey-either)
+  ;; (global-set-key [S-mouse-3] 'hkey-help)
+  
 ;; Winum - Window Numbers ========================== ;;
 
 (use-package winum
