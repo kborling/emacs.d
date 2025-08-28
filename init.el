@@ -59,7 +59,15 @@
                (display-buffer-no-window)
                (allow-no-window . t)))
 
-;; Backups ========================================== ;;
+;; Backups & File Organization ====================== ;;
+
+;; Create var directory for cleaner organization
+(defvar user-emacs-var-directory
+  (expand-file-name "var/" user-emacs-directory)
+  "Directory for storing variable data files.")
+
+(unless (file-directory-p user-emacs-var-directory)
+  (make-directory user-emacs-var-directory t))
 
 ;; Backup stored in /tmp
 (setq
@@ -72,7 +80,18 @@
  version-control t
  delete-old-versions t
  kept-new-versions 6
- create-lockfiles nil)
+ create-lockfiles nil
+
+ ;; Redirect files to var directory
+ auto-save-list-file-prefix (expand-file-name "auto-save-list/.saves-" user-emacs-var-directory)
+ tramp-persistency-file-name (expand-file-name "tramp" user-emacs-var-directory)
+ url-cache-directory (expand-file-name "url/cache/" user-emacs-var-directory)
+ url-configuration-directory (expand-file-name "url/configuration/" user-emacs-var-directory)
+ 
+ ;; Additional file redirections
+ bookmark-default-file (expand-file-name "bookmarks" user-emacs-var-directory)
+ abbrev-file-name (expand-file-name "abbrev_defs" user-emacs-var-directory)
+ nsm-settings-file (expand-file-name "network-security.data" user-emacs-var-directory))
 
 ;; Performance Optimizations ====================== ;;
 
@@ -80,6 +99,12 @@
 (when (eq system-type 'windows-nt)
   (setq gc-cons-threshold 100000000)  ; 100mb during startup
   (run-with-idle-timer 2 nil (lambda () (setq gc-cons-threshold 800000))))
+
+;; Additional performance tweaks
+(setq fast-but-imprecise-scrolling t
+      redisplay-skip-fontification-on-input t
+      jit-lock-defer-time 0
+      jit-lock-stealth-time 0.2)
 
 ;; Defaults ========================================= ;;
 
@@ -98,10 +123,39 @@
 (when (display-graphic-p)
   (context-menu-mode))
 
-;; Remember cursor place
-(setq
- save-place-file (locate-user-emacs-file "saveplace"))
-(save-place-mode 1)
+;; Persistent Features ============================== ;;
+
+;; Recent files
+(use-package recentf
+  :ensure nil
+  :hook (after-init . recentf-mode)
+  :custom
+  (recentf-save-file (expand-file-name "recentf" user-emacs-var-directory))
+  (recentf-max-saved-items 1000)
+  (recentf-max-menu-items 20)
+  (recentf-auto-cleanup 'never)
+  (recentf-exclude '(".gz" ".xz" ".zip" "/elpaca/" "/elpa/" "/opt/" "/.rustup/" "/elpa/" "/ssh:" "/sudo:" "/node_modules/" "/nix/"))
+  :config
+  (run-at-time nil (* 5 60) 'recentf-save-list))
+
+;; Save cursor position
+(use-package saveplace
+  :ensure nil
+  :hook (after-init . save-place-mode)
+  :custom
+  (save-place-file (expand-file-name "saveplace" user-emacs-var-directory)))
+
+;; Minibuffer history
+(use-package savehist
+  :ensure nil
+  :hook (after-init . savehist-mode)
+  :custom
+  (savehist-file (expand-file-name "savehist" user-emacs-var-directory))
+  (savehist-save-minibuffer-history t)
+  (savehist-autosave-interval 60)
+  (history-length 10000)
+  (history-delete-duplicates t))
+
 
 ;; Undo/redo
 (setq undo-limit (* 13 160000)
@@ -373,17 +427,6 @@ If point is at the end of the line, kill the whole line including the newline."
   :ensure nil
   :hook (after-init . global-auto-revert-mode))
 
-;; Save History ====================================== ;;
-
-(use-package savehist
-  :ensure nil
-  :hook (after-init . savehist-mode)
-  :config
-  (setq
-   history-length 10000
-   history-delete-duplicates t
-   savehist-save-minibuffer-history t
-   savehist-autosave-interval 60))
 
 ;; Grep ============================================== ;;
 
@@ -415,16 +458,6 @@ If point is at the end of the line, kill the whole line including the newline."
    xref-show-xrefs-function #'xref-show-definitions-buffer
    xref-search-program 'ripgrep))
 
-;; Recent Files ====================================== ;;
-
-(use-package recentf
-  :ensure nil
-  :hook (after-init . recentf-mode)
-  :config
-  (setq
-   recentf-save-file (locate-user-emacs-file "recentf")
-   recentf-max-saved-items 50
-   recentf-exclude '(".gz" ".xz" ".zip" "/elpaca/" "/elpa/" "/opt/" "/.rustup/" "/elpa/" "/ssh:" "/sudo:" "/node_modules/" "/nix/")))
 
 ;; Which Key ========================================= ;;
 
