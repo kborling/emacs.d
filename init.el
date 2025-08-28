@@ -1373,12 +1373,12 @@ If point is at the end of the line, kill the whole line including the newline."
   (use-package org-templates
     :ensure nil
     :after org
-    :load-path "elisp")
+    :load-path ".")
 
   (use-package org-contacts-simple
     :ensure nil
     :after org
-    :load-path "elisp")
+    :load-path ".")
 
   ;; Winum - Window Numbers ========================== ;;
 
