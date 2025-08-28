@@ -87,7 +87,7 @@
  tramp-persistency-file-name (expand-file-name "tramp" user-emacs-var-directory)
  url-cache-directory (expand-file-name "url/cache/" user-emacs-var-directory)
  url-configuration-directory (expand-file-name "url/configuration/" user-emacs-var-directory)
- 
+
  ;; Additional file redirections
  bookmark-default-file (expand-file-name "bookmarks" user-emacs-var-directory)
  abbrev-file-name (expand-file-name "abbrev_defs" user-emacs-var-directory)
@@ -204,7 +204,7 @@
   (set-face-attribute 'fixed-pitch nil
                       :family default-font-family :height 1.0)
   (set-face-attribute 'variable-pitch nil
-                      :family "FreeSans" :height 1.2 :weight 'regular))
+                      :family "FreeSans" :height 1.0 :weight 'regular))
 
 (set-display-table-slot standard-display-table 'truncation (make-glyph-code ?…))
 (set-display-table-slot standard-display-table 'wrap (make-glyph-code ?–))
@@ -218,7 +218,7 @@
    uwu-distinct-line-numbers 'nil
    uwu-scale-org-headlines t
    uwu-use-variable-pitch t)
-  ;; (load-theme 'uwu t)
+  (load-theme 'uwu t)
   )
 
 (use-package acme-theme)
@@ -229,8 +229,8 @@
   :vc (:url "https://github.com/ShamsParvezArka/fleury-theme.el" :rev :newest)
   :config
   (global-hl-line-mode +1)
-  (setq-default cursor-type '(bar . 3))
-  (load-theme 'fleury t))
+  (setq-default cursor-type '(bar . 3)))
+;; (load-theme 'fleury t))
 
 (use-package distinguished-theme)
 
@@ -317,61 +317,66 @@ If point is at the end of the line, kill the whole line including the newline."
 
 ;; Keybindings ======================================= ;;
 
-(let ((map global-map))
-  ;; Remove suspend keys
-  (dolist (key '("C-z" "C-x C-z"))
-    (define-key map (kbd key) nil))
+(defun my/setup-keybindings ()
+  "Set up all custom keybindings."
+  (let ((map global-map))
+    ;; Remove suspend keys
+    (dolist (key '("C-z" "C-x C-z"))
+      (define-key map (kbd key) nil))
 
-  ;; General keybindings
-  (dolist (binding '(("C-h C-r" . restart-emacs)
-                     ("C-;" . comment-line)
-                     ("C-a" . kdb-move-to-beginning-of-line)
-                     ("C-k" . kdb-kill-line)
-                     ("C-<return>" . electric-newline-and-maybe-indent)
-                     ("M-<return>" . open-line)
-                     ("C-j" . delete-indentation)
-                     ("C-o" . occur)
-                     ("C-z" . undo)
-                     ("C-c b" . copy-whole-buffer)
-                     ("C-c C-d" . duplicate-line)
-                     ("C-x C-r" . recentf)
-                     ("C-x f" . project-find-file)
-                     ("C-c C-r" . replace-regexp)
-                     ("C-\\" . hippie-expand)
-                     ("M-z" . zap-up-to-char)
-                     ("C-M-s" . isearch-forward-symbol-at-point)))
-    (define-key map (kbd (car binding)) (cdr binding)))
+    ;; General keybindings
+    (dolist (binding '(("C-h C-r" . restart-emacs)
+                       ("C-;" . comment-line)
+                       ("C-a" . kdb-move-to-beginning-of-line)
+                       ("C-k" . kdb-kill-line)
+                       ("C-<return>" . electric-newline-and-maybe-indent)
+                       ("M-<return>" . open-line)
+                       ("C-j" . delete-indentation)
+                       ("C-o" . occur)
+                       ("C-z" . undo)
+                       ("C-c b" . copy-whole-buffer)
+                       ("C-c C-d" . duplicate-line)
+                       ("C-x C-r" . recentf)
+                       ("C-x f" . project-find-file)
+                       ("C-c C-r" . replace-regexp)
+                       ("C-\\" . hippie-expand)
+                       ("M-z" . zap-up-to-char)
+                       ("C-M-s" . isearch-forward-symbol-at-point)))
+      (define-key map (kbd (car binding)) (cdr binding)))
 
-  ;; Insert pair shortcuts
-  (dolist (key '("M-(" "M-\"" "M-{" "M-["))
-    (define-key map (kbd key) #'insert-pair))
+    ;; Insert pair shortcuts
+    (dolist (key '("M-(" "M-\"" "M-{" "M-["))
+      (define-key map (kbd key) #'insert-pair))
 
-  ;; Buffer management
-  (dolist (binding '(("C-x b" . ibuffer)
-                     ("C-c C-p" . previous-buffer)
-                     ("C-c C-n" . next-buffer)
-                     ("C-c C-o" . other-window)
-                     ("C-x C-b" . switch-to-buffer)
-                     ("C-x k" . kill-current-buffer)
-                     ("C-x M-k" . kill-buffer-other-window)
-                     ("<backtab>" . format-current-buffer)))
-    (define-key map (kbd (car binding)) (cdr binding)))
+    ;; Buffer management
+    (dolist (binding '(("C-x b" . ibuffer)
+                       ("C-c C-p" . previous-buffer)
+                       ("C-c C-n" . next-buffer)
+                       ("C-c C-o" . other-window)
+                       ("C-x C-b" . switch-to-buffer)
+                       ("C-x k" . kill-current-buffer)
+                       ("C-x M-k" . kill-buffer-other-window)
+                       ("<backtab>" . format-current-buffer)))
+      (define-key map (kbd (car binding)) (cdr binding)))
 
-  ;; Opening tools
-  (dolist (binding '(("C-c t e" . eshell)
-                     ("C-c t v" . ansi-term)
-                     ("C-c t d" . dired-jump-other-window)))
-    (define-key map (kbd (car binding)) (cdr binding)))
+    ;; Opening tools
+    (dolist (binding '(("C-c t e" . eshell)
+                       ("C-c t v" . ansi-term)
+                       ("C-c t d" . dired-jump-other-window)))
+      (define-key map (kbd (car binding)) (cdr binding)))
 
-  ;; Configuration shortcuts
-  (dolist (binding '(("C-c e v" . config-visit)
-                     ("C-c e r" . config-reload)))
-    (define-key map (kbd (car binding)) (cdr binding)))
+    ;; Configuration shortcuts
+    (dolist (binding '(("C-c e v" . config-visit)
+                       ("C-c e r" . config-reload)))
+      (define-key map (kbd (car binding)) (cdr binding)))
 
-  ;; Toggling features
-  (dolist (binding '(("C-c t t" . toggle-theme)
-                     ("C-c t f" . toggle-frame-fullscreen)))
-    (define-key map (kbd (car binding)) (cdr binding))))
+    ;; Toggling features
+    (dolist (binding '(("C-c t t" . toggle-theme)
+                       ("C-c t f" . toggle-frame-fullscreen)))
+      (define-key map (kbd (car binding)) (cdr binding)))))
+
+;; Set up keybindings after everything else loads
+(add-hook 'after-init-hook #'my/setup-keybindings)
 
 (defun kdb/keyboard-quit-dwim ()
   "Do-What-I-Mean behaviour for a general `keyboard-quit'."
@@ -554,7 +559,20 @@ If point is at the end of the line, kill the whole line including the newline."
    dired-do-revert-buffer (lambda (dir) (not (file-remote-p dir)))
    dired-kill-when-opening-new-dired-buffer t
    delete-by-moving-to-trash t
-   dired-dwim-target t))
+   dired-dwim-target t
+   dired-ls-F-marks-symlinks t
+   dired-clean-confirm-on-delete t
+   dired-deletion-confirmer 'y-or-n-p
+   dired-mouse-drag-files t)
+
+  (when (eq system-type 'darwin)
+    (setq dired-use-ls-dired nil))     ; macOS ls doesn't support --dired
+
+  ;; Better keybindings
+  :bind (:map dired-mode-map
+              ("E" . dired-toggle-read-only)
+              ("?" . dired-summary)
+              ("C-c C-e" . wdired-change-to-wdired-mode)))
 
 ;; Ibuffer ============================================== ;;
 
@@ -569,7 +587,33 @@ If point is at the end of the line, kill the whole line including the newline."
    ibuffer-movement-cycle nil
    ibuffer-default-sorting-mode 'filename/process
    ibuffer-use-header-line t
-   ibuffer-default-shrink-to-minimum-size nil))
+   ibuffer-default-shrink-to-minimum-size nil
+
+   ;; Additional useful settings
+   ibuffer-show-empty-filter-groups nil  ; Hide empty groups
+   ibuffer-saved-filter-groups
+   '(("Default"
+      ("Emacs Config" (filename . "\\.emacs\\.d"))
+      ("Projects" (filename . "Projects/"))
+      ("Programming" (derived-mode . prog-mode))
+      ("Dired" (mode . dired-mode))
+      ("Org" (or (mode . org-mode)
+                 (mode . org-agenda-mode)))
+      ("Magit" (name . "^\\*magit"))
+      ("Help" (or (name . "^\\*Help\\*")
+                  (name . "^\\*Apropos\\*")
+                  (name . "^\\*info\\*")
+                  (name . "^\\*Messages\\*")))
+      ("Special" (name . "^\\*")))))
+
+  ;; Auto-use the saved filter groups
+  (add-hook 'ibuffer-mode-hook
+            (lambda () (ibuffer-switch-to-saved-filter-groups "Default")))
+
+  ;; Better keybindings
+  :bind (:map ibuffer-mode-map
+              ("M-o" . other-window)
+              ("/" . ibuffer-filter-by-name)))
 
 ;; Project ============================================ ;;
 
@@ -590,6 +634,7 @@ If point is at the end of the line, kill the whole line including the newline."
     (require 'dired-async)
     (dired-async-mode 1))
   :config
+  ;; Enable async byte compilation
   (async-bytecomp-package-mode 1))
 
 ;; Orderless ========================================== ;;
@@ -651,712 +696,710 @@ If point is at the end of the line, kill the whole line including the newline."
 
   (global-set-key (kbd "C-`") 'fido-vertical-mode))
 
-;; Minibuffer ======================================== ;;
+  ;; Minibuffer ======================================== ;;
 
-(use-package minibuffer
-  :ensure nil
-  :demand t
-  :config
-  (setq
-   completions-format 'one-column
-   completion-show-help nil
-   completion-show-inline-help nil
-   completion-auto-help 'always
-   completion-auto-select nil
-   completions-detailed t
-   completion-ignore-case t
-   read-buffer-completion-ignore-case t
-   completions-max-height 20
-   completions-header-format nil
-   minibuffer-visible-completions nil
-   enable-recursive-minibuffers t
-   completions-sort 'historical
-   read-answer-short t)
-  :bind (:map minibuffer-local-map
-              ("C-p" . minibuffer-previous-completion)
-              ("C-n" . minibuffer-next-completion))
-  :bind (:map completion-in-region-mode-map
-              ("C-p" . minibuffer-previous-completion)
-              ("C-n" . minibuffer-next-completion)
-              ("RET" . minibuffer-choose-completion)))
+  (use-package minibuffer
+    :ensure nil
+    :demand t
+    :config
+    (setq
+     completions-format 'one-column
+     completion-show-help nil
+     completion-show-inline-help nil
+     ;; completion-auto-help 'always
+     completion-auto-help nil
+     completion-auto-select nil
+     completions-detailed t
+     completion-ignore-case t
+     read-buffer-completion-ignore-case t
+     completions-max-height 20
+     completions-header-format nil
+     minibuffer-visible-completions nil
+     enable-recursive-minibuffers t
+     completions-sort 'historical
+     read-answer-short t)
+    :bind (:map minibuffer-local-map
+                ("C-p" . minibuffer-previous-completion)
+                ("C-n" . minibuffer-next-completion))
+    :bind (:map completion-in-region-mode-map
+                ("C-p" . minibuffer-previous-completion)
+                ("C-n" . minibuffer-next-completion)
+                ("RET" . minibuffer-choose-completion)))
 
-;; (defun update-completions-on-typing ()
-;;   "Show or hide the *Completions* buffer based on minibuffer input length.
-;; The *Completions* buffer is shown after typing at least 2 characters,
-;; hidden if fewer than 2 characters are present, and ignores navigation commands."
-;;   (when (and (minibufferp)
-;;              (not (member this-command '(minibuffer-previous-completion minibuffer-next-completion))))
-;;     (if (>= (length (minibuffer-contents)) 2)
-;;         ;; Show the *Completions* buffer if input length is 2 or more
-;;         (minibuffer-completion-help)
-;;       ;; Hide the *Completions* buffer if input length is less than 2
-;;       (when-let ((win (get-buffer-window "*Completions*")))
-;;         (delete-window win)))))
+  ;; Eglot ============================================== ;;
 
-;; (add-hook 'minibuffer-setup-hook
-;;           (lambda ()
-;;             (add-hook 'post-command-hook #'update-completions-on-typing nil t)))
+  (use-package eglot
+    :ensure nil
+    :bind (:map eglot-mode-map
+                ("C-c c r" . eglot-rename)
+                ("C-c c f" . eglot-format-buffer)
+                ("C-c c o" . eglot-code-action-organize-imports)
+                ("C-c c a" . eglot-code-actions)
+                ("C-." . eglot-code-actions)
+                ("C-c c q" . eglot-code-action-quickfix)
+                ("C-c c e" . eglot-code-action-extract)
+                ("C-c c j" . eglot-code-action-inline)
+                ("C-c c k" . eglot-code-action-rewrite)
+                ("C-c c i" . eglot-find-implementation)
+                ("C-c c d" . eglot-find-declaration)
+                ("C-c c t" . eglot-find-typeDefinition)
+                ("C-c c h" . eldoc))
+    :config
+    (setq
+     eglot-sync-connect 0
+     eglot-send-changes-idle-time 0
+     eglot-autoshutdown t
+     eglot-extend-to-xref t
+     eglot-ignored-server-capabilities '(:hoverProvider
+                                         :documentHighlightProvider)
+     ;; Windows-specific optimization
+     eglot-events-buffer-size (if (eq system-type 'windows-nt) 0 2000000))
 
-;; Eglot ============================================== ;;
+    ;; Language Servers
+    (add-to-list 'eglot-server-programs '(csharp-mode . ("csharp-ls")))
+    (add-to-list 'eglot-server-programs '(typescript-ts-mode . ("typescript-language-server" "--stdio")))
+    ;; See https://github.com/olrtg/emmet-language-server
+    (add-to-list 'eglot-server-programs '(html-ts-mode . ("emmet-language-server" "--stdio")))
+    (add-to-list 'eglot-server-programs '(css-ts-mode . ("emmet-language-server" "--stdio")))
+    (add-to-list 'eglot-server-programs '(rust-mode . ("rust-analyzer")))
+    (add-to-list 'eglot-server-programs '(rustic-mode . ("rust-analyzer")))
+    (add-to-list 'eglot-server-programs '((c++-mode c-mode)
+                                          . ("clangd"
+                                             "-j=8"
+                                             "--log=error"
+                                             "--malloc-trim"
+                                             "--background-index"
+                                             "--clang-tidy"
+                                             "--cross-file-rename"
+                                             "--completion-style=detailed"
+                                             "--pch-storage=memory"
+                                             "--header-insertion=never"
+                                             "--header-insertion-decorators=0")))
 
-(use-package eglot
-  :ensure nil
-  :bind (:map eglot-mode-map
-              ("C-c c r" . eglot-rename)
-              ("C-c c f" . eglot-format-buffer)
-              ("C-c c o" . eglot-code-action-organize-imports)
-              ("C-c c a" . eglot-code-actions)
-              ("C-." . eglot-code-actions)
-              ("C-c c q" . eglot-code-action-quickfix)
-              ("C-c c e" . eglot-code-action-extract)
-              ("C-c c j" . eglot-code-action-inline)
-              ("C-c c k" . eglot-code-action-rewrite)
-              ("C-c c i" . eglot-find-implementation)
-              ("C-c c d" . eglot-find-declaration)
-              ("C-c c t" . eglot-find-typeDefinition)
-              ("C-c c h" . eldoc))
-  :config
-  (setq
-   eglot-sync-connect 0
-   eglot-send-changes-idle-time 0
-   eglot-autoshutdown t
-   eglot-extend-to-xref t
-   eglot-ignored-server-capabilities '(:hoverProvider
-                                       :documentHighlightProvider)
-   ;; Windows-specific optimization
-   eglot-events-buffer-size (if (eq system-type 'windows-nt) 0 2000000))
+    ;; FIXME: This doesn't always work initially (eval-buffer usually fixes it)
+    (let* ((global-prefix (string-trim (shell-command-to-string "npm config get --global prefix")))
+           (modules-path (if (eq system-type 'windows-nt)
+                             "node_modules"
+                           "lib/node_modules"))
+           (node-modules-path (expand-file-name modules-path global-prefix)))
+      ;; See https://v17.angular.io/guide/language-service#neovim
+      (add-to-list 'eglot-server-programs
+                   `(angular-template-mode . ("ngserver"
+                                              "--stdio"
+                                              "--tsProbeLocations"
+                                              ,(concat node-modules-path "/typescript/lib")
+                                              "--ngProbeLocations"
+                                              ,(concat node-modules-path "/@angular/language-server/bin")))))
 
-  ;; Language Servers
-  (add-to-list 'eglot-server-programs '(csharp-mode . ("csharp-ls")))
-  (add-to-list 'eglot-server-programs '(typescript-ts-mode . ("typescript-language-server" "--stdio")))
-  ;; See https://github.com/olrtg/emmet-language-server
-  (add-to-list 'eglot-server-programs '(html-ts-mode . ("emmet-language-server" "--stdio")))
-  (add-to-list 'eglot-server-programs '(css-ts-mode . ("emmet-language-server" "--stdio")))
-  (add-to-list 'eglot-server-programs '(rust-mode . ("rust-analyzer")))
-  (add-to-list 'eglot-server-programs '(rustic-mode . ("rust-analyzer")))
-  (add-to-list 'eglot-server-programs '((c++-mode c-mode)
-                                        . ("clangd"
-                                           "-j=8"
-                                           "--log=error"
-                                           "--malloc-trim"
-                                           "--background-index"
-                                           "--clang-tidy"
-                                           "--cross-file-rename"
-                                           "--completion-style=detailed"
-                                           "--pch-storage=memory"
-                                           "--header-insertion=never"
-                                           "--header-insertion-decorators=0")))
+    ;; Show all of the available eldoc information when we want it. This way Flymake errors
+    ;; don't just get clobbered by docstrings.
+    (add-hook 'eglot-managed-mode-hook
+              (lambda ()
+                "Make sure Eldoc will show us all of the feedback at point."
+                (setq-local eldoc-documentation-strategy
+                            #'eldoc-documentation-compose)))
 
-  ;; FIXME: This doesn't always work initially (eval-buffer usually fixes it)
-  (let* ((global-prefix (string-trim (shell-command-to-string "npm config get --global prefix")))
-         (modules-path (if (eq system-type 'windows-nt)
-                           "node_modules"
-                         "lib/node_modules"))
-         (node-modules-path (expand-file-name modules-path global-prefix)))
-    ;; See https://v17.angular.io/guide/language-service#neovim
-    (add-to-list 'eglot-server-programs
-                 `(angular-template-mode . ("ngserver"
-                                            "--stdio"
-                                            "--tsProbeLocations"
-                                            ,(concat node-modules-path "/typescript/lib")
-                                            "--ngProbeLocations"
-                                            ,(concat node-modules-path "/@angular/language-server/bin")))))
+    ;; Remove inlay hints
+    (add-hook 'eglot-managed-mode-hook (lambda () (eglot-inlay-hints-mode -1)))
 
-  ;; Show all of the available eldoc information when we want it. This way Flymake errors
-  ;; don't just get clobbered by docstrings.
-  (add-hook 'eglot-managed-mode-hook
-            (lambda ()
-              "Make sure Eldoc will show us all of the feedback at point."
-              (setq-local eldoc-documentation-strategy
-                          #'eldoc-documentation-compose)))
+    (dolist (mode '(html-ts-mode
+                    angular-template-mode
+                    typescript-ts-mode
+                    css-mode
+                    js-mode
+                    c-mode
+                    c++-mode
+                    rust-mode
+                    csharp-mode))
+      (add-hook (intern (concat (symbol-name mode) "-hook")) #'eglot-ensure)))
 
-  ;; Remove inlay hints
-  (add-hook 'eglot-managed-mode-hook (lambda () (eglot-inlay-hints-mode -1)))
+  ;; NOTE: Be sure to grab the latest release 'https://github.com/blahgeek/emacs-lsp-booster/releases'
+  ;; and place in PATH
+  (use-package eglot-booster
+    :after eglot
+    :vc (:url "https://github.com/jdtsmith/eglot-booster" :rev :newest)
+    :config (eglot-booster-mode))
 
-  (dolist (mode '(html-ts-mode
-                  angular-template-mode
-                  typescript-ts-mode
-                  css-mode
-                  js-mode
-                  c-mode
-                  c++-mode
-                  rust-mode
-                  csharp-mode))
-    (add-hook (intern (concat (symbol-name mode) "-hook")) #'eglot-ensure)))
+  ;; Flymake ========================================= ;;
+  (use-package flymake
+    :ensure nil
+    :config
+    (setq
+     flymake-suppress-zero-counters t
+     flymake-no-changes-timeout 0
+     flymake-wrap-around nil
+     flymake-mode-line-format
+     '("" flymake-mode-line-exception flymake-mode-line-counters)
+     flymake-mode-line-counter-format
+     '(" " flymake-mode-line-error-counter
+       flymake-mode-line-warning-counter
+       flymake-mode-line-note-counter ""))
 
-;; NOTE: Be sure to grab the latest release 'https://github.com/blahgeek/emacs-lsp-booster/releases'
-;; and place in PATH
-(use-package eglot-booster
-  :after eglot
-  :vc (:url "https://github.com/jdtsmith/eglot-booster" :rev :newest)
-  :config (eglot-booster-mode))
+    (define-key ctl-x-x-map "m" #'flymake-mode)
 
-;; Flymake ========================================= ;;
-(use-package flymake
-  :ensure nil
-  :config
-  (setq
-   flymake-suppress-zero-counters t
-   flymake-no-changes-timeout 0
-   flymake-wrap-around nil
-   flymake-mode-line-format
-   '("" flymake-mode-line-exception flymake-mode-line-counters)
-   flymake-mode-line-counter-format
-   '(" " flymake-mode-line-error-counter
-     flymake-mode-line-warning-counter
-     flymake-mode-line-note-counter ""))
+    :bind (:map flymake-mode-map
+                ("C-c f s" . flymake-start)
+                ("C-c f d" . flymake-show-buffer-diagnostics)
+                ("C-c f D" . flymake-show-project-diagnostics)
+                ("C-c f n" . flymake-goto-next-error)
+                ("C-c f p" . flymake-goto-prev-error))
+    :hook (prog-mode-hook . flymake-mode)
+    :init
+    (add-hook 'flymake-mode-hook
+              (lambda ()
+                (setq eldoc-documentation-functions
+                      (cons 'flymake-eldoc-function
+                            (delq 'flymake-eldoc-function eldoc-documentation-functions))))))
 
-  (define-key ctl-x-x-map "m" #'flymake-mode)
+  ;; Eldoc ============================================ ;;
 
-  :bind (:map flymake-mode-map
-              ("C-c f s" . flymake-start)
-              ("C-c f d" . flymake-show-buffer-diagnostics)
-              ("C-c f D" . flymake-show-project-diagnostics)
-              ("C-c f n" . flymake-goto-next-error)
-              ("C-c f p" . flymake-goto-prev-error))
-  :hook (prog-mode-hook . flymake-mode)
-  :init
-  (add-hook 'flymake-mode-hook
-            (lambda ()
-              (setq eldoc-documentation-functions
-                    (cons 'flymake-eldoc-function
-                          (delq 'flymake-eldoc-function eldoc-documentation-functions))))))
+  (use-package eldoc
+    :ensure nil
+    :config
+    (global-eldoc-mode 1)
+    (setq
+     eldoc-echo-area-use-multiline-p t))
 
-;; Eldoc ============================================ ;;
+  ;; (use-package eldoc-box
+  ;;   :after eldoc
+  ;;   :hook (eglot-managed-mode-hook . eldoc-box-hover-mode))
 
-(use-package eldoc
-  :ensure nil
-  :config
-  (global-eldoc-mode 1)
-  (setq
-   eldoc-echo-area-use-multiline-p t))
+  ;; Exec Path ========================================= ;;
 
-;; (use-package eldoc-box
-;;   :after eldoc
-;;   :hook (eglot-managed-mode-hook . eldoc-box-hover-mode))
+  (use-package exec-path-from-shell
+    :ensure t
+    :if (memq window-system '(mac ns x))
+    :config
+    ;; (setq exec-path-from-shell-variables '("PATH" "GOPATH"))
+    (exec-path-from-shell-initialize))
 
-;; Exec Path ========================================= ;;
+  ;; Version Control =============================================== ;;
 
-(use-package exec-path-from-shell
-  :ensure t
-  :if (memq window-system '(mac ns x))
-  :config
-  ;; (setq exec-path-from-shell-variables '("PATH" "GOPATH"))
-  (exec-path-from-shell-initialize))
+  (use-package vc
+    :ensure nil
+    :config
+    ;; Essential settings only
+    (setq vc-follow-symlinks t
+          vc-handled-backends '(Git)
+          vc-git-diff-switches '("--histogram")
+          vc-git-print-log-follow t
+          vc-git-log-edit-summary-target-len 50
+          vc-git-log-edit-summary-max-len 70)
+    
+)
 
-;; Version Control =============================================== ;;
+  (use-package ssh-agency
+    :if (eq system-type 'windows-nt)
+    :vc (:url "https://github.com/magit/ssh-agency" :rev :newest))
 
-(use-package vc
-  :ensure nil
-  :bind
-  (:map global-map
-        ;; Git-friendly aliases
-        ("C-x v B" . vc-annotate) ; git blame
-        ("C-x v e" . vc-ediff)
-        ("C-x v k" . vc-delete-file) ; git rm
-        ("C-x v g" . vc-log-search) ; git log --grep
-        ("C-x v i" . vc-create-repo) ; git init
-        ("C-x v a" . vc-register) ; git add
-        ("C-x v t" . vc-create-tag) ; git tag
-        ("C-x v f" . vc-update) ; git pull
-        ("C-x v p" . vc-push) ; git push
-        ("C-x v c" . vc-clone) ; git clone
-        ("C-x v d" . vc-diff) ; git diff
-        ("C-x v s" . vc-dir) ; git status (in vc-dir buffer)
-        ("C-x v ." . vc-dir-root)
-        ("C-x v <return>" . vc-dir-root)
-        ("C-x v b b" . vc-switch-branch) ; git checkout
-        ("C-x v b n" . vc-create-branch) ; git checkout -b
-        ;; Additional git commands
-        ("C-x v m m" . vc-merge) ; git merge
-        ("C-x v m r" . vc-resolve-conflicts) ; resolve merge conflicts
-        ("C-x v r r" . vc-revert) ; git revert/reset
-        ("C-x v r b" . vc-rollback) ; git reset --hard
-        ("C-x v S" . vc-log-mergebase) ; show merge base
-        ("C-x v x" . vc-delete-file) ; git rm
-        :map vc-dir-mode-map
-        ("t" . vc-create-tag)
-        ("O" . vc-log-outgoing)
-        ("o" . vc-dir-find-file-other-window)
-        ("d" . vc-diff)         ; parallel to D: `vc-root-diff'
-        ("k" . vc-dir-delete-file)
-        ("G" . vc-revert)
-        :map vc-git-stash-shared-map
-        ("a" . vc-git-stash-apply-at-point)
-        ("c" . vc-git-stash) ; "create" named stash
-        ("k" . vc-git-stash-delete-at-point) ; symmetry with `vc-dir-delete-file'
-        ("p" . vc-git-stash-pop-at-point)
-        ("s" . vc-git-stash-snapshot)
-        :map vc-annotate-mode-map
-        ("M-q" . vc-annotate-toggle-annotation-visibility)
-        ("C-c C-c" . vc-annotate-goto-line)
-        ("<return>" . vc-annotate-find-revision-at-line)
-        ;; :map log-edit-mode-map
-        ;; ("M-s" . nil)
-        ;; ("M-r" . nil)
-        :map log-view-mode-map
-        ("<tab>" . log-view-toggle-entry-display)
-        ("<return>" . log-view-find-revision)
-        ("s" . vc-log-search)
-        ("o" . vc-log-outgoing)
-        ("f" . vc-log-incoming)
-        ("F" . vc-update)
-        ("P" . vc-push))
-  :init
-  (setq vc-follow-symlinks t)
-  :config
-  ;; Those offer various types of functionality, such as blaming,
-  ;; viewing logs, showing a dedicated buffer with changes to affected
-  ;; files.
-  (require 'vc-annotate)
-  (require 'vc-dir)
-  (require 'vc-git)
-  (require 'add-log)
-  (require 'log-view)
-
-  (setq vc-handled-backends '(Git))
-
-  ;; This one is for editing commit messages.
-  (require 'log-edit)
-  (setq log-edit-confirm 'changed)
-  (setq log-edit-keep-buffer nil)
-  (setq log-edit-require-final-newline t)
-  (setq log-edit-setup-add-author nil)
-  ;; I can see the files from the Diff with C-c C-d
-  (remove-hook 'log-edit-hook #'log-edit-show-files)
-
-  (setq vc-find-revision-no-save t)
-  (setq vc-annotate-display-mode 'scale) ; scale to oldest
-  ;; I use a different account for git commits
-  (setq add-log-keep-changes-together t)
-  (setq vc-git-diff-switches '("--patch-with-stat" "--histogram"))
-  (setq vc-git-log-switches '("--stat"))
-  (setq vc-git-print-log-follow t)
-  (setq vc-git-revision-complete-only-branches nil) ; Emacs 28
-  (setq vc-git-root-log-format
-        `("%d %h %ai %an: %s"
-          ;; The first shy group matches the characters drawn by --graph.
-          ;; We use numbered groups because `log-view-message-re' wants the
-          ;; revision number to be group 1.
-          ,(concat "^\\(?:[*/\\|]+\\)\\(?:[*/\\| ]+\\)?"
-                   "\\(?2: ([^)]+) \\)?\\(?1:[0-9a-z]+\\) "
-                   "\\(?4:[0-9]\\{4\\}-[0-9-]\\{4\\}[0-9\s+:-]\\{16\\}\\) "
-                   "\\(?3:.*?\\):")
-          ((1 'log-view-message)
-           (2 'change-log-list nil lax)
-           (3 'change-log-name)
-           (4 'change-log-date))))
-
-  ;; These two are from Emacs 29
-  (setq vc-git-log-edit-summary-target-len 50)
-  (setq vc-git-log-edit-summary-max-len 70))
-
-(use-package ssh-agency
-  :if (eq system-type 'windows-nt)
-  :vc (:url "https://github.com/magit/ssh-agency" :rev :newest))
-
-(use-package transient
-  :defer t)
-
-(use-package magit
-  :ensure t
-  :bind (("C-c g g" . magit-status)
-         ("C-c g s" . magit-status)
-         ("C-c g i" . magit-init)
-         ("C-c g c" . magit-clone)
-         ("C-c g l" . magit-pull)
-         ("C-c g p" . magit-push)
-         ("C-c g f" . magit-fetch-all)
-         ("C-c g b" . magit-branch)
-         ("C-c g B" . magit-blame)
-         ("C-c g d" . magit-diff)
-         ("C-c g r" . magit-remote)
-         ("C-c g z" . magit-stash)
-         ("C-c g Z" . magit-apply))
-  :init
-  (setq magit-define-global-key-bindings nil))
-
-(use-package magit-prime
-  :ensure t
-  :config
-  (add-hook 'magit-pre-refresh-hook 'magit-prime-refresh-cache))
-
-;; Marginalia ======================================== ;;
-
-(use-package marginalia
-  :ensure t
-  :hook (after-init . marginalia-mode)
-  :config
-  (setq marginalia-max-relative-age 0
-        marginalia-align-offset 10))
-
-;; Highlight TODOs ===================================== ;;
-
-(use-package hl-todo
-  :ensure t
-  :hook (after-init . global-hl-todo-mode)
-  :bind (:map hl-todo-mode-map
-              ("C-c t p" . hl-todo-previous)
-              ("C-c t n" . hl-todo-next)
-              ("C-c t o" . hl-todo-occur)))
-
-;; Corfu ============================================== ;;
-
-(use-package corfu
-  :ensure t
-  :hook (after-init . global-corfu-mode)
-  :bind (:map corfu-map ("<tab>" . corfu-complete))
-  :config
-  (setq corfu-preview-current nil
-        corfu-min-width 20
-        corfu-popupinfo-delay '(1.25 . 0.5))
-  (corfu-popupinfo-mode 1) ; shows documentation after `corfu-popupinfo-delay'
-
-  ;; Sort by input history (no need to modify `corfu-sort-function').
-  (with-eval-after-load 'savehist
-    (corfu-history-mode 1)
-    (add-to-list 'savehist-additional-variables 'corfu-history)))
-
-;; Cape ================================================ ;;
-
-(use-package cape
-  :config
-  (dolist (func '(cape-dabbrev
-                  cape-file
-                  cape-keyword
-                  ;; cape-elisp-symbol
-                  cape-sgml))
-    (add-to-list 'completion-at-point-functions func))
-
-  ;; https://github.com/minad/corfu/wiki#continuously-update-the-candidates
-  (advice-add 'eglot-completion-at-point :around #'cape-wrap-buster))
-
-;; Templates =========================================== ;;
-
-(use-package tempel
-  :bind (("C-<tab>" . tempel-complete)
-         ("M-+" . tempel-insert)
-         ("C-1" . tempel-previous)
-         ("C-2" . tempel-next)))
-
-(use-package tempel-collection
-  :after tempel)
-
-;; Treesitter ========================================== ;;
-
-(use-package treesit
-  :ensure nil
-  :config
-  (setq treesit-font-lock-level 4))
-
-(use-package treesit-auto
-  :custom
-  (treesit-auto-install 'prompt)
-  :config
-  (treesit-auto-add-to-auto-mode-alist 'all)
-  (global-treesit-auto-mode))
-
-(use-package combobulate
-  :vc (:url "https://github.com/mickeynp/combobulate" :rev :newest)
-  :custom
-  ;; Change the prefix key to something more convenient
-  (combobulate-key-prefix "C-c o")
-  (combobulate-flash-node t)
-  (combobulate-dimmer-mode t)
-  ;; Auto-expand region to meaningful boundaries
-  (combobulate-envelope-indent-region-function #'indent-region)
-  :hook
-  ;; Enable for specific modes that have tree-sitter support
-  ((python-ts-mode . combobulate-mode)
-   (js-ts-mode . combobulate-mode)
-   (tsx-ts-mode . combobulate-mode)
-   (typescript-ts-mode . combobulate-mode)
-   (json-ts-mode . combobulate-mode)
-   (css-ts-mode . combobulate-mode)
-   (yaml-ts-mode . combobulate-mode)
-   (html-ts-mode . combobulate-mode)
-   (toml-ts-mode . combobulate-mode)
-   (go-ts-mode . combobulate-mode)
-   (rust-ts-mode . combobulate-mode))
-  :bind
-  ;; Override some default keybindings for easier access
-  (:map combobulate-key-map
-        ;; Navigation
-        ("C-M-f" . combobulate-navigate-next)
-        ("C-M-b" . combobulate-navigate-previous)
-        ("C-M-u" . combobulate-navigate-up)
-        ("C-M-d" . combobulate-navigate-down)
-        ("C-M-n" . combobulate-navigate-sequence-next)
-        ("C-M-p" . combobulate-navigate-sequence-previous)
-        ;; Logical navigation (beginning/end of blocks)
-        ("C-M-a" . combobulate-navigate-logical-previous)
-        ("C-M-e" . combobulate-navigate-logical-next)
-        ;; Marking and selection
-        ("C-M-SPC" . combobulate-mark-node-dwim)
-        ;; Editing
-        ("C-M-k" . combobulate-kill-node-dwim)
-        ("C-M-y" . combobulate-yank)
-        ("C-M-/" . combobulate-comment-dwim)
-        ;; Manipulation
-        ("M-<up>" . combobulate-drag-up)
-        ("M-<down>" . combobulate-drag-down)
-        ("M-<left>" . combobulate-splice-self)
-        ("M-<right>" . combobulate-splice-parent)
-        ;; Envelopes (wrapping)
-        ("C-c o e" . combobulate-envelope-dwim)))
-
-;; Treesit Expand ==================================== ;;
-
-(use-package treesit-expand
-  :ensure nil
-  :vc (:url "https://github.com/kborling/treesit-expand" :rev :newest)
-  :bind (("C-=" . treesit-expand-dwim)
-         ("C--" . treesit-contract-region)
-         ("C-c e e" . treesit-expand-region)
-         ("C-c e q" . treesit-expand-reset)))
-
-;; Multiple Cursors ================================== ;;
-
-(use-package multiple-cursors
-  :bind (("C->" . mc/mark-next-like-this)
-         ("C-<" . mc/mark-previous-like-this)
-         ("C-'" . mc/mark-all-like-this)
-         ("C-S-c C-S-c" . mc/mark-edit-lines)))
-
-;; So Long =========================================== ;;
-
-(use-package so-long
-  :ensure nil
-  :hook (after-init . global-so-long-mode))
-
-;; Angular =========================================== ;;
-
-(use-package angular-mode
-  :vc (:url "https://github.com/kborling/angular-mode" :rev :newest)
-  :config
-  (defun angular-console-log-thing-at-point ()
-    "Insert a console.log statement for the full JavaScript expression at point, including function calls."
+  ;; VC Transient Menu - provides Magit-like interface for VC
+  (defun my/vc-transient ()
+    "Custom VC transient menu with Magit-like keybindings."
     (interactive)
-    (let ((expr ""))
-      (save-excursion
-        ;; Move backward to get start of dotted expression
-        (while (or (looking-back "\\(?:\\sw\\|\\s_\\|\\.\\)" (1- (point)))
-                   (looking-back ")" (1- (point))))
-          (backward-char))
-        (let ((start (point)))
-          ;; Move forward through symbol, dot, and optional function calls
-          (while (looking-at "\\(?:\\sw\\|\\s_\\|\\.\\)+")
-            (forward-sexp))
-          ;; If it's a function call, include the parentheses
-          (when (looking-at "(")
-            (forward-sexp))
-          (setq expr (buffer-substring-no-properties start (point)))))
-      (when (not (string-empty-p expr))
+    (require 'transient)
+    (transient-define-prefix my/vc-menu ()
+      "VC operations menu"
+      [["File Operations"
+        ("s" "Status" vc-dir)
+        ("d" "Diff" vc-diff)
+        ("l" "Log" vc-print-log)
+        ("B" "Blame" vc-annotate)]
+       ["Branch Operations"
+        ("b b" "Switch Branch" vc-switch-branch)
+        ("b n" "New Branch" vc-create-branch)
+        ""
+        ""
+        "Remote Operations"
+        ("f" "Pull" vc-update)
+        ("p" "Push" vc-push)
+        ("C" "Clone" vc-clone)]
+       ["Changes"
+        ("a" "Add/Register" vc-register)
+        ("c" "Commit" vc-next-action)
+        ("u" "Revert" vc-revert)
+        ("k" "Delete" vc-delete-file)
+        ""
+        "Stashing"
+        ("z z" "Stash" vc-git-stash)
+        ("z a" "Apply Stash" vc-git-stash-apply-at-point)
+        ("z p" "Pop Stash" vc-git-stash-pop-at-point)]
+       ["Other"
+        ("i" "Init Repo" vc-create-repo)
+        ("t" "Tag" vc-create-tag)
+        ("g" "Log Search" vc-log-search)
+        ""
+        "Remotes"
+        ("r u" "Set Remote URL" my/vc-remote-set-url)
+        ("r l" "List Remotes" my/vc-remote-list)
+        ""
+        ("q" "Quit" transient-quit-one)]])
+    (my/vc-menu))
+
+  (use-package transient
+    :defer t)
+
+  ;; Custom VC helper functions
+  (defun my/vc-remote-set-url ()
+    "Set remote URL for current repository."
+    (interactive)
+    (let* ((remote (read-string "Remote name (default: origin): " "origin"))
+           (url (read-string "New URL: ")))
+      (when (and remote url (not (string-empty-p url)))
+        (shell-command (format "git remote set-url %s %s" remote url))
+        (message "Remote '%s' URL updated to: %s" remote url))))
+
+  (defun my/vc-remote-list ()
+    "List all remotes with their URLs."
+    (interactive)
+    (let ((output (shell-command-to-string "git remote -v")))
+      (if (string-empty-p (string-trim output))
+          (message "No remotes configured")
+        (with-current-buffer (get-buffer-create "*VC Remotes*")
+          (erase-buffer)
+          (insert "Git Remotes:\n\n")
+          (insert output)
+          (goto-char (point-min))
+          (pop-to-buffer (current-buffer))))))
+
+  ;; Bind the custom VC transient
+  (global-set-key (kbd "C-x v v") 'my/vc-transient)
+
+  (use-package magit
+    :ensure t
+    :bind (("C-c g g" . magit-status)
+           ("C-c g s" . magit-status)
+           ("C-c g i" . magit-init)
+           ("C-c g c" . magit-clone)
+           ("C-c g l" . magit-pull)
+           ("C-c g p" . magit-push)
+           ("C-c g f" . magit-fetch-all)
+           ("C-c g b" . magit-branch)
+           ("C-c g B" . magit-blame)
+           ("C-c g d" . magit-diff)
+           ("C-c g r" . magit-remote)
+           ("C-c g z" . magit-stash)
+           ("C-c g Z" . magit-apply))
+    :init
+    (setq magit-define-global-key-bindings nil)
+    :config
+    ;; Windows performance optimizations
+    (when (eq system-type 'windows-nt)
+      (setq magit-git-executable "git.exe"
+            magit-refresh-verbose t  ; Show what's taking time
+            magit-process-popup-time 0.5  ; Show process sooner
+            magit-diff-refine-hunk nil  ; Disable expensive word-level diffing
+            magit-revision-show-gravatars nil  ; Disable gravatar fetching
+            magit-section-cache-visibility t  ; Cache section visibility
+            magit-log-auto-more t  ; Load more log entries automatically
+            magit-log-section-commit-count 20)  ; Limit log entries initially
+
+      ;; Use libgit2 when available for better performance
+      (when (and (fboundp 'libgit-available-p) (libgit-available-p))
+        (setq magit-use-libgit t)))
+
+    ;; General performance improvements
+    (setq magit-save-repository-buffers 'dontask
+          magit-repository-directories '(("~/Projects" . 2))
+          magit-commit-show-diff nil  ; Don't show diff in commit buffer
+          magit-refs-show-commit-count 'branch))
+
+  (use-package magit-prime
+    :ensure t
+    :config
+    (add-hook 'magit-pre-refresh-hook 'magit-prime-refresh-cache))
+  ;; Marginalia ======================================== ;;
+
+  (use-package marginalia
+    :ensure t
+    :hook (after-init . marginalia-mode)
+    :config
+    (setq marginalia-max-relative-age 0
+          marginalia-align-offset 10))
+
+  ;; Highlight TODOs ===================================== ;;
+
+  (use-package hl-todo
+    :ensure t
+    :hook (after-init . global-hl-todo-mode)
+    :bind (:map hl-todo-mode-map
+                ("C-c t p" . hl-todo-previous)
+                ("C-c t n" . hl-todo-next)
+                ("C-c t o" . hl-todo-occur)))
+
+  ;; Corfu ============================================== ;;
+
+  (use-package corfu
+    :ensure t
+    :hook (after-init . global-corfu-mode)
+    :bind (:map corfu-map ("<tab>" . corfu-complete))
+    :config
+    (setq corfu-preview-current nil
+          corfu-min-width 20
+          corfu-popupinfo-delay '(1.25 . 0.5))
+    (corfu-popupinfo-mode 1) ; shows documentation after `corfu-popupinfo-delay'
+
+    ;; Sort by input history (no need to modify `corfu-sort-function').
+    (with-eval-after-load 'savehist
+      (corfu-history-mode 1)
+      (add-to-list 'savehist-additional-variables 'corfu-history)))
+
+  ;; Cape ================================================ ;;
+
+  (use-package cape
+    :config
+    (dolist (func '(cape-dabbrev
+                    cape-file
+                    cape-keyword
+                    ;; cape-elisp-symbol
+                    cape-sgml))
+      (add-to-list 'completion-at-point-functions func))
+
+    ;; https://github.com/minad/corfu/wiki#continuously-update-the-candidates
+    (advice-add 'eglot-completion-at-point :around #'cape-wrap-buster))
+
+  ;; Templates =========================================== ;;
+
+  (use-package tempel
+    :bind (("C-<tab>" . tempel-complete)
+           ("M-+" . tempel-insert)
+           ("C-1" . tempel-previous)
+           ("C-2" . tempel-next)))
+
+  (use-package tempel-collection
+    :after tempel)
+
+  ;; Treesitter ========================================== ;;
+
+  (use-package treesit
+    :ensure nil
+    :config
+    (setq treesit-font-lock-level 4))
+
+  (use-package treesit-auto
+    :custom
+    (treesit-auto-install 'prompt)
+    :config
+    (treesit-auto-add-to-auto-mode-alist 'all)
+    (global-treesit-auto-mode))
+
+  (use-package combobulate
+    :vc (:url "https://github.com/mickeynp/combobulate" :rev :newest)
+    :custom
+    ;; Change the prefix key to something more convenient
+    (combobulate-key-prefix "C-c o")
+    (combobulate-flash-node t)
+    (combobulate-dimmer-mode t)
+    ;; Auto-expand region to meaningful boundaries
+    (combobulate-envelope-indent-region-function #'indent-region)
+    :hook
+    ;; Enable for specific modes that have tree-sitter support
+    ((python-ts-mode . combobulate-mode)
+     (js-ts-mode . combobulate-mode)
+     (tsx-ts-mode . combobulate-mode)
+     (typescript-ts-mode . combobulate-mode)
+     (json-ts-mode . combobulate-mode)
+     (css-ts-mode . combobulate-mode)
+     (yaml-ts-mode . combobulate-mode)
+     (html-ts-mode . combobulate-mode)
+     (toml-ts-mode . combobulate-mode)
+     (go-ts-mode . combobulate-mode)
+     (rust-ts-mode . combobulate-mode))
+    :bind
+    ;; Override some default keybindings for easier access
+    (:map combobulate-key-map
+          ;; Navigation
+          ("C-M-f" . combobulate-navigate-next)
+          ("C-M-b" . combobulate-navigate-previous)
+          ("C-M-u" . combobulate-navigate-up)
+          ("C-M-d" . combobulate-navigate-down)
+          ("C-M-n" . combobulate-navigate-sequence-next)
+          ("C-M-p" . combobulate-navigate-sequence-previous)
+          ;; Logical navigation (beginning/end of blocks)
+          ("C-M-a" . combobulate-navigate-logical-previous)
+          ("C-M-e" . combobulate-navigate-logical-next)
+          ;; Marking and selection
+          ("C-M-SPC" . combobulate-mark-node-dwim)
+          ;; Editing
+          ("C-M-k" . combobulate-kill-node-dwim)
+          ("C-M-y" . combobulate-yank)
+          ("C-M-/" . combobulate-comment-dwim)
+          ;; Manipulation
+          ("M-<up>" . combobulate-drag-up)
+          ("M-<down>" . combobulate-drag-down)
+          ("M-<left>" . combobulate-splice-self)
+          ("M-<right>" . combobulate-splice-parent)
+          ;; Envelopes (wrapping)
+          ("C-c o e" . combobulate-envelope-dwim)))
+
+  ;; Treesit Expand ==================================== ;;
+
+  (use-package treesit-expand
+    :ensure nil
+    :vc (:url "https://github.com/kborling/treesit-expand" :rev :newest)
+    :bind (("C-=" . treesit-expand-dwim)
+           ("C--" . treesit-contract-region)
+           ("C-c e e" . treesit-expand-region)
+           ("C-c e q" . treesit-expand-reset)))
+
+  ;; Multiple Cursors ================================== ;;
+
+  (use-package multiple-cursors
+    :bind (("C->" . mc/mark-next-like-this)
+           ("C-<" . mc/mark-previous-like-this)
+           ("C-'" . mc/mark-all-like-this)
+           ("C-S-c C-S-c" . mc/mark-edit-lines)))
+
+  ;; So Long =========================================== ;;
+
+  (use-package so-long
+    :ensure nil
+    :hook (after-init . global-so-long-mode))
+
+  ;; Angular =========================================== ;;
+
+  (use-package angular-mode
+    :vc (:url "https://github.com/kborling/angular-mode" :rev :newest)
+    :config
+    (defun angular-console-log-thing-at-point ()
+      "Insert a console.log statement for the full JavaScript expression at point, including function calls."
+      (interactive)
+      (let ((expr ""))
         (save-excursion
-          (end-of-line)
-          (newline-and-indent)
-          (insert (format "console.log('%s', %s);" expr expr))))))
+          ;; Move backward to get start of dotted expression
+          (while (or (looking-back "\\(?:\\sw\\|\\s_\\|\\.\\)" (1- (point)))
+                     (looking-back ")" (1- (point))))
+            (backward-char))
+          (let ((start (point)))
+            ;; Move forward through symbol, dot, and optional function calls
+            (while (looking-at "\\(?:\\sw\\|\\s_\\|\\.\\)+")
+              (forward-sexp))
+            ;; If it's a function call, include the parentheses
+            (when (looking-at "(")
+              (forward-sexp))
+            (setq expr (buffer-substring-no-properties start (point)))))
+        (when (not (string-empty-p expr))
+          (save-excursion
+            (end-of-line)
+            (newline-and-indent)
+            (insert (format "console.log('%s', %s);" expr expr))))))
 
-  (defun angular-remove-all-console-logs ()
-    "Delete all lines containing console.log(...) in the current buffer."
-    (interactive)
-    (save-excursion
-      (goto-char (point-min))
-      ;; Loop through each occurrence and delete the whole line
-      (while (re-search-forward "\\bconsole\\.log\\s-*(" nil t)
-        (beginning-of-line)
-        (kill-whole-line))))
+    (defun angular-remove-all-console-logs ()
+      "Delete all lines containing console.log(...) in the current buffer."
+      (interactive)
+      (save-excursion
+        (goto-char (point-min))
+        ;; Loop through each occurrence and delete the whole line
+        (while (re-search-forward "\\bconsole\\.log\\s-*(" nil t)
+          (beginning-of-line)
+          (kill-whole-line))))
 
-  (defun angular-open-interface ()
-    "Open an Angular interface file in the project."
-    (interactive)
-    (angular-open-file "interface"))
-  :bind (:map angular-mode-map
-              ("C-c a o f" . angular-open-interface)
-              ("C-c a c" . angular-console-log-thing-at-point)
-              ("C-c a d" . angular-remove-all-console-logs)))
+    (defun angular-open-interface ()
+      "Open an Angular interface file in the project."
+      (interactive)
+      (angular-open-file "interface"))
+    :bind (:map angular-mode-map
+                ("C-c a o f" . angular-open-interface)
+                ("C-c a c" . angular-console-log-thing-at-point)
+                ("C-c a d" . angular-remove-all-console-logs)))
 
-(define-derived-mode angular-template-mode html-ts-mode "Angular Template "
-  "A major mode derived from 'html-ts-mode', for editing angular template files with LSP support.")
-(add-to-list 'auto-mode-alist '("\\.component\\.html\\'" . angular-template-mode))
+  (define-derived-mode angular-template-mode html-ts-mode "Angular Template "
+    "A major mode derived from 'html-ts-mode', for editing angular template files with LSP support.")
+  (add-to-list 'auto-mode-alist '("\\.component\\.html\\'" . angular-template-mode))
 
-;; HTML Mode ======================================= ;;
+  ;; HTML Mode ======================================= ;;
 
-(use-package html-mode
-  :ensure nil
-  :bind (:map html-mode-map
-              ("C-c C-d" . nil))
-  :config
-  (add-to-list 'auto-mode-alist '("\\.cshtml\\'" . html-mode)))
+  (use-package html-mode
+    :ensure nil
+    :bind (:map html-mode-map
+                ("C-c C-d" . nil))
+    :config
+    (add-to-list 'auto-mode-alist '("\\.cshtml\\'" . html-mode)))
 
-;; Memmet Mode ======================================= ;;
+  ;; Memmet Mode ======================================= ;;
 
-(use-package memmet-mode
-  :vc (:url "https://github.com/kborling/memmet-mode" :rev :newest)
-  :bind (:map html-mode-map
-              ("C-<tab>" . memmet-expand))
-  :hook (html-mode . memmet-mode))
+  (use-package memmet-mode
+    :vc (:url "https://github.com/kborling/memmet-mode" :rev :newest)
+    :bind (:map html-mode-map
+                ("C-<tab>" . memmet-expand))
+    :hook (html-mode . memmet-mode))
 
-;; XML Mode ======================================= ;;
+  ;; XML Mode ======================================= ;;
 
-(use-package xml-mode
-  :ensure nil
-  :config
-  (add-to-list 'auto-mode-alist '("\\.csproj\\'" . xml-mode)))
+  (use-package xml-mode
+    :ensure nil
+    :config
+    (add-to-list 'auto-mode-alist '("\\.csproj\\'" . xml-mode)))
 
-;; Conf Mode ====================================== ;;
+  ;; Conf Mode ====================================== ;;
 
-(use-package conf-mode
-  :ensure nil
-  :config
-  (add-to-list 'auto-mode-alist '("\\.sln\\'" . conf-mode)))
+  (use-package conf-mode
+    :ensure nil
+    :config
+    (add-to-list 'auto-mode-alist '("\\.sln\\'" . conf-mode)))
 
-;; Rust ============================================ ;;
+  ;; Rust ============================================ ;;
 
-(use-package rust-mode
-  :init
-  (setq rust-mode-treesitter-derive t))
+  (use-package rust-mode
+    :init
+    (setq rust-mode-treesitter-derive t))
 
-;; .NET ============================================ ;;
+  ;; .NET ============================================ ;;
 
-(use-package dotnet
-  :hook (csharp-mode)
-  :bind ((("C-c n n" . dotnet-new)
-          ("C-c n c" . dotnet-clean)
-          ("C-c n t" . dotnet-test)
-          ("C-c n r" . dotnet-run)
-          ("C-c n a" . dotnet-run-with-args)
-          ("C-c n b" . dotnet-build))))
+  (use-package dotnet
+    :hook (csharp-mode)
+    :bind ((("C-c n n" . dotnet-new)
+            ("C-c n c" . dotnet-clean)
+            ("C-c n t" . dotnet-test)
+            ("C-c n r" . dotnet-run)
+            ("C-c n a" . dotnet-run-with-args)
+            ("C-c n b" . dotnet-build))))
 
-;; EAT ============================================ ;;
+  ;; EAT ============================================ ;;
 
-(use-package eat
-  :vc (:url "https://codeberg.org/akib/emacs-eat" :rev :newest)
-  :ensure t
-  :config
-  (add-hook 'eshell-load-hook #'eat-eshell-mode))
+  (use-package eat
+    :vc (:url "https://codeberg.org/akib/emacs-eat" :rev :newest)
+    :ensure t
+    :config
+    (add-hook 'eshell-load-hook #'eat-eshell-mode))
 
-;; Org Mode ===================================== ;;
+  ;; Org Mode ===================================== ;;
 
-(use-package org
-  ;; :ensure nil
-  :config
-  ;; Basic Org settings
-  (setq org-ellipsis "…"
-        org-use-sub-superscripts "{}"
-        org-pretty-entities t
-        org-hide-emphasis-markers t
-        org-hide-leading-stars t
-        org-directory "~/.org/"
-        org-startup-indented t
-        org-src-preserve-indentation t
-        org-edit-src-content-indentation 0
-        org-auto-align-tags nil
-        org-tags-column 0
-        org-catch-invisible-edits 'show-and-error
-        org-special-ctrl-a/e t
-        org-insert-heading-respect-content t)
-  
-  ;; Source code blocks
-  (setq org-confirm-babel-evaluate nil
-        org-src-window-setup 'current-window
-        org-edit-src-persistent-message nil)
-  
-  ;; Todo keywords for task management
-  (setq org-todo-keywords
-        '((sequence "TODO(t)" "WAITING(w)" "FOLLOWUP(f)" "|" "DONE(d)" "CANCELLED(c)")))
-  
-  ;; Agenda configuration
-  (setq org-agenda-files '("~/.org/contacts.org" "~/.org/notes.org")
-        org-log-done 'time
-        org-agenda-include-diary nil
-        org-agenda-start-on-weekday nil
-        org-agenda-span 7
-        org-agenda-skip-scheduled-if-done t
-        org-agenda-skip-deadline-if-done t)
-  
-  ;; Custom agenda views for work
-  (setq org-agenda-custom-commands
-        '(("w" "Work Overview"
-           ((agenda "" ((org-agenda-span 7)
-                       (org-agenda-start-on-weekday 1)))
-            (tags-todo "@work"
-                       ((org-agenda-overriding-header "Work TODOs")))
-            (tags "PROJECT={.+}"
-                  ((org-agenda-overriding-header "Active Projects")))))
-          ("p" "People Focus"
-           ((tags-todo "@.*:"
-                       ((org-agenda-overriding-header "People-related TODOs")))
-            (agenda "" ((org-agenda-span 3)
-                       (org-agenda-entry-types '(:scheduled))
-                       (org-agenda-overriding-header "Upcoming Meetings/Reviews")))))
-          ("r" "Weekly Review"
-           ((tags "LEVEL=2+Weekly Review"
-                  ((org-agenda-overriding-header "Recent Reviews")))
-            (todo "DONE"
-                  ((org-agenda-overriding-header "This Week's Accomplishments")
-                   (org-agenda-skip-function 
-                    '(org-agenda-skip-entry-if 'notregexp "\\[2025-.*\\]"))))))))
-  
-  ;; Structure templates
-  (setq org-structure-template-alist
-        '(("s" . "src")
-          ("E" . "src emacs-lisp")
-          ("e" . "example")
-          ("q" . "quote")
-          ("v" . "verse")
-          ("V" . "verbatim")
-          ("c" . "center")
-          ("C" . "comment")))
-  
-  ;; Babel languages
-  (org-babel-do-load-languages
-   'org-babel-load-languages
-   '((emacs-lisp . t)
-     (shell . t)
-     (restclient . t)
-     (python . t)))
-  
-  ;; Org keybindings
-  :bind (("C-c a" . org-agenda)
-         ("C-c c" . org-capture)))
+  (use-package org
+    ;; :ensure nil
+    :config
+    ;; Basic Org settings
+    (setq org-ellipsis "…"
+          org-use-sub-superscripts "{}"
+          org-pretty-entities t
+          org-hide-emphasis-markers t
+          org-hide-leading-stars t
+          org-directory "~/.org/"
+          org-startup-indented t
+          org-src-preserve-indentation t
+          org-edit-src-content-indentation 0
+          org-auto-align-tags nil
+          org-tags-column 0
+          org-catch-invisible-edits 'show-and-error
+          org-special-ctrl-a/e t
+          org-insert-heading-respect-content t)
 
-(use-package org-modern
-  :after org
-  :hook (org-mode . org-modern-mode))
+    ;; Source code blocks
+    (setq org-confirm-babel-evaluate nil
+          org-src-window-setup 'current-window
+          org-edit-src-persistent-message nil)
 
-;; Contact Management ================================ ;;
+    ;; Todo keywords for task management
+    (setq org-todo-keywords
+          '((sequence "TODO(t)" "WAITING(w)" "FOLLOWUP(f)" "|" "DONE(d)" "CANCELLED(c)")))
 
-(use-package org-templates
-  :ensure nil
-  :after org
-  :load-path "elisp")
+    ;; Agenda configuration
+    (setq org-agenda-files '("~/.org/contacts.org" "~/.org/notes.org")
+          org-log-done 'time
+          org-agenda-include-diary nil
+          org-agenda-start-on-weekday nil
+          org-agenda-span 7
+          org-agenda-skip-scheduled-if-done t
+          org-agenda-skip-deadline-if-done t)
 
-(use-package org-contacts-simple
-  :ensure nil
-  :after org
-  :load-path "elisp")
+    ;; Custom agenda views for work
+    (setq org-agenda-custom-commands
+          '(("w" "Work Overview"
+             ((agenda "" ((org-agenda-span 7)
+                          (org-agenda-start-on-weekday 1)))
+              (tags-todo "@work"
+                         ((org-agenda-overriding-header "Work TODOs")))
+              (tags "PROJECT={.+}"
+                    ((org-agenda-overriding-header "Active Projects")))))
+            ("p" "People Focus"
+             ((tags-todo "@.*:"
+                         ((org-agenda-overriding-header "People-related TODOs")))
+              (agenda "" ((org-agenda-span 3)
+                          (org-agenda-entry-types '(:scheduled))
+                          (org-agenda-overriding-header "Upcoming Meetings/Reviews")))))
+            ("r" "Weekly Review"
+             ((tags "LEVEL=2+Weekly Review"
+                    ((org-agenda-overriding-header "Recent Reviews")))
+              (todo "DONE"
+                    ((org-agenda-overriding-header "This Week's Accomplishments")
+                     (org-agenda-skip-function
+                      '(org-agenda-skip-entry-if 'notregexp "\\[2025-.*\\]"))))))))
 
-;; Winum - Window Numbers ========================== ;;
+    ;; Structure templates
+    (setq org-structure-template-alist
+          '(("s" . "src")
+            ("E" . "src emacs-lisp")
+            ("e" . "example")
+            ("q" . "quote")
+            ("v" . "verse")
+            ("V" . "verbatim")
+            ("c" . "center")
+            ("C" . "comment")))
 
-(use-package winum
-  :ensure t
-  :config
-  (winum-mode)
-  :bind (("M-1" . winum-select-window-1)
-         ("M-2" . winum-select-window-2)
-         ("M-3" . winum-select-window-3)
-         ("M-4" . winum-select-window-4)
-         ("M-5" . winum-select-window-5)
-         ("M-6" . winum-select-window-6)
-         ("M-7" . winum-select-window-7)
-         ("M-8" . winum-select-window-8)
-         ("M-9" . winum-select-window-9)))
+    ;; Babel languages
+    (org-babel-do-load-languages
+     'org-babel-load-languages
+     '((emacs-lisp . t)
+       (shell . t)
+       (restclient . t)
+       (python . t)))
 
-;; Local Variables:
-;; no-byte-compile: t
-;; no-native-compile: t
-;; no-update-autoloads: t
-;; indent-tabs-mode: nil
-;; End:
+    ;; Org keybindings
+    :bind (("C-c a" . org-agenda)
+           ("C-c c" . org-capture)))
+
+  (use-package org-modern
+    :after org
+    :hook (org-mode . org-modern-mode)
+    :config
+    ;; Windows font compatibility fixes
+    (when (eq system-type 'windows-nt)
+      ;; Use simple ASCII bullets instead of Unicode symbols
+      (setq org-modern-star '("◉" "○" "✸" "✿" "✤" "✜" "◆" "▶")
+            ;; Alternative: use even simpler bullets if above don't work
+            ;; org-modern-star '("●" "○" "◦" "▪" "▫" "▸" "▹" "▸")
+            ;; Or minimal ASCII-only option:
+            ;; org-modern-star '("*" "+" "-" "*" "+" "-" "*" "+")
+
+            ;; Disable problematic Unicode elements
+            org-modern-list '((?+ . "•") (?- . "–") (?* . "•"))
+            org-modern-block-name '("▼" . "▶")  ; Simple arrows
+            org-modern-keyword nil  ; Disable fancy keywords
+            org-modern-checkbox '((?X . "☑") (?- . "◐") (?\s . "☐"))
+            org-modern-horizontal-rule "─"  ; Simple line
+            )))
+
+  ;; Contact Management ================================ ;;
+
+  (use-package org-templates
+    :ensure nil
+    :after org
+    :load-path "elisp")
+
+  (use-package org-contacts-simple
+    :ensure nil
+    :after org
+    :load-path "elisp")
+
+  ;; Winum - Window Numbers ========================== ;;
+
+  (use-package winum
+    :ensure t
+    :config
+    (winum-mode)
+    :bind (("M-1" . winum-select-window-1)
+           ("M-2" . winum-select-window-2)
+           ("M-3" . winum-select-window-3)
+           ("M-4" . winum-select-window-4)
+           ("M-5" . winum-select-window-5)
+           ("M-6" . winum-select-window-6)
+           ("M-7" . winum-select-window-7)
+           ("M-8" . winum-select-window-8)
+           ("M-9" . winum-select-window-9)))
+
+  ;; Local Variables:
+  ;; no-byte-compile: t
+  ;; no-native-compile: t
+  ;; no-update-autoloads: t
+  ;; indent-tabs-mode: nil
+  ;; End:
 ;;; init.el ends here
