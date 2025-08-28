@@ -1208,43 +1208,88 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package org
   ;; :ensure nil
   :config
-  (setq
-   org-ellipsis "…"
-   org-use-sub-superscripts "{}"
-   org-pretty-entities t
-   org-hide-emphasis-markers t
-   org-hide-leading-stars t
-   org-confirm-babel-evaluate nil
-   org-src-window-setup 'current-window
-   org-directory "~/org/"
-   org-todo-keyword
-   '((sequence "TODO" "IN PROGRESS" "|" "DONE" "DELEGATED" "BLOCKED" "FIXME"))
-   org-structure-template-alist
-   '(("s" . "src")
-     ("E" . "src emacs-lisp")
-     ("e" . "example")
-     ("q" . "quote")
-     ("v" . "verse")
-     ("V" . "verbatim")
-     ("c" . "center")
-     ("C" . "comment"))
-   org-confirm-babel-evaluate nil
-   org-src-window-setup 'current-window
-   org-edit-src-persistent-message nil
-   org-startup-indented t
-   org-src-preserve-indentation t
-   org-edit-src-content-indentation 0
-   org-auto-align-tags nil
-   org-tags-column 0
-   org-catch-invisible-edits 'show-and-error
-   org-special-ctrl-a/e t
-   org-insert-heading-respect-content t
-   (org-babel-do-load-languages
-    'org-babel-load-languages
-    '((emacs-lisp . t)
-      (shell . t)
-      (restclient . t)
-      (python . t)))))
+  ;; Basic Org settings
+  (setq org-ellipsis "…"
+        org-use-sub-superscripts "{}"
+        org-pretty-entities t
+        org-hide-emphasis-markers t
+        org-hide-leading-stars t
+        org-directory "~/org/"
+        org-startup-indented t
+        org-src-preserve-indentation t
+        org-edit-src-content-indentation 0
+        org-auto-align-tags nil
+        org-tags-column 0
+        org-catch-invisible-edits 'show-and-error
+        org-special-ctrl-a/e t
+        org-insert-heading-respect-content t)
+  
+  ;; Source code blocks
+  (setq org-confirm-babel-evaluate nil
+        org-src-window-setup 'current-window
+        org-edit-src-persistent-message nil)
+  
+  ;; Todo keywords for task management
+  (setq org-todo-keywords
+        '((sequence "TODO(t)" "WAITING(w)" "FOLLOWUP(f)" "|" "DONE(d)" "CANCELLED(c)")))
+  
+  ;; Agenda configuration
+  (setq org-agenda-files '("~/contacts.org" "~/notes.org")
+        org-log-done 'time
+        org-agenda-include-diary nil
+        org-agenda-start-on-weekday nil
+        org-agenda-span 7
+        org-agenda-skip-scheduled-if-done t
+        org-agenda-skip-deadline-if-done t)
+  
+  ;; Custom agenda views for work
+  (setq org-agenda-custom-commands
+        '(("w" "Work Overview"
+           ((agenda "" ((org-agenda-span 7)
+                       (org-agenda-start-on-weekday 1)))
+            (tags-todo "@work"
+                       ((org-agenda-overriding-header "Work TODOs")))
+            (tags "PROJECT={.+}"
+                  ((org-agenda-overriding-header "Active Projects")))))
+          ("p" "People Focus"
+           ((tags-todo "@.*:"
+                       ((org-agenda-overriding-header "People-related TODOs")))
+            (agenda "" ((org-agenda-span 3)
+                       (org-agenda-entry-types '(:scheduled))
+                       (org-agenda-overriding-header "Upcoming Meetings/Reviews")))))
+          ("r" "Weekly Review"
+           ((tags "LEVEL=2+Weekly Review"
+                  ((org-agenda-overriding-header "Recent Reviews")))
+            (todo "DONE"
+                  ((org-agenda-overriding-header "This Week's Accomplishments")
+                   (org-agenda-skip-function 
+                    '(org-agenda-skip-entry-if 'notregexp "\\[2025-.*\\]"))))))))
+  
+  ;; Structure templates
+  (setq org-structure-template-alist
+        '(("s" . "src")
+          ("E" . "src emacs-lisp")
+          ("e" . "example")
+          ("q" . "quote")
+          ("v" . "verse")
+          ("V" . "verbatim")
+          ("c" . "center")
+          ("C" . "comment")))
+  
+  ;; Babel languages
+  (org-babel-do-load-languages
+   'org-babel-load-languages
+   '((emacs-lisp . t)
+     (shell . t)
+     (restclient . t)
+     (python . t)))
+  
+  ;; Load capture templates from separate file
+  (load (locate-user-emacs-file "org-templates.el"))
+  
+  ;; Org keybindings
+  :bind (("C-c a" . org-agenda)
+         ("C-c c" . org-capture)))
 
 (use-package org-modern
   :after org
@@ -1743,13 +1788,8 @@ If point is at the end of the line, kill the whole line including the newline."
               (global-set-key (kbd "C-c a") 'org-agenda)
               (global-set-key (kbd "C-c c") 'org-capture)
 
-              ;; Window configurations
-              (global-set-key (kbd "C-c h w s") 'hywconfig-add-by-name)
-              (global-set-key (kbd "C-c h w r") 'hywconfig-restore-by-name)
-              (global-set-key (kbd "C-c h w d") 'hywconfig-delete-by-name)
-
               ;; HyRolo - contact and note management
-              (global-set-key (kbd "C-c h r f") 'hyrolo-fgrep)
+              (global-set-key (kbd "C-c h r f") 'my/hyrolo-fgrep)
               (global-set-key (kbd "C-c h r e") 'my/hyrolo-edit-safe)
               (global-set-key (kbd "C-c h r a") 'my/hyrolo-add-contact)
               (global-set-key (kbd "C-c h r n") 'hyrolo-add)
@@ -1774,11 +1814,6 @@ If point is at the end of the line, kill the whole line including the newline."
               (global-set-key (kbd "C-c h r A") 'my/hyrolo-add-accomplishment)
               (global-set-key (kbd "C-c h r w") 'my/hyrolo-quick-win)
               (global-set-key (kbd "C-c h r v") 'my/hyrolo-view-accomplishments)
-
-              ;; Explicit Buttons
-              (global-set-key (kbd "C-c h e c") 'hui:ebut-create)
-              (global-set-key (kbd "C-c h e r") 'hui:ebut-rename)
-              (global-set-key (kbd "C-c h e d") 'hui:ebut-delete)
 
               ;; Help and utilities
               (global-set-key (kbd "C-c h @") 'hkey-help)
