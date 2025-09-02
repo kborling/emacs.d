@@ -114,6 +114,10 @@
  set-mark-command-repeat-pop t
  global-mark-ring-max 50000)
 
+;; Cursor configuration - thick bar
+(setq-default cursor-type '(bar . 3))  ; Bar cursor with width of 3 pixels
+(setq cursor-in-non-selected-windows 'hollow)  ; Hollow cursor in inactive windows
+
 ;; Contextual menu with right mouse button
 (when (display-graphic-p)
   (context-menu-mode))
@@ -131,7 +135,10 @@
   (recentf-auto-cleanup 'never)
   (recentf-exclude '(".gz" ".xz" ".zip" "/elpaca/" "/elpa/" "/opt/" "/.rustup/" "/elpa/" "/ssh:" "/sudo:" "/node_modules/" "/nix/"))
   :config
-  (run-at-time nil (* 5 60) 'recentf-save-list))
+  ;; Save silently every 5 minutes
+  (run-at-time nil (* 5 60) (lambda () 
+                               (let ((inhibit-message t))
+                                 (recentf-save-list)))))
 
 ;; Save cursor position
 (use-package saveplace
@@ -213,8 +220,7 @@
    uwu-distinct-line-numbers 'nil
    uwu-scale-org-headlines t
    uwu-use-variable-pitch t)
-  (load-theme 'uwu t)
-  )
+  (load-theme 'uwu t))
 
 (use-package acme-theme)
 
@@ -532,11 +538,57 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package diff-mode
   :ensure nil
   :defer t
+  :hook ((diff-mode . (lambda ()
+                        (setq-local truncate-lines t)
+                        (diff-refine-hunk)
+                        (outline-minor-mode 1))))
   :config
+  ;; Enhanced diff settings for magit-like appearance
   (setq
-   diff-refine nil
-   diff-font-lock-prettify t
-   diff-font-lock-syntax 'hunk-also))
+   diff-refine nil  ; Disable refinement
+   diff-font-lock-prettify nil  ; Disable prettification
+   diff-font-lock-syntax nil  ; Disable syntax highlighting in diffs
+   diff-font-lock-leading-indicator nil  ; Disable special indicator formatting
+   diff-update-on-the-fly t
+   diff-advance-after-apply-hunk t
+   diff-default-read-only t)  ; Make diff buffers read-only by default
+  
+  ;; Diff face customizations are now in uwu-theme.el
+  
+  ;; Custom function to toggle refinement
+  (defun my/diff-toggle-refine ()
+    "Toggle diff refinement between 'navigation and nil."
+    (interactive)
+    (setq diff-refine (if diff-refine nil 'navigation))
+    (if diff-refine
+        (diff-refine-hunk)
+      (diff-unrefine-hunk))
+    (message "Diff refinement: %s" (if diff-refine "enabled" "disabled")))
+  
+  ;; Better navigation
+  (defun my/diff-navigate-and-refine (orig-fun &rest args)
+    "Automatically refine hunk after navigation."
+    (apply orig-fun args)
+    (when diff-refine
+      (diff-refine-hunk)))
+  
+  (advice-add 'diff-hunk-next :around #'my/diff-navigate-and-refine)
+  (advice-add 'diff-hunk-prev :around #'my/diff-navigate-and-refine)
+  
+  :bind (:map diff-mode-map
+              ("C-c C-r" . my/diff-toggle-refine)
+              ("n" . diff-hunk-next)
+              ("p" . diff-hunk-prev)
+              ("N" . diff-file-next)
+              ("P" . diff-file-prev)
+              ("k" . diff-hunk-kill)
+              ("K" . diff-file-kill)
+              ("RET" . diff-goto-source)
+              ("o" . diff-goto-source)
+              ("SPC" . scroll-up-command)
+              ("S-SPC" . scroll-down-command)
+              ("TAB" . diff-hunk-next)
+              ("<backtab>" . diff-hunk-prev)))
 
 (use-package ediff
   :ensure nil
@@ -919,19 +971,201 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package vc
   :ensure nil
   :config
-  ;; Essential settings only
   (setq vc-follow-symlinks t
         vc-handled-backends '(Git)
-        vc-git-diff-switches '("--histogram")
+        vc-git-diff-switches '("--histogram" "--patience" "--no-prefix")
         vc-git-print-log-follow t
         vc-git-log-edit-summary-target-len 50
-        vc-git-log-edit-summary-max-len 70)
-
+        vc-git-log-edit-summary-max-len 70
+        ;; Cleaner log output with pretty format
+        vc-git-log-switches '("--graph" 
+                              "--pretty=format:%h %s" 
+                              "--abbrev-commit"
+                              "--date=short"))
+  
+  ;; Enhanced vc-diff appearance
+  (defun my/vc-diff-enhanced (&optional historic not-urgent)
+    "Enhanced vc-diff with better visual presentation."
+    (interactive "P")
+    (call-interactively 'vc-diff)
+    (when (get-buffer "*vc-diff*")
+      (with-current-buffer "*vc-diff*"
+        (diff-mode)
+        (setq-local truncate-lines t)
+        (when diff-refine
+          (diff-refine-hunk))
+        (goto-char (point-min))
+        (when (re-search-forward "^@@" nil t)
+          (beginning-of-line)))))
+  
+  ;; Hook to enhance vc-diff buffers
+  (add-hook 'vc-diff-finish-functions
+            (lambda ()
+              (when (string-match-p "\\*vc-diff\\*" (buffer-name))
+                (setq-local truncate-lines t)
+                (when diff-refine
+                  (diff-refine-hunk)))))
+  
+  ;; Custom navigation for git log format
+  (defun my/vc-log-next-commit ()
+    "Navigate to next commit in log."
+    (interactive)
+    (forward-line 1)
+    (while (and (not (eobp))
+                (not (looking-at "^\\*\\s-+[0-9a-f]\\{7,\\}")))
+      (forward-line 1))
+    (beginning-of-line))
+  
+  (defun my/vc-log-prev-commit ()
+    "Navigate to previous commit in log."
+    (interactive)
+    (forward-line -1)
+    (while (and (not (bobp))
+                (not (looking-at "^\\*\\s-+[0-9a-f]\\{7,\\}")))
+      (forward-line -1))
+    (beginning-of-line))
+  
+  ;; Enhanced vc-log appearance
+  (defun my/vc-log-enhanced ()
+    "Enhanced vc-log with better colors and navigation."
+    (interactive)
+    (call-interactively 'vc-print-log)
+    (when (get-buffer "*vc-change-log*")
+      (with-current-buffer "*vc-change-log*"
+        ;; Add custom keybindings for navigation
+        (local-set-key (kbd "n") 'my/vc-log-next-commit)
+        (local-set-key (kbd "p") 'my/vc-log-prev-commit)
+        (local-set-key (kbd "TAB") 'my/vc-log-next-commit)
+        (local-set-key (kbd "<backtab>") 'my/vc-log-prev-commit)
+        ;; Add font-lock keywords
+        (font-lock-add-keywords
+         nil
+         '(;; Branch merge/split indicators (|/ or |\)
+           ("^\\(|[/\\\\]\\)\\s-*$" (0 'font-lock-warning-face t))
+           ;; Branch lines with commits (| * hash)
+           ("^\\(|\\)\\s-\\*" (1 'font-lock-warning-face t))
+           ;; Vertical lines alone
+           ("^\\(|\\)\\s-*$" (1 'font-lock-comment-face t))
+           ;; Commit hash
+           ("\\b\\([0-9a-f]\\{7,\\}\\)\\b" (1 'font-lock-type-face t))
+           ;; Commit message after hash
+           ("[0-9a-f]\\{7,\\}\\s-+\\(.*\\)$" (1 'font-lock-string-face t)))
+         t)
+        (font-lock-fontify-buffer))))
+  
+  ;; Enhanced functions available in VC transient menu
   )
+
+;; Log-view configuration
+(use-package log-view
+  :ensure nil
+  :after vc
+  :config
+  ;; Match git log --graph --oneline format
+  (setq log-view-message-re "^\\*\\s-+\\([0-9a-f]\\{7,\\}\\)\\s-+\\(.*\\)$"
+        log-view-file-re "^\\*\\s-+\\([0-9a-f]\\{7,\\}\\)"
+        log-view-font-lock-keywords
+        '(("^\\*\\s-+\\([0-9a-f]\\{7,\\}\\)" (1 'log-view-message))
+          ("^\\*\\s-+[0-9a-f]\\{7,\\}\\s-+\\(.*\\)$" (1 'font-lock-string-face))))
+  
+  ;; Make commit hashes clickable and copyable
+  (defun my/make-hashes-clickable ()
+    "Make commit hashes clickable and copyable."
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward "\\b\\([0-9a-f]\\{7,40\\}\\)\\b" nil t)
+        (let ((hash (match-string 1))
+              (start (match-beginning 1))
+              (end (match-end 1)))
+          (put-text-property start end 'mouse-face 'highlight)
+          (put-text-property start end 'help-echo "Click: show commit details | Right-click: copy hash")
+          (put-text-property start end 'keymap 
+                             (let ((map (make-sparse-keymap)))
+                               (define-key map [mouse-1] 
+                                 (lambda (e) (interactive "e") 
+                                   (my/vc-commit-show hash)))
+                               (define-key map [mouse-3] 
+                                 (lambda (e) (interactive "e") 
+                                   (kill-new hash) 
+                                   (message "Copied hash: %s" hash)))
+                               (define-key map (kbd "RET") 
+                                 (lambda () (interactive) 
+                                   (my/vc-commit-show hash)))
+                               (define-key map (kbd "c") 
+                                 (lambda () (interactive) 
+                                   (kill-new hash) 
+                                   (message "Copied hash: %s" hash)))
+                               map))))))
+  
+  ;; Add branch styling font-lock patterns
+  (defun my/add-log-styling ()
+    "Add font-lock patterns for branch indicators and styling."
+    (font-lock-add-keywords
+     nil
+     '(;; Branch merge/split indicators on their own line
+       ("^\\(|[/\\\\]\\|[/\\\\]|\\)\\s-*$" . 'font-lock-warning-face)
+       ;; Branch lines with commits (| * hash message)
+       ("^\\(|\\)\\s-\\*" (1 'font-lock-warning-face))
+       ;; Vertical branch lines alone
+       ("^\\(|\\)\\s-*$" . 'font-lock-comment-face)
+       ;; Commit hash (7+ hex characters)
+       ("\\b\\([0-9a-f]\\{7,\\}\\)\\b" (1 'log-view-message))
+       ;; Everything after the hash is the commit message
+       ("[0-9a-f]\\{7,\\}\\s-+\\(.*\\)$" (1 'font-lock-string-face))
+       ;; Branch/tag names in parentheses
+       ("(\\([^)]+\\))" (1 'font-lock-keyword-face))
+       ;; Merge indicators
+       ("\\<Merge:\\s-" . 'font-lock-builtin-face)
+       ;; Issue numbers
+       ("#[0-9]+" . 'font-lock-constant-face))
+     t))
+  
+  ;; Enhanced display settings
+  (add-hook 'log-view-mode-hook
+            (lambda ()
+              (setq-local truncate-lines t)
+              (hl-line-mode 1)
+              ;; Ensure proper mode setup
+              (setq-local log-view-per-file-logs nil)
+              (setq-local log-view-message-face 'log-view-message)
+              ;; Apply styling and make hashes clickable
+              (my/add-log-styling)
+              (font-lock-fontify-buffer)
+              (my/make-hashes-clickable)))
+  
+  ;; Also apply to vc-git-log-view-mode
+  (add-hook 'vc-git-log-view-mode-hook
+            (lambda ()
+              (my/add-log-styling)
+              (font-lock-fontify-buffer)
+              (my/make-hashes-clickable))))
 
 (use-package ssh-agency
   :if (eq system-type 'windows-nt)
   :vc (:url "https://github.com/magit/ssh-agency" :rev :newest))
+
+
+;; VC-msg - Show commit messages for current line
+(use-package vc-msg
+  :ensure t
+  :config
+  ;; Customize popup appearance - cleaner style
+  (setq vc-msg-show-author t
+        vc-msg-time-format "%Y-%m-%d %H:%M"
+        vc-msg-persist-popup t)
+  
+  ;; Use built-in vc backend
+  (setq vc-msg-git-show-commit-function 'vc-msg-git-show-commit-internal)
+  
+  ;; Remove box/border from popup
+  (with-eval-after-load 'vc-msg
+    (set-face-attribute 'vc-msg-face nil
+                        :box nil
+                        :background "#232A2C"  ; uwu-bright-black
+                        :foreground "#C5C8C9")) ; uwu-fg
+  
+  ;; Available in VC transient menu as 'm'
+  )
 
 ;; VC Transient Menu - provides Magit-like interface for VC
 (defun my/vc-transient ()
@@ -942,9 +1176,10 @@ If point is at the end of the line, kill the whole line including the newline."
     "VC operations menu"
     [["File Operations"
       ("s" "Status" vc-dir)
-      ("d" "Diff" vc-diff)
-      ("l" "Log" vc-print-log)
-      ("B" "Blame" vc-annotate)]
+      ("d" "Enhanced Diff" my/vc-diff-enhanced)
+      ("l" "Enhanced Log" my/vc-log-enhanced)
+      ("B" "Blame" vc-annotate)
+      ("=" "Basic Diff" vc-diff)]
      ["Branch Operations"
       ("b b" "Switch Branch" vc-switch-branch)
       ("b n" "New Branch" vc-create-branch)
@@ -952,6 +1187,7 @@ If point is at the end of the line, kill the whole line including the newline."
       ""
       "Remote Operations"
       ("f" "Pull" vc-update)
+      ("F" "Fetch" vc-update)
       ("p" "Push" vc-push)
       ("C" "Clone" vc-clone)]
      ["Changes"
@@ -964,10 +1200,16 @@ If point is at the end of the line, kill the whole line including the newline."
       ("z z" "Stash" vc-git-stash)
       ("z a" "Apply Stash" vc-git-stash-apply-at-point)
       ("z p" "Pop Stash" vc-git-stash-pop-at-point)]
-     ["Other"
+     ["Commit Tools"
+      ("h s" "Show Commit" my/vc-commit-show)
+      ("h d" "Commit Diff" my/vc-commit-diff)
+      ("h t" "Commit Stats" my/vc-commit-stats)
+      ("m" "Show Line Commit" vc-msg-show)
+      ""
+      "Search & Info"
+      ("g" "Log Search" vc-log-search)
       ("i" "Init Repo" vc-create-repo)
       ("t" "Tag" vc-create-tag)
-      ("g" "Log Search" vc-log-search)
       ""
       "Remotes"
       ("r u" "Set Remote URL" my/vc-remote-set-url)
@@ -975,9 +1217,6 @@ If point is at the end of the line, kill the whole line including the newline."
       ""
       ("q" "Quit" transient-quit-one)]])
   (my/vc-menu))
-
-(use-package transient
-  :defer t)
 
 ;; Custom VC helper functions
 (defun my/vc-remote-set-url ()
@@ -988,6 +1227,38 @@ If point is at the end of the line, kill the whole line including the newline."
     (when (and remote url (not (string-empty-p url)))
       (shell-command (format "git remote set-url %s %s" remote url))
       (message "Remote '%s' URL updated to: %s" remote url))))
+
+;; Commit hash lookup functions
+(defun my/vc-commit-show (hash)
+  "Show detailed information about a commit hash."
+  (interactive "sCommit hash: ")
+  (let ((output (shell-command-to-string 
+                 (format "git show --stat --pretty=fuller %s" (shell-quote-argument hash)))))
+    (with-current-buffer (get-buffer-create "*Commit Details*")
+      (erase-buffer)
+      (insert output)
+      (diff-mode)
+      (goto-char (point-min))
+      (pop-to-buffer (current-buffer)))))
+
+(defun my/vc-commit-diff (hash)
+  "Show diff for a specific commit."
+  (interactive "sCommit hash: ")
+  (let ((output (shell-command-to-string 
+                 (format "git show --format= %s" (shell-quote-argument hash)))))
+    (with-current-buffer (get-buffer-create "*Commit Diff*")
+      (erase-buffer)
+      (insert output)
+      (diff-mode)
+      (goto-char (point-min))
+      (pop-to-buffer (current-buffer)))))
+
+(defun my/vc-commit-stats (hash)
+  "Show stats for a specific commit HASH."
+  (interactive "sCommit hash: ")
+  (let ((output (shell-command-to-string 
+                 (format "git show --stat --format='%%h %%s%%n%%aD %%an' %s" (shell-quote-argument hash)))))
+    (message "📊 %s" (string-trim output))))
 
 (defun my/vc-remote-list ()
   "List all remotes with their URLs."
@@ -1002,52 +1273,152 @@ If point is at the end of the line, kill the whole line including the newline."
         (goto-char (point-min))
         (pop-to-buffer (current-buffer))))))
 
-;; Bind the custom VC transient
-(global-set-key (kbd "C-x v v") 'my/vc-transient)
-
-(use-package magit
-  :ensure t
-  :bind (("C-c g g" . magit-status)
-         ("C-c g s" . magit-status)
-         ("C-c g i" . magit-init)
-         ("C-c g c" . magit-clone)
-         ("C-c g l" . magit-pull)
-         ("C-c g p" . magit-push)
-         ("C-c g f" . magit-fetch-all)
-         ("C-c g b" . magit-branch)
-         ("C-c g B" . magit-blame)
-         ("C-c g d" . magit-diff)
-         ("C-c g r" . magit-remote)
-         ("C-c g z" . magit-stash)
-         ("C-c g Z" . magit-apply))
-  :init
-  (setq magit-define-global-key-bindings nil)
+;; VC-dir Enhancements
+(use-package vc-dir
+  :ensure nil
+  :after vc
   :config
-  ;; Windows performance optimizations
-  (when (eq system-type 'windows-nt)
-    (setq magit-git-executable "git.exe"
-          magit-refresh-verbose t  ; Show what's taking time
-          magit-process-popup-time 0.5  ; Show process sooner
-          magit-diff-refine-hunk nil  ; Disable expensive word-level diffing
-          magit-revision-show-gravatars nil  ; Disable gravatar fetching
-          magit-section-cache-visibility t  ; Cache section visibility
-          magit-log-auto-more t  ; Load more log entries automatically
-          magit-log-section-commit-count 20)  ; Limit log entries initially
+  ;; Better defaults for cleaner UI
+  (setq vc-dir-hide-up-to-date t           ; Hide unchanged files by default
+        vc-dir-hide-unregistered nil       ; Show untracked files
+        vc-stay-local t                    ; Faster for remote repos
+        vc-directory-exclusion-list '(".git" ".hg" ".svn" "node_modules" ".venv"))
+  
+  ;; Custom function to hide uninteresting files
+  (defun my/vc-dir-hide-unmodified ()
+    "Hide up-to-date and ignored files in vc-dir."
+    (interactive)
+    (vc-dir-hide-state 'up-to-date)
+    (vc-dir-hide-state 'ignored))
+  
+  ;; Show only modified files
+  (defun my/vc-dir-show-only-modified ()
+    "Show only modified files in vc-dir."
+    (interactive)
+    (vc-dir-hide-state 'up-to-date)
+    (vc-dir-hide-state 'ignored)
+    (vc-dir-hide-state 'unregistered))
+  
+  ;; Toggle showing all files
+  (defun my/vc-dir-toggle-all ()
+    "Toggle between showing all files and only modified files."
+    (interactive)
+    (if (get 'my/vc-dir-toggle-all 'showing-all)
+        (progn
+          (my/vc-dir-show-only-modified)
+          (put 'my/vc-dir-toggle-all 'showing-all nil)
+          (message "Showing only modified files"))
+      (progn
+        (vc-dir-unmark-all-files t)
+        (revert-buffer)
+        (put 'my/vc-dir-toggle-all 'showing-all t)
+        (message "Showing all files"))))
+  
+  ;; Quick commit with message
+  (defun my/vc-dir-quick-commit ()
+    "Quick commit with a simple message prompt."
+    (interactive)
+    (let ((msg (read-string "Commit message: ")))
+      (vc-next-action nil)
+      (insert msg)
+      (log-edit-done)))
+  
+  ;; Stage/unstage helpers
+  (defun my/vc-dir-stage-all ()
+    "Stage all changes."
+    (interactive)
+    (vc-dir-mark-all-files t)
+    (vc-next-action nil)
+    (message "All changes staged"))
+  
+  ;; Show summary of changes
+  (defun my/vc-dir-summary ()
+    "Show a summary of repository status."
+    (interactive)
+    (let ((modified 0) (added 0) (removed 0) (unregistered 0))
+      (save-excursion
+        (goto-char (point-min))
+        (while (not (eobp))
+          (when (looking-at "^[ *][ *]\\s-+\\(\\S-+\\)\\s-+")
+            (let ((state (match-string 1)))
+              (cond ((string= state "edited") (cl-incf modified))
+                    ((string= state "added") (cl-incf added))
+                    ((string= state "removed") (cl-incf removed))
+                    ((string= state "unregistered") (cl-incf unregistered)))))
+          (forward-line 1)))
+      (message "📊 Modified: %d | Added: %d | Removed: %d | Untracked: %d" 
+               modified added removed unregistered)))
+  
+  ;; Enhanced display with icons
+  (defun my/vc-dir-prettify ()
+    "Add icons and better formatting to vc-dir."
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward "^[ *][ *]\\s-+\\(edited\\)" nil t)
+        (replace-match "modified" nil nil nil 1))
+      (goto-char (point-min))
+      (while (re-search-forward "^[ *][ *]\\s-+\\(added\\)" nil t)
+        (overlay-put (make-overlay (match-beginning 1) (match-end 1))
+                     'face '(:foreground "#6BB05D" :weight bold)))
+      (goto-char (point-min))
+      (while (re-search-forward "^[ *][ *]\\s-+\\(removed\\)" nil t)
+        (overlay-put (make-overlay (match-beginning 1) (match-end 1))
+                     'face '(:foreground "#F65B5B" :weight bold)))))
+  
+  ;; Enhanced keybindings
+  :bind (:map vc-dir-mode-map
+              ("h" . my/vc-dir-hide-unmodified)
+              ("H" . my/vc-dir-toggle-all)
+              ("M" . my/vc-dir-show-only-modified)
+              ("c" . my/vc-dir-quick-commit)
+              ("a" . my/vc-dir-stage-all)
+              ("s" . my/vc-dir-summary)
+              ("P" . vc-push)
+              ("F" . vc-update)
+              ("b" . vc-switch-branch)
+              ("l" . vc-print-log)
+              ("=" . vc-diff)
+              ("g" . revert-buffer)
+              ("k" . vc-dir-delete-file)
+              ("!" . vc-dir-ignore)
+              ("?" . my/vc-dir-help))
+  
+  ;; Help function
+  (defun my/vc-dir-help ()
+    "Show vc-dir keybinding help."
+    (interactive)
+    (message "VC-Dir: [m]ark [u]nmark [c]ommit [=]diff [l]og [g]refresh [h]ide [s]ummary [a]dd-all [P]ush [F]etch"))
+  
+  ;; Auto-refresh and enhance display
+  (add-hook 'vc-dir-mode-hook
+            (lambda ()
+              (auto-revert-mode 1)
+              (hl-line-mode 1)
+              (display-line-numbers-mode -1)  ; Cleaner without line numbers
+              (my/vc-dir-prettify)             ; Apply prettification
+              (setq-local revert-buffer-function
+                          (lambda (_ignore-auto _noconfirm)
+                            (vc-dir-refresh)
+                            (my/vc-dir-prettify)))
+              ;; Show summary on startup
+              (run-at-time 0.1 nil 'my/vc-dir-summary))))
 
-    ;; Use libgit2 when available for better performance
-    (when (and (fboundp 'libgit-available-p) (libgit-available-p))
-      (setq magit-use-libgit t)))
+;; Additional VC customizations for better experience
+(with-eval-after-load 'vc
+  ;; Faster git operations
+  (setq vc-git-diff-switches '("--histogram" "--color=never")
+        vc-suppress-confirm t  ; Don't ask for confirmation on every operation
+        vc-command-messages t)  ; Show VC command messages
+  
+  ;; Better commit message interface
+  (setq log-edit-confirm 'changed  ; Only confirm if buffer changed
+        log-edit-keep-buffer nil  ; Don't keep log buffer after commit
+        log-edit-require-final-newline t
+        log-edit-setup-add-author nil))
 
-  ;; General performance improvements
-  (setq magit-save-repository-buffers 'dontask
-        magit-repository-directories '(("~/Projects" . 2))
-        magit-commit-show-diff nil  ; Don't show diff in commit buffer
-        magit-refs-show-commit-count 'branch))
+(global-set-key (kbd "C-c g") 'my/vc-transient)
 
-(use-package magit-prime
-  :ensure t
-  :config
-  (add-hook 'magit-pre-refresh-hook 'magit-prime-refresh-cache))
+
 ;; Marginalia ======================================== ;;
 
 (use-package marginalia
