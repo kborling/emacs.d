@@ -1242,7 +1242,7 @@ If point is at the end of the line, kill the whole line including the newline."
       (pop-to-buffer (current-buffer)))))
 
 (defun my/vc-commit-diff (hash)
-  "Show diff for a specific commit."
+  "Show diff for a specific commit HASH."
   (interactive "sCommit hash: ")
   (let ((output (shell-command-to-string 
                  (format "git show --format= %s" (shell-quote-argument hash)))))
@@ -1258,7 +1258,7 @@ If point is at the end of the line, kill the whole line including the newline."
   (interactive "sCommit hash: ")
   (let ((output (shell-command-to-string 
                  (format "git show --stat --format='%%h %%s%%n%%aD %%an' %s" (shell-quote-argument hash)))))
-    (message "📊 %s" (string-trim output))))
+    (message "%s" (string-trim output))))
 
 (defun my/vc-remote-list ()
   "List all remotes with their URLs."
@@ -1365,29 +1365,29 @@ If point is at the end of the line, kill the whole line including the newline."
         (overlay-put (make-overlay (match-beginning 1) (match-end 1))
                      'face '(:foreground "#F65B5B" :weight bold)))))
   
-  ;; Enhanced keybindings
-  :bind (:map vc-dir-mode-map
-              ("h" . my/vc-dir-hide-unmodified)
-              ("H" . my/vc-dir-toggle-all)
-              ("M" . my/vc-dir-show-only-modified)
-              ("c" . my/vc-dir-quick-commit)
-              ("a" . my/vc-dir-stage-all)
-              ("s" . my/vc-dir-summary)
-              ("P" . vc-push)
-              ("F" . vc-update)
-              ("b" . vc-switch-branch)
-              ("l" . vc-print-log)
-              ("=" . vc-diff)
-              ("g" . revert-buffer)
-              ("k" . vc-dir-delete-file)
-              ("!" . vc-dir-ignore)
-              ("?" . my/vc-dir-help))
-  
   ;; Help function
   (defun my/vc-dir-help ()
     "Show vc-dir keybinding help."
     (interactive)
     (message "VC-Dir: [m]ark [u]nmark [c]ommit [=]diff [l]og [g]refresh [h]ide [s]ummary [a]dd-all [P]ush [F]etch"))
+  
+  ;; Set up keybindings using define-key instead of :bind
+  (with-eval-after-load 'vc-dir
+    (define-key vc-dir-mode-map (kbd "h") 'my/vc-dir-hide-unmodified)
+    (define-key vc-dir-mode-map (kbd "H") 'my/vc-dir-toggle-all)
+    (define-key vc-dir-mode-map (kbd "M") 'my/vc-dir-show-only-modified)
+    (define-key vc-dir-mode-map (kbd "c") 'my/vc-dir-quick-commit)
+    (define-key vc-dir-mode-map (kbd "a") 'my/vc-dir-stage-all)
+    (define-key vc-dir-mode-map (kbd "s") 'my/vc-dir-summary)
+    (define-key vc-dir-mode-map (kbd "P") 'vc-push)
+    (define-key vc-dir-mode-map (kbd "F") 'vc-update)
+    (define-key vc-dir-mode-map (kbd "b") 'vc-switch-branch)
+    (define-key vc-dir-mode-map (kbd "l") 'vc-print-log)
+    (define-key vc-dir-mode-map (kbd "=") 'vc-diff)
+    (define-key vc-dir-mode-map (kbd "g") 'revert-buffer)
+    (define-key vc-dir-mode-map (kbd "k") 'vc-dir-delete-file)
+    (define-key vc-dir-mode-map (kbd "!") 'vc-dir-ignore)
+    (define-key vc-dir-mode-map (kbd "?") 'my/vc-dir-help))
   
   ;; Auto-refresh and enhance display
   (add-hook 'vc-dir-mode-hook
