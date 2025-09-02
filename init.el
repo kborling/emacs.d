@@ -15,8 +15,14 @@
 ;;; Code:
 
 ;; User ============================================= ;;
-(setq user-full-name "Kevin Borling"
-      user-mail-address "kborling@protonmail.com")
+;; These can be set in a local file if needed for specific packages
+;; (setq user-full-name ""
+;;       user-mail-address "")
+
+;; Load personal settings if they exist (not tracked in git)
+(let ((personal-file (locate-user-emacs-file "personal.el")))
+  (when (file-exists-p personal-file)
+    (load personal-file)))
 
 ;; Custom ========================================== ;;
 
@@ -908,8 +914,8 @@ If point is at the end of the line, kill the whole line including the newline."
   (defun my/flymake-quickfix ()
     "Apply quickfix at point if available."
     (interactive)
-    (when-let ((diag (get-char-property (point) 'flymake-diagnostic)))
-      (when-let ((data (flymake-diagnostic-data diag)))
+    (when-let* ((diag (get-char-property (point) 'flymake-diagnostic)))
+      (when-let* ((data (flymake-diagnostic-data diag)))
         (when (plist-get data :quickfix)
           (funcall (plist-get data :quickfix))))))
 
@@ -1158,11 +1164,13 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq vc-msg-git-show-commit-function 'vc-msg-git-show-commit-internal)
   
   ;; Remove box/border from popup
-  (with-eval-after-load 'vc-msg
-    (set-face-attribute 'vc-msg-face nil
-                        :box nil
-                        :background "#232A2C"  ; uwu-bright-black
-                        :foreground "#C5C8C9")) ; uwu-fg
+  (add-hook 'vc-msg-mode-hook
+            (lambda ()
+              (when (facep 'vc-msg-face)
+                (set-face-attribute 'vc-msg-face nil
+                                    :box nil
+                                    :background "#232A2C"  ; uwu-bright-black
+                                    :foreground "#C5C8C9")))) ; uwu-fg
   
   ;; Available in VC transient menu as 'm'
   )
@@ -1174,46 +1182,68 @@ If point is at the end of the line, kill the whole line including the newline."
   (require 'transient)
   (transient-define-prefix my/vc-menu ()
     "VC operations menu"
-    [["File Operations"
+    [["Status & Diff"
       ("s" "Status" vc-dir)
-      ("d" "Enhanced Diff" my/vc-diff-enhanced)
-      ("l" "Enhanced Log" my/vc-log-enhanced)
+      ("d" "Diff (unstaged)" my/vc-diff-enhanced)
+      ("D" "Diff vs Branch" vc-root-diff)
+      ("=" "Basic Diff" vc-diff)
+      ("e" "Ediff" vc-ediff)
+      ("E" "Ediff Revision" vc-version-ediff)]
+     
+     ["Log & History"
+      ("l" "Log (current file)" my/vc-log-enhanced)
+      ("L" "Log (branch)" vc-print-root-log)
+      ("h h" "File History" vc-print-root-log)
+      ("h s" "Show Commit" my/vc-commit-show)
+      ("h d" "Commit Diff" my/vc-commit-diff)
+      ("h f" "Find Revision" vc-revision-other-window)
+      ("/" "Search Log" vc-log-search)
       ("B" "Blame" vc-annotate)
-      ("=" "Basic Diff" vc-diff)]
-     ["Branch Operations"
-      ("b b" "Switch Branch" vc-switch-branch)
-      ("b n" "New Branch" vc-create-branch)
+      ("M" "Line Commit" vc-msg-show)]
+     
+     ["Branch"
+      ("b b" "Switch" vc-switch-branch)
+      ("b n" "New" vc-create-branch)
+      ("b d" "Delete" my/vc-delete-branch)
+      ("b r" "Rename" my/vc-rename-branch)
+      ("?" "File at Branch" my/vc-find-branch-file)
       ""
-      ""
-      "Remote Operations"
+      "-Merge-"
+      ("m" "Merge" vc-merge)]
+     
+     ["Remote"
       ("f" "Pull" vc-update)
       ("F" "Fetch" vc-update)
       ("p" "Push" vc-push)
-      ("C" "Clone" vc-clone)]
-     ["Changes"
-      ("a" "Add/Register" vc-register)
+      ("P" "Push Specific" vc-push)
+      ""
+      "-Management-"
+      ("r l" "List" my/vc-remote-list)
+      ("r a" "Add" my/vc-remote-add)
+      ("r u" "Set URL" my/vc-remote-set-url)
+      ("C" "Clone" vc-clone)]]
+    
+    [["Changes"
+      ("a" "Add/Stage" vc-register)
       ("c" "Commit" vc-next-action)
+      ("C-c" "Amend" my/vc-git-amend-commit)
       ("u" "Revert" vc-revert)
+      ("U" "Checkout" vc-revert-file)
       ("k" "Delete" vc-delete-file)
-      ""
-      "Stashing"
-      ("z z" "Stash" vc-git-stash)
-      ("z a" "Apply Stash" vc-git-stash-apply-at-point)
-      ("z p" "Pop Stash" vc-git-stash-pop-at-point)]
-     ["Commit Tools"
-      ("h s" "Show Commit" my/vc-commit-show)
-      ("h d" "Commit Diff" my/vc-commit-diff)
-      ("h t" "Commit Stats" my/vc-commit-stats)
-      ("m" "Show Line Commit" vc-msg-show)
-      ""
-      "Search & Info"
-      ("g" "Log Search" vc-log-search)
+      ("R" "Rename" vc-rename-file)]
+     
+     ["Stash"
+      ("z z" "Stash" my/vc-git-stash)
+      ("z s" "Stash Message" my/vc-git-stash-push)
+      ("z a" "Apply" my/vc-git-stash-apply)
+      ("z p" "Pop" my/vc-git-stash-pop)
+      ("z l" "List" my/vc-git-stash-list)]
+     
+     ["Tags & Info"
+      ("t" "Create Tag" vc-create-tag)
+      ("T" "List Tags" my/vc-git-list-tags)
       ("i" "Init Repo" vc-create-repo)
-      ("t" "Tag" vc-create-tag)
-      ""
-      "Remotes"
-      ("r u" "Set Remote URL" my/vc-remote-set-url)
-      ("r l" "List Remotes" my/vc-remote-list)
+      ("!" "Git Command" my/vc-git-command)
       ""
       ("q" "Quit" transient-quit-one)]])
   (my/vc-menu))
@@ -1227,6 +1257,166 @@ If point is at the end of the line, kill the whole line including the newline."
     (when (and remote url (not (string-empty-p url)))
       (shell-command (format "git remote set-url %s %s" remote url))
       (message "Remote '%s' URL updated to: %s" remote url))))
+
+(defun my/vc-remote-add ()
+  "Add a new remote to the current repository."
+  (interactive)
+  (let* ((remote (read-string "Remote name: "))
+         (url (read-string "Remote URL: ")))
+    (when (and remote url (not (string-empty-p url)) (not (string-empty-p remote)))
+      (shell-command (format "git remote add %s %s" remote url))
+      (message "Remote '%s' added with URL: %s" remote url))))
+
+(defun my/vc-git-amend-commit ()
+  "Amend the last commit."
+  (interactive)
+  (if (vc-git-conflicted-files default-directory)
+      (error "Cannot amend while there are unresolved conflicts"))
+  (let ((last-msg (shell-command-to-string "git log -1 --pretty=%B")))
+    (vc-git-checkin nil nil t last-msg t)))
+
+(defun vc-revert-file ()
+  "Revert the current file to the last committed version."
+  (interactive)
+  (when (vc-backend buffer-file-name)
+    (if (yes-or-no-p (format "Revert %s to last committed version? " 
+                             (file-name-nondirectory buffer-file-name)))
+        (progn
+          (vc-revert buffer-file-name)
+          (revert-buffer t t)
+          (message "File reverted to last committed version"))
+      (message "Revert cancelled"))))
+
+(defun my/vc-delete-branch ()
+  "Delete a git branch."
+  (interactive)
+  (let* ((branches (split-string 
+                    (shell-command-to-string "git branch --format='%(refname:short)'") 
+                    "\n" t))
+         (branch (completing-read "Delete branch: " branches)))
+    (when (yes-or-no-p (format "Delete branch '%s'? " branch))
+      (shell-command (format "git branch -d %s" branch))
+      (message "Branch '%s' deleted" branch))))
+
+(defun my/vc-rename-branch ()
+  "Rename the current git branch."
+  (interactive)
+  (let* ((current-branch (string-trim (shell-command-to-string "git branch --show-current")))
+         (new-name (read-string (format "Rename branch '%s' to: " current-branch))))
+    (when (and new-name (not (string-empty-p new-name)))
+      (shell-command (format "git branch -m %s" new-name))
+      (message "Branch renamed from '%s' to '%s'" current-branch new-name))))
+
+(defun my/vc-git-stash ()
+  "Stash current changes."
+  (interactive)
+  (shell-command "git stash")
+  (message "Changes stashed")
+  (when (derived-mode-p 'vc-dir-mode)
+    (vc-dir-refresh)))
+
+(defun my/vc-git-stash-push ()
+  "Create a new stash with a custom message."
+  (interactive)
+  (let ((message (read-string "Stash message: ")))
+    (if (string-empty-p message)
+        (shell-command "git stash push")
+      (shell-command (format "git stash push -m %s" (shell-quote-argument message))))
+    (message "Changes stashed")
+    (when (derived-mode-p 'vc-dir-mode)
+      (vc-dir-refresh))))
+
+(defun my/vc-git-stash-apply ()
+  "Apply a stash from the list."
+  (interactive)
+  (let* ((stashes (shell-command-to-string "git stash list"))
+         (stash-list (split-string stashes "\n" t))
+         (stash (when stash-list
+                  (completing-read "Apply stash: " stash-list nil t))))
+    (if stash
+        (let ((stash-num (car (split-string stash ":"))))
+          (shell-command (format "git stash apply %s" stash-num))
+          (message "Stash applied: %s" stash-num)
+          (when (derived-mode-p 'vc-dir-mode)
+            (vc-dir-refresh)))
+      (message "No stashes available"))))
+
+(defun my/vc-git-stash-pop ()
+  "Pop a stash from the list."
+  (interactive)
+  (let* ((stashes (shell-command-to-string "git stash list"))
+         (stash-list (split-string stashes "\n" t))
+         (stash (when stash-list
+                  (completing-read "Pop stash: " stash-list nil t))))
+    (if stash
+        (let ((stash-num (car (split-string stash ":"))))
+          (shell-command (format "git stash pop %s" stash-num))
+          (message "Stash popped: %s" stash-num)
+          (when (derived-mode-p 'vc-dir-mode)
+            (vc-dir-refresh)))
+      (message "No stashes available"))))
+
+(defun my/vc-git-stash-list ()
+  "List all stashes."
+  (interactive)
+  (let ((stashes (shell-command-to-string "git stash list")))
+    (if (string-empty-p (string-trim stashes))
+        (message "No stashes found")
+      (with-current-buffer (get-buffer-create "*Git Stashes*")
+        (erase-buffer)
+        (insert "Git Stashes:\n\n")
+        (insert stashes)
+        (goto-char (point-min))
+        (pop-to-buffer (current-buffer))))))
+
+(defun my/vc-git-list-tags ()
+  "List all tags in the repository."
+  (interactive)
+  (let ((tags (shell-command-to-string "git tag -l --sort=-version:refname")))
+    (if (string-empty-p (string-trim tags))
+        (message "No tags found")
+      (with-current-buffer (get-buffer-create "*Git Tags*")
+        (erase-buffer)
+        (insert "Git Tags (sorted by version):\n\n")
+        (insert tags)
+        (goto-char (point-min))
+        (pop-to-buffer (current-buffer))))))
+
+(defun my/vc-find-branch-file ()
+  "Find and open a file from another branch."
+  (interactive)
+  (let* ((branches (split-string 
+                    (shell-command-to-string "git branch -a --format='%(refname:short)'") 
+                    "\n" t))
+         (branch (completing-read "Branch: " branches))
+         (files (split-string 
+                 (shell-command-to-string (format "git ls-tree -r --name-only %s" branch))
+                 "\n" t))
+         (file (completing-read "File: " files)))
+    (when file
+      (let ((content (shell-command-to-string 
+                      (format "git show %s:%s" branch file))))
+        (with-current-buffer (get-buffer-create (format "*%s:%s*" branch file))
+          (erase-buffer)
+          (insert content)
+          (set-buffer-modified-p nil)
+          (goto-char (point-min))
+          (pop-to-buffer (current-buffer)))))))
+
+(defun my/vc-git-command ()
+  "Run an arbitrary git command."
+  (interactive)
+  (let* ((command (read-string "Git command (without 'git'): "))
+         (full-command (format "git %s" command))
+         (output (shell-command-to-string full-command)))
+    (if (string-empty-p (string-trim output))
+        (message "Git command completed: %s" command)
+      (with-current-buffer (get-buffer-create "*Git Output*")
+        (erase-buffer)
+        (insert (format "$ %s\n\n" full-command))
+        (insert output)
+        (goto-char (point-min))
+        (pop-to-buffer (current-buffer))))))
 
 ;; Commit hash lookup functions
 (defun my/vc-commit-show (hash)
@@ -1349,6 +1539,80 @@ If point is at the end of the line, kill the whole line including the newline."
       (message "📊 Modified: %d | Added: %d | Removed: %d | Untracked: %d" 
                modified added removed unregistered)))
   
+  ;; Show diff for file at point or all marked files
+  (defun my/vc-dir-show-diff ()
+    "Show diff for the file at point or all marked files in a side window."
+    (interactive)
+    (let* ((files (or (vc-dir-marked-files)
+                      (when (vc-dir-current-file)
+                        (list (vc-dir-current-file)))))
+           (buf (get-buffer-create "*vc-dir-diff*")))
+      (if (not files)
+          (message "No file at point or marked files")
+        ;; Use vc-diff which handles the backend properly
+        (let ((default-directory (vc-dir-root)))
+          (with-current-buffer buf
+            (let ((inhibit-read-only t))
+              (erase-buffer)))
+          ;; Get the backend for the first file
+          (let ((backend (vc-backend (car files))))
+            (when backend
+              (vc-diff-internal backend files nil nil t buf)))
+          ;; Display in side window
+          (display-buffer buf
+                          '((display-buffer-in-side-window)
+                            (side . right)
+                            (window-width . 0.5)))))))
+  
+  ;; Toggle diff preview mode
+  (defvar-local my/vc-dir-show-diff-mode nil
+    "Whether to automatically show diffs in vc-dir.")
+  
+  (defun my/vc-dir-toggle-diff-preview ()
+    "Toggle automatic diff preview in vc-dir."
+    (interactive)
+    (setq my/vc-dir-show-diff-mode (not my/vc-dir-show-diff-mode))
+    (if my/vc-dir-show-diff-mode
+        (progn
+          (add-hook 'post-command-hook #'my/vc-dir-maybe-show-diff nil t)
+          (my/vc-dir-show-diff)
+          (message "Diff preview enabled"))
+      (remove-hook 'post-command-hook #'my/vc-dir-maybe-show-diff t)
+      (when (get-buffer "*vc-dir-diff*")
+        (delete-windows-on "*vc-dir-diff*"))
+      (message "Diff preview disabled")))
+  
+  (defun my/vc-dir-maybe-show-diff ()
+    "Show diff for current file if in preview mode."
+    (when (and my/vc-dir-show-diff-mode
+               (derived-mode-p 'vc-dir-mode)
+               (vc-dir-current-file))
+      (ignore-errors (my/vc-dir-show-diff))))
+  
+  ;; Show all diffs at once (like git diff)
+  (defun my/vc-dir-show-all-diffs ()
+    "Show all uncommitted changes in a single diff buffer."
+    (interactive)
+    (let ((buf (get-buffer-create "*vc-all-diffs*"))
+          (backend (vc-backend default-directory)))
+      (if (not backend)
+          (message "No version control backend found")
+        (with-current-buffer buf
+          (let ((inhibit-read-only t))
+            (erase-buffer)))
+        (vc-diff-internal backend nil nil nil t buf)
+        (pop-to-buffer buf))))
+  
+  ;; Quick stage/unstage with diff preview
+  (defun my/vc-dir-stage-and-next ()
+    "Stage current file and move to next modified file."
+    (interactive)
+    (vc-dir-mark)
+    (vc-next-action nil)
+    (vc-dir-next-line 1)
+    (when my/vc-dir-show-diff-mode
+      (my/vc-dir-show-diff)))
+  
   ;; Enhanced display with icons
   (defun my/vc-dir-prettify ()
     "Add icons and better formatting to vc-dir."
@@ -1369,7 +1633,7 @@ If point is at the end of the line, kill the whole line including the newline."
   (defun my/vc-dir-help ()
     "Show vc-dir keybinding help."
     (interactive)
-    (message "VC-Dir: [m]ark [u]nmark [c]ommit [=]diff [l]og [g]refresh [h]ide [s]ummary [a]dd-all [P]ush [F]etch"))
+    (message "VC-Dir: [d]iff [D]iff-all [TAB]toggle-preview [SPC]stage&next [c]ommit [l]og [g]refresh [h]ide [s]ummary"))
   
   ;; Set up keybindings using define-key instead of :bind
   (with-eval-after-load 'vc-dir
@@ -1387,6 +1651,11 @@ If point is at the end of the line, kill the whole line including the newline."
     (define-key vc-dir-mode-map (kbd "g") 'revert-buffer)
     (define-key vc-dir-mode-map (kbd "k") 'vc-dir-delete-file)
     (define-key vc-dir-mode-map (kbd "!") 'vc-dir-ignore)
+    ;; New diff-related keybindings
+    (define-key vc-dir-mode-map (kbd "d") 'my/vc-dir-show-diff)
+    (define-key vc-dir-mode-map (kbd "D") 'my/vc-dir-show-all-diffs)
+    (define-key vc-dir-mode-map (kbd "TAB") 'my/vc-dir-toggle-diff-preview)
+    (define-key vc-dir-mode-map (kbd "SPC") 'my/vc-dir-stage-and-next)
     (define-key vc-dir-mode-map (kbd "?") 'my/vc-dir-help))
   
   ;; Auto-refresh and enhance display
