@@ -33,3 +33,5 @@ org-roam.db
 .org-id-locations
 chatgpt/
 session.*
+personal.el
+init.el.backup

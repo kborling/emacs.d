@@ -7,22 +7,22 @@
 ;;; Code:
 
 ;; File locations
-(defvar my/contacts-file "~/.org/contacts.org"
+(defvar kdb/contacts-file "~/.org/contacts.org"
   "File for storing contacts.")
 
-(defvar my/notes-file "~/.org/notes.org"
+(defvar kdb/notes-file "~/.org/notes.org"
   "File for storing general notes.")
 
 ;; === CONTACT MANAGEMENT === ;;
 
-(defun my/add-contact ()
+(defun kdb/add-contact ()
   "Add a new contact."
   (interactive)
   (let ((name (read-string "Name: "))
         (email (read-string "Email: "))
         (phone (read-string "Phone: "))
         (notes (read-string "Initial note: ")))
-    (with-current-buffer (find-file-noselect my/contacts-file)
+    (with-current-buffer (find-file-noselect kdb/contacts-file)
       (goto-char (point-max))
       (insert (format "\n* %s\n" name))
       (when (not (string-empty-p email))
@@ -35,7 +35,7 @@
       (save-buffer)
       (message "Contact '%s' added" name))))
 
-(defun my/add-meeting-note ()
+(defun kdb/add-meeting-note ()
   "Add a meeting note for a contact."
   (interactive)
   (let* ((contact-name (read-string "Contact name: "))
@@ -47,7 +47,7 @@
          (timestamp (format-time-string "%Y-%m-%d %H:%M"))
          (date-only (format-time-string "%Y-%m-%d")))
     
-    (with-current-buffer (find-file-noselect my/contacts-file)
+    (with-current-buffer (find-file-noselect kdb/contacts-file)
       (goto-char (point-min))
       (if (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote contact-name)) nil t)
           (progn
@@ -79,7 +79,7 @@
 
 ;; === ACCOMPLISHMENTS & ISSUES === ;;
 
-(defun my/add-accomplishment ()
+(defun kdb/add-accomplishment ()
   "Add an accomplishment for a contact."
   (interactive)
   (let* ((contact-name (read-string "Contact name: "))
@@ -89,7 +89,7 @@
          (impact (read-string "Impact/Significance (optional): "))
          (date-only (format-time-string "%Y-%m-%d")))
     
-    (with-current-buffer (find-file-noselect my/contacts-file)
+    (with-current-buffer (find-file-noselect kdb/contacts-file)
       (goto-char (point-min))
       (if (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote contact-name)) nil t)
           (let ((contact-end (save-excursion
@@ -122,14 +122,14 @@
         (message "New contact '%s' created with accomplishment" contact-name))
       (save-buffer))))
 
-(defun my/quick-win ()
+(defun kdb/quick-win ()
   "Quickly log a win for a contact."
   (interactive)
   (let* ((contact-name (read-string "Contact: "))
          (win (read-string "Quick win: "))
          (date-only (format-time-string "%Y-%m-%d")))
     
-    (with-current-buffer (find-file-noselect my/contacts-file)
+    (with-current-buffer (find-file-noselect kdb/contacts-file)
       (goto-char (point-min))
       (if (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote contact-name)) nil t)
           (let ((contact-end (save-excursion
@@ -155,12 +155,12 @@
         (message "✓ New contact '%s' created with win" contact-name))
       (save-buffer))))
 
-(defun my/view-accomplishments ()
+(defun kdb/view-accomplishments ()
   "View accomplishments for a contact."
   (interactive)
   (let* ((contact-name (read-string "View accomplishments for: "))
          (found nil))
-    (with-current-buffer (find-file-noselect my/contacts-file)
+    (with-current-buffer (find-file-noselect kdb/contacts-file)
       (save-excursion
         (goto-char (point-min))
         (when (search-forward (format "* %s" contact-name) nil t)
@@ -194,7 +194,7 @@
 
 ;; === DAILY NOTES === ;;
 
-(defun my/daily-notes ()
+(defun kdb/daily-notes ()
   "Add quick daily notes to notes.org."
   (interactive)
   (let* ((note-type (completing-read "Note type: "
@@ -203,7 +203,7 @@
          (date-only (format-time-string "%Y-%m-%d"))
          (timestamp (format-time-string "%Y-%m-%d %H:%M")))
     
-    (with-current-buffer (find-file-noselect my/notes-file)
+    (with-current-buffer (find-file-noselect kdb/notes-file)
       (goto-char (point-max))
       (insert (format "\n* %s - %s\n" note-type date-only))
       (insert (format "  Time: %s\n" timestamp))
@@ -213,24 +213,24 @@
 
 ;; === SEARCH & NAVIGATION === ;;
 
-(defun my/search-contacts (search-term)
+(defun kdb/search-contacts (search-term)
   "Search for SEARCH-TERM in contacts and notes."
   (interactive "sSearch: ")
-  (let ((files (list my/contacts-file my/notes-file)))
+  (let ((files (list kdb/contacts-file kdb/notes-file)))
     (multi-occur
      (mapcar #'find-file-noselect files)
      search-term)))
 
-(defun my/find-contact ()
+(defun kdb/find-contact ()
   "Jump to a contact using completion."
   (interactive)
   (let ((contacts (org-map-entries
                    (lambda () (nth 4 (org-heading-components)))
                    "LEVEL=1"
-                   (list my/contacts-file))))
+                   (list kdb/contacts-file))))
     (when contacts
       (let ((contact (completing-read "Jump to contact: " contacts nil t)))
-        (with-current-buffer (find-file-noselect my/contacts-file)
+        (with-current-buffer (find-file-noselect kdb/contacts-file)
           (goto-char (point-min))
           (search-forward (format "* %s" contact))
           (switch-to-buffer (current-buffer))
@@ -238,32 +238,32 @@
           (recenter-top-bottom))))))
 
 ;; Better search with deadgrep if available
-(defun my/search-all ()
+(defun kdb/search-all ()
   "Search contacts and notes with deadgrep or occur."
   (interactive)
   (if (fboundp 'deadgrep)
       (let ((search-term (read-string "Search all: ")))
-        (deadgrep search-term (file-name-directory my/contacts-file)))
-    (call-interactively 'my/search-contacts)))
+        (deadgrep search-term (file-name-directory kdb/contacts-file)))
+    (call-interactively 'kdb/search-contacts)))
 
 ;; === FILE ACCESS === ;;
 
-(defun my/open-contacts ()
+(defun kdb/open-contacts ()
   "Open contacts file."
   (interactive)
-  (find-file my/contacts-file))
+  (find-file kdb/contacts-file))
 
-(defun my/open-notes ()
+(defun kdb/open-notes ()
   "Open notes file."
   (interactive)
-  (find-file my/notes-file))
+  (find-file kdb/notes-file))
 
 ;; === WEEKLY REVIEW === ;;
 
-(defun my/weekly-review ()
+(defun kdb/weekly-review ()
   "Create weekly review entry."
   (interactive)
-  (with-current-buffer (find-file-noselect my/notes-file)
+  (with-current-buffer (find-file-noselect kdb/notes-file)
     (goto-char (point-max))
     (insert (format "\n* Weekly Review - %s\n" (format-time-string "%Y-W%U")))
     (insert "** Accomplishments\n- \n\n")
@@ -274,35 +274,6 @@
     (switch-to-buffer (current-buffer))
     (forward-line -7)
     (end-of-line)))
-
-;; === KEYBINDINGS === ;;
-;; Organized keybindings that replace HyRolo
-
-(with-eval-after-load 'org
-  ;; Contact management
-  (global-set-key (kbd "C-c r a") 'my/add-contact)
-  (global-set-key (kbd "C-c r m") 'my/add-meeting-note)
-  (global-set-key (kbd "C-c r A") 'my/add-accomplishment)
-  (global-set-key (kbd "C-c r w") 'my/quick-win)
-  (global-set-key (kbd "C-c r v") 'my/view-accomplishments)
-  
-  ;; Daily workflow
-  (global-set-key (kbd "C-c r d") 'my/daily-notes)
-  (global-set-key (kbd "C-c r W") 'my/weekly-review)
-  
-  ;; Search and navigation
-  (global-set-key (kbd "C-c r f") 'my/search-all)
-  (global-set-key (kbd "C-c r j") 'my/find-contact)
-  (global-set-key (kbd "C-c r s") 'my/search-contacts)
-  
-  ;; Quick file access
-  (global-set-key (kbd "C-c r c") 'my/open-contacts)
-  (global-set-key (kbd "C-c r o") 'my/open-notes)
-  
-  ;; Already defined in org config:
-  ;; C-c c - org-capture
-  ;; C-c a - org-agenda
-  )
 
 (provide 'org-contacts-simple)
 ;;; org-contacts-simple.el ends here

@@ -1,0 +1,33 @@
+;;; personal.el --- Personal settings not tracked in git -*- lexical-binding: t; -*-
+
+;;; Commentary:
+;; Copy this file to personal.el and customize with your personal information.
+;; The personal.el file is loaded automatically but ignored by git.
+;; This keeps your personal information private while sharing your config.
+
+;;; Code:
+
+;; User information for various Emacs packages
+(setq user-full-name "Your Name"
+      user-mail-address "your.email@example.com")
+
+;; Additional private settings can go here
+;; For example:
+;; - API keys for packages
+;; - Personal org-mode paths
+;; - Machine-specific configurations
+
+;; Example: Personal org directories
+;; (setq org-directory "~/Documents/org/"
+;;       org-agenda-files '("~/Documents/org/todo.org"
+;;                          "~/Documents/org/projects.org"))
+
+;; Example: API tokens (never commit these!)
+;; (setq some-package-api-key "your-secret-key-here")
+
+;; Example: Machine-specific settings
+;; (when (string= (system-name) "work-laptop")
+;;   (setq some-work-specific-variable t))
+
+(provide 'personal)
+;;; personal.el ends here
