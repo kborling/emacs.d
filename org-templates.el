@@ -13,7 +13,7 @@
          "** TODO %?\n   Added: %U")
         
         ;; === MEETINGS & PEOPLE ===
-        ("m" "Meeting" entry (file+function "~/.org/contacts.org" my/org-capture-meeting)
+        ("m" "Meeting" entry (file+function "~/.org/contacts.org" kdb-org-capture-meeting)
          "** Meeting - %u\n   Notes: %?\n   Action Items: ")
         
         ("f" "Follow-up" entry (file+headline "~/.org/notes.org" "Follow-ups")  
@@ -23,10 +23,10 @@
         ("n" "Note" entry (file+headline "~/.org/notes.org" "Quick Notes")
          "** %u - %?")
         
-        ("w" "Win" entry (file+function "~/.org/contacts.org" my/org-capture-accomplishment)
+        ("w" "Win" entry (file+function "~/.org/contacts.org" kdb-org-capture-accomplishment)
          "*** Win - %u (%?)")
         
-        ("i" "Issue" entry (file+function "~/.org/contacts.org" my/org-capture-issue)
+        ("i" "Issue" entry (file+function "~/.org/contacts.org" kdb-org-capture-issue)
          "*** Issue - %u (%?)\n    Action Needed: ")
         
         ;; === PROJECT WORK ===  
@@ -35,7 +35,7 @@
 
 ;; Helper functions for org-capture templates
 
-(defun my/org-capture-contact-todo ()
+(defun kdb-org-capture-contact-todo ()
   "Move to or create contact heading for TODO capture."
   (let ((contact (read-string "Contact name: ")))
     (goto-char (point-min))
@@ -46,7 +46,7 @@
       (insert (format "\n* %s\n  Added: %s\n" contact (format-time-string "%Y-%m-%d"))))
     (point)))
 
-(defun my/org-capture-meeting ()
+(defun kdb-org-capture-meeting ()
   "Move to or create contact heading for meeting capture."
   (let ((contact (read-string "Contact name (or empty for general): ")))
     (if (string-empty-p contact)
@@ -58,7 +58,7 @@
         (insert (format "\n* %s\n  Added: %s\n" contact (format-time-string "%Y-%m-%d")))))
     (point)))
 
-(defun my/org-capture-accomplishment ()
+(defun kdb-org-capture-accomplishment ()
   "Move to contact's accomplishments section."
   (let ((contact (read-string "Contact name: ")))
     (goto-char (point-min))
@@ -74,7 +74,7 @@
                      contact (format-time-string "%Y-%m-%d"))))
     (point)))
 
-(defun my/org-capture-issue ()
+(defun kdb-org-capture-issue ()
   "Move to employee's issues section."
   (let ((contact (read-string "Employee name: ")))
     (goto-char (point-min))
@@ -90,7 +90,7 @@
                      contact (format-time-string "%Y-%m-%d"))))
     (point)))
 
-(defun my/org-capture-review ()
+(defun kdb-org-capture-review ()
   "Move to or create contact for review capture."
   (let ((contact (read-string "Employee name: ")))
     (goto-char (point-min))

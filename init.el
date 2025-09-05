@@ -14,11 +14,6 @@
 
 ;;; Code:
 
-;; User ============================================= ;;
-;; These can be set in a local file if needed for specific packages
-;; (setq user-full-name ""
-;;       user-mail-address "")
-
 ;; Load personal settings if they exist (not tracked in git)
 (let ((personal-file (locate-user-emacs-file "personal.el")))
   (when (file-exists-p personal-file)
@@ -28,6 +23,20 @@
 
 (setq custom-file (locate-user-emacs-file "custom.el"))
 (load custom-file :no-error-if-file-is-missing)
+
+;; Performance Optimizations ====================== ;;
+
+;; Disable jsonrpc logging for better performance with LSP
+(fset #'jsonrpc--log-event #'ignore)
+
+;; Native compilation settings to avoid battery drain
+(setq native-comp-async-report-warnings-errors nil
+      native-comp-async-jobs-number 4)
+
+(setq fast-but-imprecise-scrolling t
+      redisplay-skip-fontification-on-input t
+      jit-lock-defer-time 0
+      jit-lock-stealth-time 0.2)
 
 ;; Package ============================================= ;;
 
@@ -98,14 +107,6 @@
  bookmark-default-file (expand-file-name "bookmarks" user-emacs-var-directory)
  abbrev-file-name (expand-file-name "abbrev_defs" user-emacs-var-directory)
  nsm-settings-file (expand-file-name "network-security.data" user-emacs-var-directory))
-
-;; Performance Optimizations ====================== ;;
-
-;; Additional performance tweaks
-(setq fast-but-imprecise-scrolling t
-      redisplay-skip-fontification-on-input t
-      jit-lock-defer-time 0
-      jit-lock-stealth-time 0.2)
 
 ;; Defaults ========================================= ;;
 
@@ -313,7 +314,7 @@ If point is at the end of the line, kill the whole line including the newline."
 
 ;; Keybindings ======================================= ;;
 
-(defun my/setup-keybindings ()
+(defun kdb-setup-keybindings ()
   "Set up all custom keybindings."
   (let ((map global-map))
     ;; Remove suspend keys
@@ -340,9 +341,11 @@ If point is at the end of the line, kill the whole line including the newline."
                        ("C-M-s" . isearch-forward-symbol-at-point)))
       (define-key map (kbd (car binding)) (cdr binding)))
 
-    ;; Insert pair shortcuts
-    (dolist (key '("M-(" "M-\"" "M-{" "M-["))
-      (define-key map (kbd key) #'insert-pair))
+    ;; TODO navigation (hl-todo)
+    (dolist (binding '(("M-[" . hl-todo-previous)
+                       ("M-]" . hl-todo-next)
+                       ("C-c o o" . hl-todo-occur)))
+      (define-key map (kbd (car binding)) (cdr binding)))
 
     ;; Buffer management
     (dolist (binding '(("C-x b" . ibuffer)
@@ -355,10 +358,20 @@ If point is at the end of the line, kill the whole line including the newline."
                        ("<backtab>" . format-current-buffer)))
       (define-key map (kbd (car binding)) (cdr binding)))
 
-    ;; Opening tools
-    (dolist (binding '(("C-c t e" . eshell)
-                       ("C-c t v" . ansi-term)
-                       ("C-c t d" . dired-jump-other-window)))
+    ;; Window management
+    (dolist (binding '(("C-x w s" . window-swap-states)
+                       ("C-x 4 4" . other-window-prefix)
+                       ("C-x 4 1" . same-window-prefix)))
+      (define-key map (kbd (car binding)) (cdr binding)))
+
+    ;; Terminal management
+    (dolist (binding '(("C-`" . kdb-eshell-toggle)
+                       ("C-~" . kdb-terminal-new)
+                       ("C-c t e" . kdb-eshell-new)
+                       ("C-c t t" . kdb-terminal-new)
+                       ("C-c t s" . shell)
+                       ("C-c t d" . dired-jump-other-window)
+                       ("C-c t =" . fido-vertical-mode)))
       (define-key map (kbd (car binding)) (cdr binding)))
 
     ;; Configuration shortcuts
@@ -367,12 +380,12 @@ If point is at the end of the line, kill the whole line including the newline."
       (define-key map (kbd (car binding)) (cdr binding)))
 
     ;; Toggling features
-    (dolist (binding '(("C-c t t" . toggle-theme)
+    (dolist (binding '(("C-c t h" . toggle-theme)  ; Changed from t t to t h
                        ("C-c t f" . toggle-frame-fullscreen)))
       (define-key map (kbd (car binding)) (cdr binding)))))
 
 ;; Set up keybindings after everything else loads
-(add-hook 'after-init-hook #'my/setup-keybindings)
+(add-hook 'after-init-hook #'kdb-setup-keybindings)
 
 (defun kdb/keyboard-quit-dwim ()
   "Do-What-I-Mean behaviour for a general `keyboard-quit'."
@@ -427,7 +440,6 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package autorevert
   :ensure nil
   :hook (after-init . global-auto-revert-mode))
-
 
 ;; Grep ============================================== ;;
 
@@ -484,11 +496,7 @@ If point is at the end of the line, kill the whole line including the newline."
               ("M-/" . isearch-complete)
               ("M-e" . isearch-edit-string)
               ("M-s M-<" . isearch-beginning-of-buffer)
-              ("M-s M->" . isearch-end-of-buffer)
-              ("C-n" . isearch-repeat-forward)
-              ("C-p" . isearch-repeat-backward)
-              ("<down>" . isearch-repeat-forward)
-              ("<up>" . isearch-repeat-backward))
+              ("M-s M->" . isearch-end-of-buffer))
   :config
   (setq
    search-whitespace-regexp ".*?"
@@ -498,25 +506,22 @@ If point is at the end of the line, kill the whole line including the newline."
    isearch-wrap-pause 'no
    isearch-yank-on-move 'shift
    isearch-allow-scroll 'unlimited
-   isearch-allow-motion t ; Allow motion commands during isearch
-   isearch-motion-changes-direction t ; Motion commands change search direction
+   isearch-allow-motion t
+   isearch-motion-changes-direction t
    isearch-repeat-on-direction-change t
-   isearch-regexp-lax-whitespace t ; More flexible whitespace matching in regexp search
-   isearch-lax-whitespace t ; More flexible whitespace matching
-   lazy-highlight-initial-delay 0.1 ; Faster highlighting
-   lazy-highlight-interval 0 ; Highlight all matches immediately
-   lazy-highlight-max-at-a-time nil) ; No limit on highlighting
+   isearch-regexp-lax-whitespace t
+   lazy-highlight-initial-delay 0.1)
   
   ;; Occur integration - show all matches in a buffer
   (define-key isearch-mode-map (kbd "M-s o") 'isearch-occur)
   
   ;; Better visual feedback
-  (defun my/isearch-remove-failed-part ()
+  (defun kdb-isearch-remove-failed-part ()
     "Remove the failing part of the search string."
     (interactive)
     (while (isearch-fail-pos)
       (isearch-pop-state)))
-  (define-key isearch-mode-map (kbd "C-<backspace>") 'my/isearch-remove-failed-part)
+  (define-key isearch-mode-map (kbd "C-<backspace>") 'kdb-isearch-remove-failed-part)
   
   (define-key minibuffer-local-isearch-map (kbd "M-/") #'isearch-complete-edit))
 
@@ -562,7 +567,7 @@ If point is at the end of the line, kill the whole line including the newline."
   ;; Diff face customizations are now in uwu-theme.el
   
   ;; Custom function to toggle refinement
-  (defun my/diff-toggle-refine ()
+  (defun kdb-diff-toggle-refine ()
     "Toggle diff refinement between 'navigation and nil."
     (interactive)
     (setq diff-refine (if diff-refine nil 'navigation))
@@ -572,17 +577,17 @@ If point is at the end of the line, kill the whole line including the newline."
     (message "Diff refinement: %s" (if diff-refine "enabled" "disabled")))
   
   ;; Better navigation
-  (defun my/diff-navigate-and-refine (orig-fun &rest args)
+  (defun kdb-diff-navigate-and-refine (orig-fun &rest args)
     "Automatically refine hunk after navigation."
     (apply orig-fun args)
     (when diff-refine
       (diff-refine-hunk)))
   
-  (advice-add 'diff-hunk-next :around #'my/diff-navigate-and-refine)
-  (advice-add 'diff-hunk-prev :around #'my/diff-navigate-and-refine)
+  (advice-add 'diff-hunk-next :around #'kdb-diff-navigate-and-refine)
+  (advice-add 'diff-hunk-prev :around #'kdb-diff-navigate-and-refine)
   
   :bind (:map diff-mode-map
-              ("C-c C-r" . my/diff-toggle-refine)
+              ("C-c C-r" . kdb-diff-toggle-refine)
               ("n" . diff-hunk-next)
               ("p" . diff-hunk-prev)
               ("N" . diff-file-next)
@@ -704,6 +709,75 @@ If point is at the end of the line, kill the whole line including the newline."
   ;; Enable async byte compilation
   (async-bytecomp-package-mode 1))
 
+;; Terminal & Shell ====================================== ;;
+
+;; Eshell configuration with multiple instance support
+(use-package eshell
+  :ensure nil
+  :config
+  (setq eshell-history-size 10000
+        eshell-buffer-maximum-lines 10000
+        eshell-scroll-to-bottom-on-input t
+        eshell-destroy-buffer-when-process-dies t)
+  
+  ;; Better eshell prompt (simple version without magit dependency)
+  (defun kdb-eshell-prompt ()
+    "Custom Eshell prompt."
+    (concat
+     (propertize (abbreviate-file-name (eshell/pwd)) 'face 'font-lock-keyword-face)
+     (if (zerop (user-uid)) " # " " $ ")))
+  
+  (setq eshell-prompt-function 'kdb-eshell-prompt
+        eshell-prompt-regexp "^[^#$\n]* [#$] "))
+
+;; Function to create new eshell instances
+(defun kdb-eshell-new ()
+  "Create a new eshell buffer with a unique name."
+  (interactive)
+  (let ((eshell-buffer-name (generate-new-buffer-name "*eshell*")))
+    (eshell)))
+
+;; Function to toggle eshell
+(defun kdb-eshell-toggle ()
+  "Toggle eshell window at bottom of frame and focus it."
+  (interactive)
+  (let ((eshell-window (get-buffer-window "*eshell*")))
+    (if eshell-window
+        (if (eq (selected-window) eshell-window)
+            ;; If already in eshell, close it
+            (delete-window eshell-window)
+          ;; If eshell visible but not focused, focus it
+          (select-window eshell-window))
+      ;; If not visible, create/show and focus it
+      (let ((buf (or (get-buffer "*eshell*")
+                     (save-window-excursion (eshell)))))
+        (select-window
+         (display-buffer buf
+                         '((display-buffer-at-bottom)
+                           (window-height . 0.3))))))))
+
+;; Better terminal with vterm or eat (both excellent)
+;; Note: eat is in your custom.el as installed
+(when (package-installed-p 'eat)
+  (use-package eat
+    :config
+    (setq eat-kill-buffer-on-exit t
+          eat-enable-mouse t)
+    
+    (defun kdb-eat-new ()
+      "Create a new eat terminal with unique name."
+      (interactive)
+      (let ((eat-buffer-name (generate-new-buffer-name "*eat*")))
+        (eat)))))
+
+;; Function to create multiple terminal instances
+(defun kdb-terminal-new ()
+  "Create a new terminal buffer (eat if available, otherwise eshell)."
+  (interactive)
+  (if (fboundp 'eat)
+      (call-interactively 'kdb-eat-new)
+    (call-interactively 'kdb-eshell-new)))
+
 ;; Orderless ========================================== ;;
 
 (use-package orderless
@@ -758,7 +832,7 @@ If point is at the end of the line, kill the whole line including the newline."
         icomplete-with-completion-tables t
         icomplete-scroll t)
 
-  (global-set-key (kbd "C-`") 'fido-vertical-mode))
+)
 
 ;; Minibuffer ======================================== ;;
 
@@ -911,7 +985,7 @@ If point is at the end of the line, kill the whole line including the newline."
                       :underline '(:style wave :color "blue"))
 
   ;; Quick fix function
-  (defun my/flymake-quickfix ()
+  (defun kdb-flymake-quickfix ()
     "Apply quickfix at point if available."
     (interactive)
     (when-let* ((diag (get-char-property (point) 'flymake-diagnostic)))
@@ -920,12 +994,12 @@ If point is at the end of the line, kill the whole line including the newline."
           (funcall (plist-get data :quickfix))))))
 
   ;; Navigate only errors (skip warnings/notes)
-  (defun my/flymake-goto-next-error-only ()
+  (defun kdb-flymake-goto-next-error-only ()
     "Go to next error, skipping warnings and notes."
     (interactive)
     (flymake-goto-next-error nil '(:error)))
   
-  (defun my/flymake-goto-prev-error-only ()
+  (defun kdb-flymake-goto-prev-error-only ()
     "Go to previous error, skipping warnings and notes."
     (interactive)
     (flymake-goto-prev-error nil '(:error)))
@@ -936,9 +1010,9 @@ If point is at the end of the line, kill the whole line including the newline."
               ("C-c f s" . flymake-start)
               ("C-c f d" . flymake-show-buffer-diagnostics)
               ("C-c f D" . flymake-show-project-diagnostics)
-              ("C-c f n" . my/flymake-goto-next-error-only)
-              ("C-c f p" . my/flymake-goto-prev-error-only)
-              ("C-c f q" . my/flymake-quickfix)
+              ("C-c f n" . kdb-flymake-goto-next-error-only)
+              ("C-c f p" . kdb-flymake-goto-prev-error-only)
+              ("C-c f q" . kdb-flymake-quickfix)
               ("M-n" . flymake-goto-next-error)
               ("M-p" . flymake-goto-prev-error))
   :hook ((prog-mode . flymake-mode)
@@ -997,11 +1071,7 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package hl-todo
   :ensure t
-  :hook (after-init . global-hl-todo-mode)
-  :bind (:map hl-todo-mode-map
-              ("C-c t p" . hl-todo-previous)
-              ("C-c t n" . hl-todo-next)
-              ("C-c t o" . hl-todo-occur)))
+  :hook (after-init . global-hl-todo-mode))
 
 ;; Corfu ============================================== ;;
 
