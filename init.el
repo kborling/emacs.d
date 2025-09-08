@@ -19,14 +19,11 @@
   (when (file-exists-p personal-file)
     (load personal-file)))
 
-;; Custom ========================================== ;;
 
 (setq custom-file (locate-user-emacs-file "custom.el"))
 (load custom-file :no-error-if-file-is-missing)
 
-;; Performance Optimizations ====================== ;;
 
-;; Disable jsonrpc logging for better performance with LSP
 (fset #'jsonrpc--log-event #'ignore)
 
 ;; Native compilation settings to avoid battery drain
@@ -38,7 +35,6 @@
       jit-lock-defer-time 0
       jit-lock-stealth-time 0.2)
 
-;; Package ============================================= ;;
 
 (setq package-archives
       '(("gnu-elpa" . "https://elpa.gnu.org/packages/")
@@ -74,7 +70,6 @@
                (display-buffer-no-window)
                (allow-no-window . t)))
 
-;; Backups & File Organization ====================== ;;
 
 ;; Create var directory for cleaner organization
 (defvar user-emacs-var-directory
@@ -103,12 +98,10 @@
  url-cache-directory (expand-file-name "url/cache/" user-emacs-var-directory)
  url-configuration-directory (expand-file-name "url/configuration/" user-emacs-var-directory)
 
- ;; Additional file redirections
  bookmark-default-file (expand-file-name "bookmarks" user-emacs-var-directory)
  abbrev-file-name (expand-file-name "abbrev_defs" user-emacs-var-directory)
  nsm-settings-file (expand-file-name "network-security.data" user-emacs-var-directory))
 
-;; Defaults ========================================= ;;
 
 (setq
  sentence-end-double-space nil
@@ -129,7 +122,6 @@
 (when (display-graphic-p)
   (context-menu-mode))
 
-;; Persistent Features ============================== ;;
 
 ;; Recent files
 (use-package recentf
@@ -165,13 +157,11 @@
   (history-length 10000)
   (history-delete-duplicates t))
 
-
 ;; Undo/redo
 (setq undo-limit (* 13 160000)
       undo-strong-limit (* 13 240000)
       undo-outer-limit (* 13 24000000))
 
-;; Enable indentation+completion using the TAB key.
 (setq tab-always-indent 'complete)
 
 (setq-default indent-tabs-mode nil
@@ -304,7 +294,6 @@ If point is at the end of the line, kill the whole line including the newline."
       (kill-whole-line)
     (kill-line)))
 
-;; TAGS ============================================== ;;
 
 (defun kdb-create-tags (dir-name)
   "Create tags file using DIR-NAME."
@@ -312,7 +301,6 @@ If point is at the end of the line, kill the whole line including the newline."
   (shell-command
    (format "%s -f TAGS -e -R %s" (locate-file "ctags" exec-path) (directory-file-name dir-name))))
 
-;; Keybindings ======================================= ;;
 
 (defun kdb-setup-keybindings ()
   "Set up all custom keybindings."
@@ -384,7 +372,6 @@ If point is at the end of the line, kill the whole line including the newline."
                        ("C-c t f" . toggle-frame-fullscreen)))
       (define-key map (kbd (car binding)) (cdr binding)))))
 
-;; Set up keybindings after everything else loads
 (add-hook 'after-init-hook #'kdb-setup-keybindings)
 
 (defun kdb/keyboard-quit-dwim ()
@@ -402,7 +389,6 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (define-key global-map (kbd "C-g") #'kdb/keyboard-quit-dwim)
 
-;; OSX ============================================= ;;
 ;; (when (eq system-type 'darwin)
 ;;   (select-frame-set-input-focus (selected-frame))
 ;;   (setq mac-option-modifier nil
@@ -411,7 +397,6 @@ If point is at the end of the line, kill the whole line including the newline."
 ;;         mac-right-option-modifier 'alt
 ;;         mac-command-modifier 'meta))
 
-;; Ansi-term ====================================== ;;
 
 (defadvice kdb-ansi-term (before force-bash)
   "Set the default shell to bash."
@@ -431,29 +416,27 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (add-hook 'term-exec-hook 'kdb-term-exec-hook)
 
+;; Ansi-term ====================================== ;;
+
 ;; Paste into term
 (eval-after-load "term"
   '(define-key term-raw-map (kbd "C-c C-y") 'term-paste))
 
-;; Auto Revert ====================================== ;;
 
 (use-package autorevert
   :ensure nil
   :hook (after-init . global-auto-revert-mode))
 
-;; Grep ============================================== ;;
 
 (use-package grep
   :ensure nil
   :config
-  ;; Use ripgrep for grep-command
   (setq grep-command "rg --color=never --no-heading --line-number --smart-case "
         ;; grep-find-command
         ;; (concat "fd --type f --hidden --follow --exclude .git | "
         ;;         "xargs rg --color=never --no-heading --line-number --smart-case ")
         grep-use-null-device nil))
 
-;; Deadgrep ========================================== ;;
 
 (use-package deadgrep
   :ensure t
@@ -461,7 +444,6 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq deadgrep-extra-arguments '("--no-config" "--multiline"))
   (global-set-key (kbd "C-x g") #'deadgrep))
 
-;; Xref ============================================== ;;
 
 (use-package xref
   :ensure nil
@@ -472,7 +454,6 @@ If point is at the end of the line, kill the whole line including the newline."
    xref-search-program 'ripgrep))
 
 
-;; Which Key ========================================= ;;
 
 (use-package which-key
   :ensure nil
@@ -480,14 +461,12 @@ If point is at the end of the line, kill the whole line including the newline."
   :config
   (which-key-mode))
 
-;; EditorConfig ======================================== ;;
 
 (use-package editorconfig
   :ensure nil
   :config
   (editorconfig-mode 1))
 
-;; ISearch =========================================== ;;
 
 (use-package isearch
   :ensure nil
@@ -515,7 +494,6 @@ If point is at the end of the line, kill the whole line including the newline."
   ;; Occur integration - show all matches in a buffer
   (define-key isearch-mode-map (kbd "M-s o") 'isearch-occur)
   
-  ;; Better visual feedback
   (defun kdb-isearch-remove-failed-part ()
     "Remove the failing part of the search string."
     (interactive)
@@ -525,7 +503,6 @@ If point is at the end of the line, kill the whole line including the newline."
   
   (define-key minibuffer-local-isearch-map (kbd "M-/") #'isearch-complete-edit))
 
-;; Dabbrev =========================================== ;;
 
 (use-package dabbrev
   :ensure nil
@@ -544,7 +521,6 @@ If point is at the end of the line, kill the whole line including the newline."
    dabbrev-ignored-buffer-modes
    '(archive-mode image-mode docview-mode pdf-view-mode)))
 
-;; Diff ========================================= ;;
 
 (use-package diff-mode
   :ensure nil
@@ -554,7 +530,6 @@ If point is at the end of the line, kill the whole line including the newline."
                         (diff-refine-hunk)
                         (outline-minor-mode 1))))
   :config
-  ;; Enhanced diff settings for magit-like appearance
   (setq
    diff-refine nil  ; Disable refinement
    diff-font-lock-prettify nil  ; Disable prettification
@@ -564,9 +539,6 @@ If point is at the end of the line, kill the whole line including the newline."
    diff-advance-after-apply-hunk t
    diff-default-read-only t)  ; Make diff buffers read-only by default
   
-  ;; Diff face customizations are now in uwu-theme.el
-  
-  ;; Custom function to toggle refinement
   (defun kdb-diff-toggle-refine ()
     "Toggle diff refinement between 'navigation and nil."
     (interactive)
@@ -576,7 +548,6 @@ If point is at the end of the line, kill the whole line including the newline."
       (diff-unrefine-hunk))
     (message "Diff refinement: %s" (if diff-refine "enabled" "disabled")))
   
-  ;; Better navigation
   (defun kdb-diff-navigate-and-refine (orig-fun &rest args)
     "Automatically refine hunk after navigation."
     (apply orig-fun args)
@@ -612,7 +583,6 @@ If point is at the end of the line, kill the whole line including the newline."
    ediff-split-window-function 'split-window-horizontally
    ediff-window-setup-function 'ediff-setup-windows-plain))
 
-;; Dired ============================================= ;;
 
 (use-package dired
   :ensure nil
@@ -640,13 +610,11 @@ If point is at the end of the line, kill the whole line including the newline."
   (when (eq system-type 'darwin)
     (setq dired-use-ls-dired nil))     ; macOS ls doesn't support --dired
 
-  ;; Better keybindings
   :bind (:map dired-mode-map
               ("E" . dired-toggle-read-only)
               ("?" . dired-summary)
               ("C-c C-e" . wdired-change-to-wdired-mode)))
 
-;; Ibuffer ============================================== ;;
 
 (use-package ibuffer
   :ensure nil
@@ -661,33 +629,44 @@ If point is at the end of the line, kill the whole line including the newline."
    ibuffer-use-header-line t
    ibuffer-default-shrink-to-minimum-size nil
 
-   ;; Additional useful settings
    ibuffer-show-empty-filter-groups nil  ; Hide empty groups
    ibuffer-saved-filter-groups
    '(("Default"
-      ("Emacs Config" (filename . "\\.emacs\\.d"))
-      ("Projects" (filename . "Projects/"))
+      ("Emacs Config" (or (filename . "\\.emacs\\.d")
+                          (name . "^\\*scratch\\*")
+                          (name . "^\\*Messages\\*")))
+      ("VC/Git" (or (name . "^\\*magit")
+                    (name . "^\\*vc-")
+                    (name . "^\\*git-")
+                    (mode . diff-mode)
+                    (mode . log-view-mode)))
+      ("Terminal" (or (mode . eshell-mode)
+                      (mode . shell-mode)
+                      (mode . term-mode)
+                      (name . "^\\*eat\\*")))
+      ("Org" (or (mode . org-mode)
+                 (mode . org-agenda-mode)
+                 (filename . "\\.org$")))
       ("Programming" (derived-mode . prog-mode))
       ("Dired" (mode . dired-mode))
-      ("Org" (or (mode . org-mode)
-                 (mode . org-agenda-mode)))
-      ("Magit" (name . "^\\*magit"))
-      ("Help" (or (name . "^\\*Help\\*")
-                  (name . "^\\*Apropos\\*")
-                  (name . "^\\*info\\*")
-                  (name . "^\\*Messages\\*")))
+      ("Completion" (or (name . "^\\*Completions\\*")
+                        (name . "^\\*Flymake")
+                        (name . "^\\*company")
+                        (name . "^\\*corfu")))
+      ("Help/Info" (or (name . "^\\*Help\\*")
+                       (name . "^\\*Apropos\\*")
+                       (name . "^\\*info\\*")
+                       (name . "^\\*Man ")
+                       (mode . helpful-mode)))
       ("Special" (name . "^\\*")))))
 
-  ;; Auto-use the saved filter groups
   (add-hook 'ibuffer-mode-hook
             (lambda () (ibuffer-switch-to-saved-filter-groups "Default")))
 
-  ;; Better keybindings
   :bind (:map ibuffer-mode-map
               ("M-o" . other-window)
               ("/" . ibuffer-filter-by-name)))
 
-;; Project ============================================ ;;
 
 (use-package project
   :ensure nil
@@ -696,7 +675,6 @@ If point is at the end of the line, kill the whole line including the newline."
    vc-directory-exclusion-list (nconc vc-directory-exclusion-list '("node_modules" "elpa" ".sl"))
    project-vc-extra-root-markers '(".envrc" "package.json" ".project" ".sl")))
 
-;; Async ============================================== ;;
 
 (use-package async
   :ensure t
@@ -706,12 +684,9 @@ If point is at the end of the line, kill the whole line including the newline."
     (require 'dired-async)
     (dired-async-mode 1))
   :config
-  ;; Enable async byte compilation
   (async-bytecomp-package-mode 1))
 
-;; Terminal & Shell ====================================== ;;
 
-;; Eshell configuration with multiple instance support
 (use-package eshell
   :ensure nil
   :config
@@ -720,7 +695,6 @@ If point is at the end of the line, kill the whole line including the newline."
         eshell-scroll-to-bottom-on-input t
         eshell-destroy-buffer-when-process-dies t)
   
-  ;; Better eshell prompt (simple version without magit dependency)
   (defun kdb-eshell-prompt ()
     "Custom Eshell prompt."
     (concat
@@ -730,14 +704,12 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq eshell-prompt-function 'kdb-eshell-prompt
         eshell-prompt-regexp "^[^#$\n]* [#$] "))
 
-;; Function to create new eshell instances
 (defun kdb-eshell-new ()
   "Create a new eshell buffer with a unique name."
   (interactive)
   (let ((eshell-buffer-name (generate-new-buffer-name "*eshell*")))
     (eshell)))
 
-;; Function to toggle eshell
 (defun kdb-eshell-toggle ()
   "Toggle eshell window at bottom of frame and focus it."
   (interactive)
@@ -756,8 +728,6 @@ If point is at the end of the line, kill the whole line including the newline."
                          '((display-buffer-at-bottom)
                            (window-height . 0.3))))))))
 
-;; Better terminal with vterm or eat (both excellent)
-;; Note: eat is in your custom.el as installed
 (when (package-installed-p 'eat)
   (use-package eat
     :config
@@ -770,7 +740,6 @@ If point is at the end of the line, kill the whole line including the newline."
       (let ((eat-buffer-name (generate-new-buffer-name "*eat*")))
         (eat)))))
 
-;; Function to create multiple terminal instances
 (defun kdb-terminal-new ()
   "Create a new terminal buffer (eat if available, otherwise eshell)."
   (interactive)
@@ -778,7 +747,6 @@ If point is at the end of the line, kill the whole line including the newline."
       (call-interactively 'kdb-eat-new)
     (call-interactively 'kdb-eshell-new)))
 
-;; Orderless ========================================== ;;
 
 (use-package orderless
   :ensure t
@@ -791,7 +759,6 @@ If point is at the end of the line, kill the whole line including the newline."
   :config
   (setq orderless-matching-styles '(orderless-prefixes orderless-regexp)))
 
-;; Fussy =============================================== ;;
 
 (use-package fussy
   :config
@@ -811,7 +778,6 @@ If point is at the end of the line, kill the whole line including the newline."
                           fussy-default-regex-fn 'fussy-pattern-first-letter
                           fussy-prefer-prefix nil))))
 
-;; Icomplete ========================================= ;;
 
 (use-package icomplete
   :ensure nil
@@ -834,7 +800,6 @@ If point is at the end of the line, kill the whole line including the newline."
 
 )
 
-;; Minibuffer ======================================== ;;
 
 (use-package minibuffer
   :ensure nil
@@ -864,7 +829,6 @@ If point is at the end of the line, kill the whole line including the newline."
               ("C-n" . minibuffer-next-completion)
               ("RET" . minibuffer-choose-completion)))
 
-;; Eglot ============================================== ;;
 
 (use-package eglot
   :ensure nil
@@ -958,7 +922,6 @@ If point is at the end of the line, kill the whole line including the newline."
   :vc (:url "https://github.com/jdtsmith/eglot-booster" :rev :newest)
   :config (eglot-booster-mode))
 
-;; Flymake ========================================= ;;
 (use-package flymake
   :ensure nil
   :config
@@ -976,7 +939,6 @@ If point is at the end of the line, kill the whole line including the newline."
      flymake-mode-line-warning-counter
      flymake-mode-line-note-counter ""))
 
-  ;; Custom faces for better visibility
   (set-face-attribute 'flymake-error nil
                       :underline '(:style wave :color "red"))
   (set-face-attribute 'flymake-warning nil
@@ -984,7 +946,6 @@ If point is at the end of the line, kill the whole line including the newline."
   (set-face-attribute 'flymake-note nil
                       :underline '(:style wave :color "blue"))
 
-  ;; Quick fix function
   (defun kdb-flymake-quickfix ()
     "Apply quickfix at point if available."
     (interactive)
@@ -993,7 +954,6 @@ If point is at the end of the line, kill the whole line including the newline."
         (when (plist-get data :quickfix)
           (funcall (plist-get data :quickfix))))))
 
-  ;; Navigate only errors (skip warnings/notes)
   (defun kdb-flymake-goto-next-error-only ()
     "Go to next error, skipping warnings and notes."
     (interactive)
@@ -1024,7 +984,6 @@ If point is at the end of the line, kill the whole line including the newline."
                     (cons 'flymake-eldoc-function
                           (delq 'flymake-eldoc-function eldoc-documentation-functions))))))
 
-;; Eldoc ============================================ ;;
 
 (use-package eldoc
   :ensure nil
@@ -1037,7 +996,6 @@ If point is at the end of the line, kill the whole line including the newline."
 ;;   :after eldoc
 ;;   :hook (eglot-managed-mode-hook . eldoc-box-hover-mode))
 
-;; Exec Path ========================================= ;;
 
 (use-package exec-path-from-shell
   :ensure t
@@ -1046,7 +1004,6 @@ If point is at the end of the line, kill the whole line including the newline."
   ;; (setq exec-path-from-shell-variables '("PATH" "GOPATH"))
   (exec-path-from-shell-initialize))
 
-;; Version Control =============================================== ;;
 
 ;; Add lisp directory to load path
 (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
@@ -1058,7 +1015,6 @@ If point is at the end of the line, kill the whole line including the newline."
 (require 'init-org)
 
 
-;; Marginalia ======================================== ;;
 
 (use-package marginalia
   :ensure t
@@ -1067,13 +1023,11 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq marginalia-max-relative-age 0
         marginalia-align-offset 10))
 
-;; Highlight TODOs ===================================== ;;
 
 (use-package hl-todo
   :ensure t
   :hook (after-init . global-hl-todo-mode))
 
-;; Corfu ============================================== ;;
 
 (use-package corfu
   :ensure t
@@ -1090,7 +1044,6 @@ If point is at the end of the line, kill the whole line including the newline."
     (corfu-history-mode 1)
     (add-to-list 'savehist-additional-variables 'corfu-history)))
 
-;; Cape ================================================ ;;
 
 (use-package cape
   :config
@@ -1104,7 +1057,6 @@ If point is at the end of the line, kill the whole line including the newline."
   ;; https://github.com/minad/corfu/wiki#continuously-update-the-candidates
   (advice-add 'eglot-completion-at-point :around #'cape-wrap-buster))
 
-;; Templates =========================================== ;;
 
 (use-package tempel
   :bind (("C-<tab>" . tempel-complete)
@@ -1115,7 +1067,6 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package tempel-collection
   :after tempel)
 
-;; Treesitter ========================================== ;;
 
 (use-package treesit
   :ensure nil
@@ -1136,10 +1087,8 @@ If point is at the end of the line, kill the whole line including the newline."
   (combobulate-key-prefix "C-c o")
   (combobulate-flash-node t)
   (combobulate-dimmer-mode t)
-  ;; Auto-expand region to meaningful boundaries
   (combobulate-envelope-indent-region-function #'indent-region)
   :hook
-  ;; Enable for specific modes that have tree-sitter support
   ((python-ts-mode . combobulate-mode)
    (js-ts-mode . combobulate-mode)
    (tsx-ts-mode . combobulate-mode)
@@ -1178,7 +1127,6 @@ If point is at the end of the line, kill the whole line including the newline."
         ;; Envelopes (wrapping)
         ("C-c o e" . combobulate-envelope-dwim)))
 
-;; Treesit Expand ==================================== ;;
 
 (use-package treesit-expand
   :ensure nil
@@ -1188,7 +1136,6 @@ If point is at the end of the line, kill the whole line including the newline."
          ("C-c e e" . treesit-expand-region)
          ("C-c e q" . treesit-expand-reset)))
 
-;; Multiple Cursors ================================== ;;
 
 (use-package multiple-cursors
   :bind (("C->" . mc/mark-next-like-this)
@@ -1196,13 +1143,11 @@ If point is at the end of the line, kill the whole line including the newline."
          ("C-'" . mc/mark-all-like-this)
          ("C-S-c C-S-c" . mc/mark-edit-lines)))
 
-;; So Long =========================================== ;;
 
 (use-package so-long
   :ensure nil
   :hook (after-init . global-so-long-mode))
 
-;; Angular =========================================== ;;
 
 (use-package angular-mode
   :vc (:url "https://github.com/kborling/angular-mode" :rev :newest)
@@ -1262,7 +1207,6 @@ If point is at the end of the line, kill the whole line including the newline."
   :config
   (add-to-list 'auto-mode-alist '("\\.cshtml\\'" . html-mode)))
 
-;; Memmet Mode ======================================= ;;
 
 (use-package memmet-mode
   :vc (:url "https://github.com/kborling/memmet-mode" :rev :newest)
@@ -1270,21 +1214,18 @@ If point is at the end of the line, kill the whole line including the newline."
               ("C-<tab>" . memmet-expand))
   :hook (html-mode . memmet-mode))
 
-;; XML Mode ======================================= ;;
 
 (use-package xml-mode
   :ensure nil
   :config
   (add-to-list 'auto-mode-alist '("\\.csproj\\'" . xml-mode)))
 
-;; Conf Mode ====================================== ;;
 
 (use-package conf-mode
   :ensure nil
   :config
   (add-to-list 'auto-mode-alist '("\\.sln\\'" . conf-mode)))
 
-;; Rust ============================================ ;;
 
 (use-package rust-mode
   :init
@@ -1315,20 +1256,17 @@ If point is at the end of the line, kill the whole line including the newline."
   
   ;; Windows-specific settings
   (when (eq system-type 'windows-nt)
-    ;; Use PowerShell or Git Bash on Windows
     (setq eat-shell (or (executable-find "pwsh")
                         (executable-find "powershell")
                         (executable-find "bash")
                         "cmd.exe")))
   
-  ;; Better colors and display
   (setq eat-term-name "xterm-256color")
   
   ;; Eshell integration
   (add-hook 'eshell-load-hook #'eat-eshell-mode)
   (add-hook 'eshell-load-hook #'eat-eshell-visual-command-mode)
   
-  ;; Better keybindings in eat mode
   (add-hook 'eat-mode-hook
             (lambda ()
               (define-key eat-semi-char-mode-map (kbd "C-c C-c") 'eat-self-input)

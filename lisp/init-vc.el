@@ -17,13 +17,11 @@
         vc-git-print-log-follow t
         vc-git-log-edit-summary-target-len 50
         vc-git-log-edit-summary-max-len 70
-        ;; Cleaner log output with pretty format
         vc-git-log-switches '("--graph" 
                               "--pretty=format:%h %s" 
                               "--abbrev-commit"
                               "--date=short"))
   
-  ;; Enhanced vc-diff appearance
   (defun kdb-vc-diff-enhanced (&optional historic not-urgent)
     "Enhanced vc-diff with better visual presentation."
     (interactive "P")
@@ -38,7 +36,6 @@
         (when (re-search-forward "^@@" nil t)
           (beginning-of-line)))))
   
-  ;; Hook to enhance vc-diff buffers
   (add-hook 'vc-diff-finish-functions
             (lambda ()
               (when (string-match-p "\\*vc-diff\\*" (buffer-name))
@@ -46,7 +43,6 @@
                 (when diff-refine
                   (diff-refine-hunk)))))
   
-  ;; Custom navigation for git log format
   (defun kdb-vc-log-next-commit ()
     "Navigate to next commit in log."
     (interactive)
@@ -65,19 +61,16 @@
       (forward-line -1))
     (beginning-of-line))
   
-  ;; Enhanced vc-log appearance
   (defun kdb-vc-log-enhanced ()
     "Enhanced vc-log with better colors and navigation."
     (interactive)
     (call-interactively 'vc-print-log)
     (when (get-buffer "*vc-change-log*")
       (with-current-buffer "*vc-change-log*"
-        ;; Add custom keybindings for navigation
         (local-set-key (kbd "n") 'kdb-vc-log-next-commit)
         (local-set-key (kbd "p") 'kdb-vc-log-prev-commit)
         (local-set-key (kbd "TAB") 'kdb-vc-log-next-commit)
         (local-set-key (kbd "<backtab>") 'kdb-vc-log-prev-commit)
-        ;; Add font-lock keywords
         (font-lock-add-keywords
          nil
          '(;; Branch merge/split indicators (|/ or |\)
@@ -93,7 +86,6 @@
          t)
         (font-lock-fontify-buffer))))
   
-  ;; Enhanced functions available in VC transient menu
   )
 
 ;; Log-view configuration

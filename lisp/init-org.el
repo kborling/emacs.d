@@ -8,7 +8,6 @@
 (use-package org
   ;; :ensure nil
   :config
-  ;; Basic Org settings
   (setq org-ellipsis "…"
         org-use-sub-superscripts "{}"
         org-pretty-entities t
@@ -24,16 +23,13 @@
         org-special-ctrl-a/e t
         org-insert-heading-respect-content t)
 
-  ;; Source code blocks
   (setq org-confirm-babel-evaluate nil
         org-src-window-setup 'current-window
         org-edit-src-persistent-message nil)
 
-  ;; Todo keywords for task management
   (setq org-todo-keywords
         '((sequence "TODO(t)" "WAITING(w)" "FOLLOWUP(f)" "|" "DONE(d)" "CANCELLED(c)")))
 
-  ;; Agenda configuration
   (setq org-agenda-files '("~/.org/contacts.org" "~/.org/notes.org")
         org-log-done 'time
         org-agenda-include-diary nil
@@ -42,7 +38,6 @@
         org-agenda-skip-scheduled-if-done t
         org-agenda-skip-deadline-if-done t)
 
-  ;; Custom agenda views for work
   (setq org-agenda-custom-commands
         '(("w" "Work Overview"
            ((agenda "" ((org-agenda-span 7)
@@ -65,7 +60,6 @@
                    (org-agenda-skip-function
                     '(org-agenda-skip-entry-if 'notregexp "\\[2025-.*\\]"))))))))
 
-  ;; Structure templates
   (setq org-structure-template-alist
         '(("s" . "src")
           ("E" . "src emacs-lisp")
@@ -76,7 +70,6 @@
           ("c" . "center")
           ("C" . "comment")))
 
-  ;; Babel languages
   (org-babel-do-load-languages
    'org-babel-load-languages
    '((emacs-lisp . t)
@@ -84,7 +77,6 @@
      (restclient . t)
      (python . t)))
 
-  ;; Org keybindings
   :bind (("C-c o a" . org-agenda)
          ("C-c o c" . org-capture)))
 
@@ -92,21 +84,13 @@
   :after org
   :hook (org-mode . org-modern-mode)
   :config
-  ;; Windows font compatibility fixes
   (when (eq system-type 'windows-nt)
-    ;; Use simple ASCII bullets instead of Unicode symbols
     (setq org-modern-star '("◉" "○" "✸" "✿" "✤" "✜" "◆" "▶")
-          ;; Alternative: use even simpler bullets if above don't work
-          ;; org-modern-star '("●" "○" "◦" "▪" "▫" "▸" "▹" "▸")
-          ;; Or minimal ASCII-only option:
-          ;; org-modern-star '("*" "+" "-" "*" "+" "-" "*" "+")
-
-          ;; Disable problematic Unicode elements
           org-modern-list '((?+ . "•") (?- . "–") (?* . "•"))
-          org-modern-block-name '("▼" . "▶")  ; Simple arrows
-          org-modern-keyword nil  ; Disable fancy keywords
+          org-modern-block-name '("▼" . "▶")
+          org-modern-keyword nil
           org-modern-checkbox '((?X . "☑") (?- . "◐") (?\s . "☐"))
-          org-modern-horizontal-rule "─"  ; Simple line
+          org-modern-horizontal-rule "─"
           )))
 
 ;; Load org-templates and org-contacts
@@ -119,7 +103,6 @@
     (message "Loading org-contacts from: %s" org-contacts-file) 
     (load org-contacts-file nil t)
     
-    ;; Define keybindings after loading contacts
     (global-set-key (kbd "C-c o n") 'kdb/add-contact)
     (global-set-key (kbd "C-c o m") 'kdb/add-meeting-note)
     (global-set-key (kbd "C-c o A") 'kdb/add-accomplishment)
