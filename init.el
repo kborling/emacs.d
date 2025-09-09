@@ -1014,6 +1014,9 @@ If point is at the end of the line, kill the whole line including the newline."
 ;; Load Org configuration
 (require 'init-org)
 
+;; Load encryption configuration
+(require 'init-encryption)
+
 
 
 (use-package marginalia
@@ -1288,6 +1291,7 @@ If point is at the end of the line, kill the whole line including the newline."
          ("M-7" . winum-select-window-7)
          ("M-8" . winum-select-window-8)
          ("M-9" . winum-select-window-9)))
+
 
 ;; Local Variables:
 ;; no-byte-compile: t
