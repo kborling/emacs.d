@@ -27,7 +27,8 @@ Files should be specified with their full paths or using ~ for home directory."
                           "gpg"))
 
 ;; Use loopback for pinentry to avoid GUI popups
-(setq epg-pinentry-mode 'loopback)
+;; Comment out for GUI pinentry-mac
+;; (setq epg-pinentry-mode 'loopback)
 
 ;; Automatically select keys for encryption
 (setq epa-file-select-keys nil)  ; Use default key
@@ -35,6 +36,10 @@ Files should be specified with their full paths or using ~ for home directory."
 ;; Cache passphrases for convenience (adjust timeout as needed)
 (setq epa-file-cache-passphrase-for-symmetric-encryption t)
 (setq password-cache-expiry 3600)  ; Cache for 1 hour
+
+;; Allow multiple password attempts
+(setq epa-file-inhibit-auto-save t)  ; Don't auto-save encrypted files
+(setq epg-passphrase-coding-system 'utf-8)
 
 ;; Function to check if a file should be encrypted
 (defun kdb-should-encrypt-file-p (file)
@@ -148,6 +153,35 @@ Files should be specified with their full paths or using ~ for home directory."
 
 ;; Check org files after saving
 (advice-add 'org-save-all-org-buffers :after #'kdb-org-check-encryption)
+
+;; Wrapper for safe file operations with retry
+(defun kdb-with-encrypted-file (file operation &rest args)
+  "Execute OPERATION on FILE with decryption retry support.
+If decryption fails, offer to retry or skip."
+  (condition-case err
+      (apply operation file args)
+    (file-error
+     (if (and (string-match-p "\\.gpg\\'" file)
+              (yes-or-no-p (format "Failed to decrypt %s. Retry? " 
+                                   (file-name-nondirectory file))))
+         ;; Clear password cache and retry
+         (progn
+           (password-cache-remove file)
+           (apply operation file args))
+       (signal (car err) (cdr err))))
+    (epg-error
+     (if (yes-or-no-p (format "Decryption error for %s. Retry? " 
+                              (file-name-nondirectory file)))
+         (progn
+           (password-cache-remove file)
+           (apply operation file args))
+       (message "Skipping encrypted file operation")))))
+
+;; Helper to open encrypted files with retry
+(defun kdb-find-encrypted-file (file)
+  "Open FILE with automatic retry on decryption failure."
+  (interactive "fFile: ")
+  (kdb-with-encrypted-file file #'find-file))
 
 (provide 'init-encryption)
 ;;; init-encryption.el ends here

@@ -30,7 +30,12 @@
   (setq org-todo-keywords
         '((sequence "TODO(t)" "WAITING(w)" "FOLLOWUP(f)" "|" "DONE(d)" "CANCELLED(c)")))
 
-  (setq org-agenda-files '("~/.org/contacts.org" "~/.org/notes.org")
+  ;; Check for encrypted version first, fall back to regular org file
+  (setq org-agenda-files 
+        (list (if (file-exists-p "~/.org/contacts.org.gpg")
+                  "~/.org/contacts.org.gpg"
+                "~/.org/contacts.org")
+              "~/.org/notes.org")
         org-log-done 'time
         org-agenda-include-diary nil
         org-agenda-start-on-weekday nil
