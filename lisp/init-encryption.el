@@ -30,8 +30,18 @@ Files should be specified with their full paths or using ~ for home directory."
 ;; Comment out for GUI pinentry-mac
 ;; (setq epg-pinentry-mode 'loopback)
 
-;; Automatically select keys for encryption
-(setq epa-file-select-keys nil)  ; Use default key
+;; Encryption method configuration
+(defcustom kdb-encryption-method 'symmetric
+  "Encryption method to use: 'symmetric, 'asymmetric, or 'ask.
+Symmetric is recommended for multi-machine use."
+  :type '(choice (const :tag "Symmetric (password-only)" symmetric)
+                 (const :tag "Asymmetric (GPG key)" asymmetric)  
+                 (const :tag "Ask each time" ask))
+  :group 'encryption)
+
+;; Default to symmetric for better portability
+(setq epa-file-select-keys 'symmetric)  ; Use symmetric by default
+(setq epa-file-encrypt-to nil)  ; Don't use public key by default
 
 ;; Cache passphrases for convenience (adjust timeout as needed)
 (setq epa-file-cache-passphrase-for-symmetric-encryption t)
@@ -48,6 +58,25 @@ Files should be specified with their full paths or using ~ for home directory."
     (cl-some (lambda (pattern)
                (string-equal expanded-file (expand-file-name pattern)))
              kdb-encrypted-files)))
+
+;; Setup encryption method for specific files
+(defun kdb-setup-file-encryption-method ()
+  "Setup encryption method based on file and configuration."
+  (when (string-match "\\.gpg\\'" buffer-file-name)
+    (pcase kdb-encryption-method
+      ('symmetric 
+       (setq-local epa-file-encrypt-to nil
+                   epa-file-select-keys 'symmetric))
+      ('asymmetric
+       (setq-local epa-file-select-keys nil))
+      ('ask
+       (if (y-or-n-p "Use symmetric encryption (password-only)? ")
+           (setq-local epa-file-encrypt-to nil
+                       epa-file-select-keys 'symmetric)
+         (setq-local epa-file-select-keys nil))))))
+
+;; Hook to setup encryption when finding .gpg files
+(add-hook 'find-file-hook #'kdb-setup-file-encryption-method)
 
 ;; Function to setup encryption for a file
 (defun kdb-setup-file-encryption ()
@@ -129,6 +158,20 @@ Files should be specified with their full paths or using ~ for home directory."
   (customize-save-variable 'kdb-encrypted-files kdb-encrypted-files)
   (message "Removed %s from encryption list" file))
 
+;; Function to switch encryption method
+(defun kdb-switch-encryption-method ()
+  "Switch between symmetric and asymmetric encryption."
+  (interactive)
+  (let ((method (completing-read "Encryption method: " 
+                                 '("symmetric" "asymmetric" "ask") 
+                                 nil t nil nil 
+                                 (symbol-name kdb-encryption-method))))
+    (setq kdb-encryption-method (intern method))
+    (customize-save-variable 'kdb-encryption-method kdb-encryption-method)
+    (message "Encryption method set to: %s" method)
+    (when (string-match "\\.gpg\\'" (or buffer-file-name ""))
+      (kdb-setup-file-encryption-method))))
+
 ;; Create menu for encryption functions
 (define-prefix-command 'kdb-encryption-map)
 (define-key global-map (kbd "C-c E") 'kdb-encryption-map)
@@ -136,10 +179,13 @@ Files should be specified with their full paths or using ~ for home directory."
 (define-key kdb-encryption-map (kbd "d") #'kdb-decrypt-file)
 (define-key kdb-encryption-map (kbd "a") #'kdb-add-file-to-encryption)
 (define-key kdb-encryption-map (kbd "r") #'kdb-remove-file-from-encryption)
+(define-key kdb-encryption-map (kbd "m") #'kdb-switch-encryption-method)
 (define-key kdb-encryption-map (kbd "l") 
   (lambda () 
     (interactive) 
-    (message "Encrypted files: %s" (mapconcat 'identity kdb-encrypted-files ", "))))
+    (message "Encrypted files: %s | Method: %s" 
+             (mapconcat 'identity kdb-encrypted-files ", ")
+             kdb-encryption-method)))
 
 ;; Advice for org-mode files
 (defun kdb-org-check-encryption (&rest _)
