@@ -95,19 +95,20 @@ Symmetric is recommended for multi-machine use."
       (save-buffer)
       (message "File encrypted and saved as %s" new-name))))
 
-;; Function to transparently handle encrypted files
-(defun kdb-handle-encrypted-file ()
-  "Handle opening of files that should be encrypted."
+;; Function to optionally redirect to encrypted file
+(defun kdb-prompt-for-encrypted-file ()
+  "Prompt user to open encrypted version if it exists."
   (when (and buffer-file-name
              (kdb-should-encrypt-file-p buffer-file-name)
              (not (string-suffix-p ".gpg" buffer-file-name))
              (file-exists-p (concat buffer-file-name ".gpg")))
-    ;; If the .gpg version exists, open that instead
-    (let ((gpg-file (concat buffer-file-name ".gpg")))
-      (find-alternate-file gpg-file))))
+    ;; Only prompt, don't automatically redirect
+    (when (y-or-n-p (format "Encrypted version exists (%s.gpg). Open that instead? " 
+                            (file-name-nondirectory buffer-file-name)))
+      (let ((gpg-file (concat buffer-file-name ".gpg")))
+        (find-alternate-file gpg-file)))))
 
-;; Hook to check files when opening
-(add-hook 'find-file-hook #'kdb-handle-encrypted-file)
+;; Removed automatic hook - user must explicitly choose
 
 ;; Function to encrypt an existing file
 (defun kdb-encrypt-file (file)
@@ -158,6 +159,19 @@ Symmetric is recommended for multi-machine use."
   (customize-save-variable 'kdb-encrypted-files kdb-encrypted-files)
   (message "Removed %s from encryption list" file))
 
+;; Function to open encrypted version of current file
+(defun kdb-open-encrypted-version ()
+  "Open the encrypted (.gpg) version of the current file if it exists."
+  (interactive)
+  (if buffer-file-name
+      (let ((gpg-file (concat buffer-file-name ".gpg")))
+        (if (file-exists-p gpg-file)
+            (find-alternate-file gpg-file)
+          (if (y-or-n-p "No encrypted version exists. Create one? ")
+              (kdb-setup-file-encryption)
+            (message "No encrypted version found"))))
+    (message "No file associated with current buffer")))
+
 ;; Function to switch encryption method
 (defun kdb-switch-encryption-method ()
   "Switch between symmetric and asymmetric encryption."
@@ -179,6 +193,7 @@ Symmetric is recommended for multi-machine use."
 (define-key kdb-encryption-map (kbd "d") #'kdb-decrypt-file)
 (define-key kdb-encryption-map (kbd "a") #'kdb-add-file-to-encryption)
 (define-key kdb-encryption-map (kbd "r") #'kdb-remove-file-from-encryption)
+(define-key kdb-encryption-map (kbd "o") #'kdb-open-encrypted-version)
 (define-key kdb-encryption-map (kbd "m") #'kdb-switch-encryption-method)
 (define-key kdb-encryption-map (kbd "l") 
   (lambda () 
