@@ -10,11 +10,11 @@
   :config
   (setq org-ellipsis "…"
         org-use-sub-superscripts "{}"
-        org-pretty-entities t
-        org-hide-emphasis-markers t
+        org-pretty-entities (not (eq system-type 'windows-nt)) ; Disable on Windows
+        org-hide-emphasis-markers (not (eq system-type 'windows-nt)) ; Disable on Windows
         org-hide-leading-stars t
         org-directory "~/.org/"
-        org-startup-indented t
+        org-startup-indented (not (eq system-type 'windows-nt)) ; Disable on Windows for speed
         org-src-preserve-indentation t
         org-edit-src-content-indentation 0
         org-auto-align-tags nil

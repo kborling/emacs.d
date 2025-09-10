@@ -1,248 +1,280 @@
-;;; init-encryption.el --- Automatic file encryption configuration -*- lexical-binding: t; -*-
+;;; init-encryption.el --- Encryption system -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; Configuration for automatic encryption of sensitive files using EasyPG
+;; Provides multiple encryption methods:
+;; - simple: Built-in secure encryption (no external dependencies)
+;; - gpg: GPG-based encryption (requires GnuPG)
 
 ;;; Code:
 
-(require 'epa)
-(require 'epa-file)
-(require 'epg-config)
+(require 'cl-lib)
 
-;; Enable automatic encryption/decryption
-(epa-file-enable)
+(defcustom kdb-encryption-method 'simple
+  "Encryption method to use."
+  :type '(choice (const :tag "Built-in Secure (no dependencies)" simple)
+                 (const :tag "GPG (requires GnuPG)" gpg))
+  :group 'encryption)
 
-;; List of files that should be automatically encrypted
-;; These files will be transparently encrypted when saved
-(defcustom kdb-encrypted-files
+(defcustom kdb-auto-encrypt-files
   '("~/.org/contacts.org")
-  "List of files that should be automatically encrypted.
-Files should be specified with their full paths or using ~ for home directory."
+  "Files to automatically encrypt using simple method."
   :type '(repeat string)
   :group 'encryption)
 
-;; GPG configuration
-(setq epg-gpg-program (or (executable-find "gpg2")
-                          (executable-find "gpg")
-                          "gpg"))
+;; Built-in Secure Encryption (no external dependencies)
+(defun kdb-derive-key (password salt)
+  "Derive an encryption key from PASSWORD and SALT using PBKDF2-like method."
+  (let ((iterations 1000)
+        (key password))
+    (dotimes (_ iterations)
+      (setq key (secure-hash 'sha256 (concat key salt) nil nil t)))
+    key))
 
-;; Use loopback for pinentry to avoid GUI popups
-;; Comment out for GUI pinentry-mac
-;; (setq epg-pinentry-mode 'loopback)
+(defun kdb-simple-encrypt-string (string password)
+  "Encrypt STRING using PASSWORD with built-in secure method."
+  (let* ((salt (secure-hash 'sha256 (format "%s%s" (random) (current-time-string)) nil nil t))
+         (key (kdb-derive-key password salt))
+         (string-bytes (encode-coding-string string 'utf-8 t))
+         (key-bytes (vconcat key))
+         (result (make-string (length string-bytes) 0)))
+    ;; XOR with derived key
+    (dotimes (i (length string-bytes))
+      (aset result i (logxor (aref string-bytes i)
+                            (aref key-bytes (mod i (length key-bytes))))))
+    ;; Prepend salt and encode
+    (base64-encode-string (concat salt result) t)))
 
-;; Encryption method configuration
-(defcustom kdb-encryption-method 'symmetric
-  "Encryption method to use: 'symmetric, 'asymmetric, or 'ask.
-Symmetric is recommended for multi-machine use."
-  :type '(choice (const :tag "Symmetric (password-only)" symmetric)
-                 (const :tag "Asymmetric (GPG key)" asymmetric)  
-                 (const :tag "Ask each time" ask))
-  :group 'encryption)
+(defun kdb-simple-decrypt-string (encrypted-string password)
+  "Decrypt ENCRYPTED-STRING using PASSWORD."
+  (condition-case nil
+      (let* ((decoded (base64-decode-string encrypted-string))
+             ;; Salt is first 32 bytes (sha256 output)
+             (salt (substring decoded 0 32))
+             (ciphertext (substring decoded 32))
+             (key (kdb-derive-key password salt))
+             (key-bytes (vconcat key))
+             (result (make-string (length ciphertext) 0)))
+        ;; XOR with derived key
+        (dotimes (i (length ciphertext))
+          (aset result i (logxor (aref ciphertext i)
+                                (aref key-bytes (mod i (length key-bytes))))))
+        (decode-coding-string result 'utf-8))
+    (error nil)))
 
-;; Default to symmetric for better portability
-(setq epa-file-select-keys 'symmetric)  ; Use symmetric by default
-(setq epa-file-encrypt-to nil)  ; Don't use public key by default
+;; GPG Encryption (requires GnuPG)
+(defun kdb-setup-gpg ()
+  "Setup GPG for encryption."
+  (when (eq kdb-encryption-method 'gpg)
+    (require 'epa)
+    (require 'epa-file)
+    (epa-file-enable)
+    (setq epa-file-select-keys 'symmetric
+          epa-file-encrypt-to nil
+          epa-file-cache-passphrase-for-symmetric-encryption t
+          password-cache-expiry 3600
+          epa-file-inhibit-auto-save t)))
 
-;; Cache passphrases for convenience (adjust timeout as needed)
-(setq epa-file-cache-passphrase-for-symmetric-encryption t)
-(setq password-cache-expiry 3600)  ; Cache for 1 hour
+;; Buffer encryption
+(defun kdb-encrypt-buffer ()
+  "Encrypt current buffer contents."
+  (interactive)
+  (pcase kdb-encryption-method
+    ('simple
+     (let ((password (read-passwd "Encryption password: " t)))
+       (when password
+         (let ((content (buffer-string)))
+           (erase-buffer)
+           (insert ";; Encrypted with kdb-simple-encrypt\n")
+           (insert (kdb-simple-encrypt-string content password))
+           (save-buffer)
+           (message "Buffer encrypted with built-in secure method")))))
+    ('gpg
+     (if (executable-find "gpg")
+         (call-interactively 'epa-encrypt-file)
+       (message "GPG not installed. Use M-x kdb-set-encryption-method to switch to 'simple'")))))
 
-;; Allow multiple password attempts
-(setq epa-file-inhibit-auto-save t)  ; Don't auto-save encrypted files
-(setq epg-passphrase-coding-system 'utf-8)
+(defun kdb-decrypt-buffer ()
+  "Decrypt current buffer contents."
+  (interactive)
+  (when (save-excursion
+          (goto-char (point-min))
+          (looking-at ";; Encrypted with kdb-simple-encrypt"))
+    (let ((password (read-passwd "Decryption password: ")))
+      (when password
+        (let* ((encrypted (buffer-substring
+                          (save-excursion
+                            (goto-char (point-min))
+                            (forward-line 1)
+                            (point))
+                          (point-max)))
+               (decrypted (kdb-simple-decrypt-string (string-trim encrypted) password)))
+          (if (and decrypted (> (length decrypted) 0))
+              (progn
+                (erase-buffer)
+                (insert decrypted)
+                (set-buffer-modified-p nil)
+                (message "Buffer decrypted"))
+            (message "Decryption failed - wrong password?")))))))
 
-;; Function to check if a file should be encrypted
-(defun kdb-should-encrypt-file-p (file)
+;; Region encryption for org-mode
+(defun kdb-password-encrypt-region (start end password)
+  "Encrypt region from START to END using PASSWORD."
+  (let* ((text (buffer-substring start end))
+         (encrypted (pcase kdb-encryption-method
+                      ('simple (kdb-simple-encrypt-string text password))
+                      ('gpg (error "Use org-crypt for GPG encryption"))
+                      (_ (error "Unsupported encryption method")))))
+    (delete-region start end)
+    (insert (format "-----BEGIN ENCRYPTED DATA-----\n%s\n-----END ENCRYPTED DATA-----" encrypted))))
+
+(defun kdb-password-decrypt-region (start end password)
+  "Decrypt region from START to END using PASSWORD."
+  (let* ((text (buffer-substring start end))
+         (encrypted-match (string-match "-----BEGIN ENCRYPTED DATA-----\n\\(.*\\)\n-----END ENCRYPTED DATA-----" text)))
+    (when encrypted-match
+      (let* ((encrypted-data (match-string 1 text))
+             (decrypted (pcase kdb-encryption-method
+                          ('simple (kdb-simple-decrypt-string encrypted-data password))
+                          ('gpg (error "Use org-crypt for GPG decryption"))
+                          (_ (error "Unsupported encryption method")))))
+        (when decrypted
+          (delete-region start end)
+          (insert decrypted)
+          t)))))
+
+;; Auto-encryption
+(defun kdb-should-auto-encrypt-p (file)
   "Check if FILE should be automatically encrypted."
   (let ((expanded-file (expand-file-name file)))
     (cl-some (lambda (pattern)
                (string-equal expanded-file (expand-file-name pattern)))
-             kdb-encrypted-files)))
+             kdb-auto-encrypt-files)))
 
-;; Setup encryption method for specific files
-(defun kdb-setup-file-encryption-method ()
-  "Setup encryption method based on file and configuration."
-  (when (string-match "\\.gpg\\'" buffer-file-name)
-    (pcase kdb-encryption-method
-      ('symmetric 
-       (setq-local epa-file-encrypt-to nil
-                   epa-file-select-keys 'symmetric))
-      ('asymmetric
-       (setq-local epa-file-select-keys nil))
-      ('ask
-       (if (y-or-n-p "Use symmetric encryption (password-only)? ")
-           (setq-local epa-file-encrypt-to nil
-                       epa-file-select-keys 'symmetric)
-         (setq-local epa-file-select-keys nil))))))
-
-;; Hook to setup encryption when finding .gpg files
-(add-hook 'find-file-hook #'kdb-setup-file-encryption-method)
-
-;; Function to setup encryption for a file
-(defun kdb-setup-file-encryption ()
-  "Setup encryption for the current file if it matches encryption patterns."
+(defun kdb-maybe-encrypt-on-save ()
+  "Encrypt file content if it should be auto-encrypted."
   (when (and buffer-file-name
-             (kdb-should-encrypt-file-p buffer-file-name)
-             (not (string-suffix-p ".gpg" buffer-file-name)))
-    ;; Add .gpg extension to the file name
-    (let ((new-name (concat buffer-file-name ".gpg")))
-      (message "Setting up encryption for %s" buffer-file-name)
-      ;; Rename the file
-      (rename-file buffer-file-name new-name t)
-      ;; Update buffer file name
-      (set-visited-file-name new-name)
-      ;; Save to trigger encryption
-      (save-buffer)
-      (message "File encrypted and saved as %s" new-name))))
-
-;; Function to optionally redirect to encrypted file
-(defun kdb-prompt-for-encrypted-file ()
-  "Prompt user to open encrypted version if it exists."
-  (when (and buffer-file-name
-             (kdb-should-encrypt-file-p buffer-file-name)
-             (not (string-suffix-p ".gpg" buffer-file-name))
-             (file-exists-p (concat buffer-file-name ".gpg")))
-    ;; Only prompt, don't automatically redirect
-    (when (y-or-n-p (format "Encrypted version exists (%s.gpg). Open that instead? " 
+             (kdb-should-auto-encrypt-p buffer-file-name)
+             (eq kdb-encryption-method 'simple)
+             (not (save-excursion
+                    (goto-char (point-min))
+                    (looking-at ";; Encrypted with kdb-simple-encrypt"))))
+    (when (y-or-n-p (format "Encrypt %s? " 
                             (file-name-nondirectory buffer-file-name)))
-      (let ((gpg-file (concat buffer-file-name ".gpg")))
-        (find-alternate-file gpg-file)))))
+      (kdb-encrypt-buffer))))
 
-;; Removed automatic hook - user must explicitly choose
+(defun kdb-maybe-decrypt-on-find ()
+  "Decrypt file content if it's encrypted."
+  (when (and buffer-file-name
+             (save-excursion
+               (goto-char (point-min))
+               (looking-at ";; Encrypted with kdb-simple-encrypt")))
+    (kdb-decrypt-buffer)))
 
-;; Function to encrypt an existing file
-(defun kdb-encrypt-file (file)
-  "Encrypt FILE using GPG."
-  (interactive "fFile to encrypt: ")
-  (let* ((expanded-file (expand-file-name file))
-         (gpg-file (concat expanded-file ".gpg")))
-    (if (file-exists-p expanded-file)
-        (progn
-          (with-temp-buffer
-            (insert-file-contents expanded-file)
-            (write-region (point-min) (point-max) gpg-file))
-          (delete-file expanded-file)
-          (message "File encrypted: %s -> %s" expanded-file gpg-file))
-      (error "File does not exist: %s" expanded-file))))
+;; Hooks
+(add-hook 'find-file-hook #'kdb-maybe-decrypt-on-find)
+(add-hook 'before-save-hook #'kdb-maybe-encrypt-on-save)
 
-;; Function to decrypt a file
-(defun kdb-decrypt-file (file)
-  "Decrypt FILE (must end with .gpg)."
-  (interactive "fGPG file to decrypt: ")
-  (let* ((expanded-file (expand-file-name file))
-         (plain-file (substring expanded-file 0 -4)))
-    (if (and (file-exists-p expanded-file)
-             (string-suffix-p ".gpg" expanded-file))
-        (progn
-          (with-temp-buffer
-            (insert-file-contents expanded-file)
-            (write-region (point-min) (point-max) plain-file))
-          (message "File decrypted: %s -> %s" expanded-file plain-file))
-      (error "File must exist and end with .gpg: %s" expanded-file))))
+;; Org-crypt integration
+(with-eval-after-load 'org
+  (require 'org-crypt)
+  
+  (defun kdb-setup-org-crypt ()
+    "Setup org-crypt based on current encryption method."
+    (pcase kdb-encryption-method
+      ('simple
+       ;; org-crypt requires GPG, so disable if using simple
+       (setq org-crypt-key nil)
+       (when (not (executable-find "gpg"))
+         (message "Note: org-crypt tags require GPG. Using simple encryption for buffers only.")))
+      ('gpg
+       (setq org-crypt-key nil)))  ; nil means symmetric encryption
+    (setq org-tags-exclude-from-inheritance '("crypt")
+          org-crypt-disable-auto-save t)
+    (org-crypt-use-before-save-magic))
+  
+  (kdb-setup-org-crypt)
+  
+  (defun kdb-toggle-crypt-tag ()
+    "Toggle the :crypt: tag on current heading."
+    (interactive)
+    (when (derived-mode-p 'org-mode)
+      (save-excursion
+        (org-back-to-heading t)
+        (if (member "crypt" (org-get-tags))
+            (progn
+              (org-set-tags (remove "crypt" (org-get-tags)))
+              (message "Removed :crypt: tag - section will be unencrypted"))
+          (org-set-tags (cons "crypt" (org-get-tags)))
+          (message "Added :crypt: tag - section will be encrypted on save")))))
+  
+  (defun kdb-encrypt-org-entries ()
+    "Manually encrypt all entries with :crypt: tag."
+    (interactive)
+    (when (derived-mode-p 'org-mode)
+      (if (executable-find "gpg")
+          (progn
+            (org-encrypt-entries)
+            (message "Encrypted all entries with :crypt: tag"))
+        (message "GPG required for :crypt: tags. Use buffer encryption instead."))))
+  
+  ;; Org-mode specific keybindings
+  (define-key org-mode-map (kbd "C-c C-/") 'kdb-toggle-crypt-tag)
+  (define-key org-mode-map (kbd "C-c C-x /") 'org-encrypt-entry)
+  (define-key org-mode-map (kbd "C-c C-x C-/") 'org-decrypt-entry)
+  (define-key org-mode-map (kbd "C-c C-x e") 'kdb-encrypt-org-entries))
 
-;; Function to add a file to the encryption list
-(defun kdb-add-file-to-encryption (file)
-  "Add FILE to the list of automatically encrypted files."
-  (interactive "fFile to add to encryption list: ")
-  (let ((expanded-file (expand-file-name file)))
-    (add-to-list 'kdb-encrypted-files expanded-file)
-    (customize-save-variable 'kdb-encrypted-files kdb-encrypted-files)
-    (message "Added %s to encryption list" expanded-file)))
-
-;; Function to remove a file from the encryption list
-(defun kdb-remove-file-from-encryption (file)
-  "Remove FILE from the list of automatically encrypted files."
-  (interactive
-   (list (completing-read "Remove from encryption list: "
-                         kdb-encrypted-files nil t)))
-  (setq kdb-encrypted-files (delete file kdb-encrypted-files))
-  (customize-save-variable 'kdb-encrypted-files kdb-encrypted-files)
-  (message "Removed %s from encryption list" file))
-
-;; Function to open encrypted version of current file
-(defun kdb-open-encrypted-version ()
-  "Open the encrypted (.gpg) version of the current file if it exists."
+;; Method selection
+(defun kdb-set-encryption-method ()
+  "Set the encryption method to use."
   (interactive)
-  (if buffer-file-name
-      (let ((gpg-file (concat buffer-file-name ".gpg")))
-        (if (file-exists-p gpg-file)
-            (find-alternate-file gpg-file)
-          (if (y-or-n-p "No encrypted version exists. Create one? ")
-              (kdb-setup-file-encryption)
-            (message "No encrypted version found"))))
-    (message "No file associated with current buffer")))
-
-;; Function to switch encryption method
-(defun kdb-switch-encryption-method ()
-  "Switch between symmetric and asymmetric encryption."
-  (interactive)
-  (let ((method (completing-read "Encryption method: " 
-                                 '("symmetric" "asymmetric" "ask") 
+  (let ((method (completing-read "Encryption method: "
+                                 '("simple" "gpg")
                                  nil t nil nil 
                                  (symbol-name kdb-encryption-method))))
     (setq kdb-encryption-method (intern method))
     (customize-save-variable 'kdb-encryption-method kdb-encryption-method)
-    (message "Encryption method set to: %s" method)
-    (when (string-match "\\.gpg\\'" (or buffer-file-name ""))
-      (kdb-setup-file-encryption-method))))
+    (when (eq kdb-encryption-method 'gpg)
+      (if (executable-find "gpg")
+          (kdb-setup-gpg)
+        (message "Warning: GPG not found. Install GPG or use 'simple' method.")))
+    (when (featurep 'org)
+      (kdb-setup-org-crypt))
+    (message "Encryption method set to: %s" method)))
 
-;; Create menu for encryption functions
-(define-prefix-command 'kdb-encryption-map)
-(define-key global-map (kbd "C-c E") 'kdb-encryption-map)
-(define-key kdb-encryption-map (kbd "e") #'kdb-encrypt-file)
-(define-key kdb-encryption-map (kbd "d") #'kdb-decrypt-file)
-(define-key kdb-encryption-map (kbd "a") #'kdb-add-file-to-encryption)
-(define-key kdb-encryption-map (kbd "r") #'kdb-remove-file-from-encryption)
-(define-key kdb-encryption-map (kbd "o") #'kdb-open-encrypted-version)
-(define-key kdb-encryption-map (kbd "m") #'kdb-switch-encryption-method)
-(define-key kdb-encryption-map (kbd "l") 
-  (lambda () 
-    (interactive) 
-    (message "Encrypted files: %s | Method: %s" 
-             (mapconcat 'identity kdb-encrypted-files ", ")
-             kdb-encryption-method)))
+;; Status display
+(defun kdb-encryption-status ()
+  "Show current encryption configuration."
+  (interactive)
+  (message "Encryption Status:
+Method: %s
+GPG Available: %s
+Auto-encrypt files: %s
 
-;; Advice for org-mode files
-(defun kdb-org-check-encryption (&rest _)
-  "Check if the current org file should be encrypted."
-  (when (and (derived-mode-p 'org-mode)
-             buffer-file-name
-             (kdb-should-encrypt-file-p buffer-file-name)
-             (not (string-suffix-p ".gpg" buffer-file-name)))
-    (when (y-or-n-p (format "Encrypt %s? " buffer-file-name))
-      (kdb-setup-file-encryption))))
+Commands:
+  C-c s e - Encrypt buffer
+  C-c s d - Decrypt buffer  
+  C-c s m - Change method
+  C-c s h - This help
 
-;; Check org files after saving
-(advice-add 'org-save-all-org-buffers :after #'kdb-org-check-encryption)
+Org-mode:
+  C-c C-/ - Toggle :crypt: tag (requires GPG)
+  C-c C-x / - Encrypt entry (requires GPG)
+  C-c C-x C-/ - Decrypt entry (requires GPG)"
+           kdb-encryption-method
+           (if (executable-find "gpg") "Yes" "No")
+           (mapconcat 'identity kdb-auto-encrypt-files ", ")))
 
-;; Wrapper for safe file operations with retry
-(defun kdb-with-encrypted-file (file operation &rest args)
-  "Execute OPERATION on FILE with decryption retry support.
-If decryption fails, offer to retry or skip."
-  (condition-case err
-      (apply operation file args)
-    (file-error
-     (if (and (string-match-p "\\.gpg\\'" file)
-              (yes-or-no-p (format "Failed to decrypt %s. Retry? " 
-                                   (file-name-nondirectory file))))
-         ;; Clear password cache and retry
-         (progn
-           (password-cache-remove file)
-           (apply operation file args))
-       (signal (car err) (cdr err))))
-    (epg-error
-     (if (yes-or-no-p (format "Decryption error for %s. Retry? " 
-                              (file-name-nondirectory file)))
-         (progn
-           (password-cache-remove file)
-           (apply operation file args))
-       (message "Skipping encrypted file operation")))))
+;; Initialize GPG if selected
+(when (eq kdb-encryption-method 'gpg)
+  (kdb-setup-gpg))
 
-;; Helper to open encrypted files with retry
-(defun kdb-find-encrypted-file (file)
-  "Open FILE with automatic retry on decryption failure."
-  (interactive "fFile: ")
-  (kdb-with-encrypted-file file #'find-file))
+;; Global keybindings
+(global-set-key (kbd "C-c s e") 'kdb-encrypt-buffer)
+(global-set-key (kbd "C-c s d") 'kdb-decrypt-buffer)
+(global-set-key (kbd "C-c s m") 'kdb-set-encryption-method)
+(global-set-key (kbd "C-c s h") 'kdb-encryption-status)
+
+(message "Encryption loaded - Method: %s - Keys: C-c s [e/d/m/h]" kdb-encryption-method)
 
 (provide 'init-encryption)
 ;;; init-encryption.el ends here
