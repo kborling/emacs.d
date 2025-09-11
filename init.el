@@ -416,12 +416,9 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (add-hook 'term-exec-hook 'kdb-term-exec-hook)
 
-;; Ansi-term ====================================== ;;
-
 ;; Paste into term
 (eval-after-load "term"
   '(define-key term-raw-map (kbd "C-c C-y") 'term-paste))
-
 
 (use-package autorevert
   :ensure nil
@@ -735,10 +732,24 @@ If point is at the end of the line, kill the whole line including the newline."
           eat-enable-mouse t)
     
     (defun kdb-eat-new ()
-      "Create a new eat terminal with unique name."
+      "Create a new terminal with unique name, using best available for platform."
       (interactive)
-      (let ((eat-buffer-name (generate-new-buffer-name "*eat*")))
-        (eat)))))
+      (cond
+       ;; On Windows, use ansi-term or term
+       ((eq system-type 'windows-nt)
+        (if (fboundp 'ansi-term)
+            (ansi-term (or (getenv "COMSPEC") "cmd.exe"))
+          (term (or (getenv "COMSPEC") "cmd.exe"))))
+       ;; On other systems, try eat first, fall back to ansi-term
+       ((fboundp 'eat)
+        (let ((eat-buffer-name (generate-new-buffer-name "*eat*")))
+          (eat)))
+       ;; Fallback to ansi-term
+       ((fboundp 'ansi-term)
+        (ansi-term (or (getenv "SHELL") "/bin/bash")))
+       ;; Last resort: basic term
+       (t
+        (term (or (getenv "SHELL") "/bin/bash"))))))
 
 (defun kdb-terminal-new ()
   "Create a new terminal buffer (eat if available, otherwise eshell)."
@@ -815,7 +826,7 @@ If point is at the end of the line, kill the whole line including the newline."
    completions-detailed t
    completion-ignore-case t
    read-buffer-completion-ignore-case t
-   completions-max-height 20
+   completions-max-height 14
    completions-header-format nil
    minibuffer-visible-completions nil
    enable-recursive-minibuffers t
@@ -1086,8 +1097,7 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package combobulate
   :vc (:url "https://github.com/mickeynp/combobulate" :rev :newest)
   :custom
-  ;; Change the prefix key to something more convenient
-  (combobulate-key-prefix "C-c o")
+  (combobulate-key-prefix "C-c O")
   (combobulate-flash-node t)
   (combobulate-dimmer-mode t)
   (combobulate-envelope-indent-region-function #'indent-region)
