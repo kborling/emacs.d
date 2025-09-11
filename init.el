@@ -268,6 +268,58 @@
     (push-mark (point-max) nil t)
     (copy-region-as-kill 1 (buffer-size))))
 
+;; Terminal management functions (defined early for keybindings)
+(defun kdb-eshell-new ()
+  "Create a new eshell buffer with a unique name."
+  (interactive)
+  (let ((eshell-buffer-name (generate-new-buffer-name "*eshell*")))
+    (eshell)))
+
+(defun kdb-eshell-toggle ()
+  "Toggle eshell window at bottom of frame and focus it."
+  (interactive)
+  (let ((eshell-window (get-buffer-window "*eshell*")))
+    (if eshell-window
+        (if (eq (selected-window) eshell-window)
+            ;; If already in eshell, close it
+            (delete-window eshell-window)
+          ;; If eshell visible but not focused, focus it
+          (select-window eshell-window))
+      ;; If not visible, create/show and focus it
+      (let ((buf (or (get-buffer "*eshell*")
+                     (save-window-excursion (eshell)))))
+        (select-window
+         (display-buffer buf
+                         '((display-buffer-at-bottom)
+                           (window-height . 0.3))))))))
+
+(defun kdb-eat-new ()
+  "Create a new terminal with unique name, using best available for platform."
+  (interactive)
+  (cond
+   ;; On Windows, use ansi-term or term
+   ((eq system-type 'windows-nt)
+    (if (fboundp 'ansi-term)
+        (ansi-term (or (getenv "COMSPEC") "cmd.exe"))
+      (term (or (getenv "COMSPEC") "cmd.exe"))))
+   ;; On other systems, try eat first, fall back to ansi-term
+   ((and (fboundp 'eat) (not (eq system-type 'windows-nt)))
+    (let ((eat-buffer-name (generate-new-buffer-name "*eat*")))
+      (eat)))
+   ;; Fallback to ansi-term
+   ((fboundp 'ansi-term)
+    (ansi-term (or (getenv "SHELL") "/bin/bash")))
+   ;; Last resort: basic term
+   (t
+    (term (or (getenv "SHELL") "/bin/bash")))))
+
+(defun kdb-terminal-new ()
+  "Create a new terminal buffer (eat if available, otherwise eshell)."
+  (interactive)
+  (if (and (fboundp 'eat) (not (eq system-type 'windows-nt)))
+      (call-interactively 'kdb-eat-new)
+    (call-interactively 'kdb-eshell-new)))
+
 (defun toggle-theme ()
   "Toggle between available themes."
   (interactive)
@@ -729,34 +781,9 @@ If point is at the end of the line, kill the whole line including the newline."
   (use-package eat
     :config
     (setq eat-kill-buffer-on-exit t
-          eat-enable-mouse t)
-    
-    (defun kdb-eat-new ()
-      "Create a new terminal with unique name, using best available for platform."
-      (interactive)
-      (cond
-       ;; On Windows, use ansi-term or term
-       ((eq system-type 'windows-nt)
-        (if (fboundp 'ansi-term)
-            (ansi-term (or (getenv "COMSPEC") "cmd.exe"))
-          (term (or (getenv "COMSPEC") "cmd.exe"))))
-       ;; On other systems, try eat first, fall back to ansi-term
-       ((fboundp 'eat)
-        (let ((eat-buffer-name (generate-new-buffer-name "*eat*")))
-          (eat)))
-       ;; Fallback to ansi-term
-       ((fboundp 'ansi-term)
-        (ansi-term (or (getenv "SHELL") "/bin/bash")))
-       ;; Last resort: basic term
-       (t
-        (term (or (getenv "SHELL") "/bin/bash"))))))
+          eat-enable-mouse t)))
 
-(defun kdb-terminal-new ()
-  "Create a new terminal buffer (eat if available, otherwise eshell)."
-  (interactive)
-  (if (fboundp 'eat)
-      (call-interactively 'kdb-eat-new)
-    (call-interactively 'kdb-eshell-new)))
+;; Terminal functions already defined earlier in file
 
 
 (use-package orderless
