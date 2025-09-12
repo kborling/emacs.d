@@ -362,7 +362,7 @@
       ("r l" "List" kdb-vc-remote-list)
       ("r a" "Add" kdb-vc-remote-add)
       ("r u" "Set URL" kdb-vc-remote-set-url)
-      ("C" "Clone" vc-clone)]]
+      ("C" "Clone" kdb-vc-clone)]]
     
     [["Changes"
       ("a" "Add/Stage" vc-register)
@@ -590,6 +590,15 @@
   (let ((output (shell-command-to-string 
                  (format "git show --stat --format='%%h %%s%%n%%aD %%an' %s" (shell-quote-argument hash)))))
     (message "%s" (string-trim output))))
+
+(defun kdb-vc-clone ()
+  "Clone a repository. Requires Emacs 29.1 or later."
+  (interactive)
+  (if (>= emacs-major-version 31)
+      (if (fboundp 'vc-clone)
+          (call-interactively 'vc-clone)
+        (message "vc-clone not available in this Emacs build"))
+    (message "vc-clone requires Emacs 31.1 or later. Current version: %s" emacs-version)))
 
 (defun kdb-vc-remote-list ()
   "List all remotes with their URLs."
