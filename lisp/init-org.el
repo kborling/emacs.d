@@ -85,6 +85,25 @@
   :bind (("C-c o a" . org-agenda)
          ("C-c o c" . org-capture)))
 
+;; Define function outside of use-package
+(defun kdb/org-wrap-source-block (lang)
+  "Wrap region in org source code block with LANG."
+  (interactive
+   (list (completing-read "Language: "
+                         '("emacs-lisp" "python" "javascript" "bash" "shell" 
+                           "sql" "json" "yaml" "xml" "html" "css" "c" "cpp"
+                           "java" "go" "rust" "typescript" "ruby" "php")
+                         nil nil nil nil "emacs-lisp")))
+  (if (use-region-p)
+      (let ((beg (region-beginning))
+            (end (region-end)))
+        (goto-char end)
+        (insert "\n#+end_src")
+        (goto-char beg)
+        (insert (format "#+begin_src %s\n" lang)))
+    (insert (format "#+begin_src %s\n\n#+end_src" lang))
+    (forward-line -1)))
+
 (use-package org-modern
   :after org
   :hook (org-mode . org-modern-mode)
@@ -120,6 +139,10 @@
     (global-set-key (kbd "C-c o s") 'kdb/search-contacts)
     (global-set-key (kbd "C-c o C") 'kdb/open-contacts)
     (global-set-key (kbd "C-c o N") 'kdb/open-notes)))
+
+;; Org-mode specific keybinding for wrapping in source blocks
+(with-eval-after-load 'org
+  (define-key org-mode-map (kbd "C-c o b") 'kdb/org-wrap-source-block))
 
 (provide 'init-org)
 ;;; init-org.el ends here
