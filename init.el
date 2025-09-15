@@ -297,13 +297,18 @@
   "Create a new terminal with unique name, using best available for platform."
   (interactive)
   (cond
+   ;; In terminal mode, always use ansi-term
+   ((not (display-graphic-p))
+    (if (fboundp 'ansi-term)
+        (ansi-term (or (getenv "SHELL") (getenv "COMSPEC") "/bin/bash"))
+      (term (or (getenv "SHELL") (getenv "COMSPEC") "/bin/bash"))))
    ;; On Windows, use ansi-term or term
    ((eq system-type 'windows-nt)
     (if (fboundp 'ansi-term)
         (ansi-term (or (getenv "COMSPEC") "cmd.exe"))
       (term (or (getenv "COMSPEC") "cmd.exe"))))
-   ;; On other systems, try eat first, fall back to ansi-term
-   ((and (fboundp 'eat) (not (eq system-type 'windows-nt)))
+   ;; On GUI systems, try eat first, fall back to ansi-term
+   ((and (fboundp 'eat) (display-graphic-p))
     (let ((eat-buffer-name (generate-new-buffer-name "*eat*")))
       (eat)))
    ;; Fallback to ansi-term
@@ -1046,6 +1051,9 @@ If point is at the end of the line, kill the whole line including the newline."
 
 ;; Load encryption configuration
 (require 'init-encryption)
+
+;; Load terminal optimizations
+(require 'init-terminal)
 
 
 
