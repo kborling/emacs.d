@@ -313,12 +313,6 @@
    (t
     (term (or (getenv "SHELL") "/bin/bash")))))
 
-(defun kdb-terminal-new ()
-  "Create a new terminal buffer (eat if available, otherwise eshell)."
-  (interactive)
-  (if (and (fboundp 'eat) (not (eq system-type 'windows-nt)))
-      (call-interactively 'kdb-eat-new)
-    (call-interactively 'kdb-eshell-new)))
 
 (defun toggle-theme ()
   "Toggle between available themes."
@@ -406,9 +400,9 @@ If point is at the end of the line, kill the whole line including the newline."
 
     ;; Terminal management
     (dolist (binding '(("C-`" . kdb-eshell-toggle)
-                       ("C-~" . kdb-terminal-new)
+                       ("C-~" . kdb-eat-new)
                        ("C-c t e" . kdb-eshell-new)
-                       ("C-c t t" . kdb-terminal-new)
+                       ("C-c t t" . kdb-eat-new)
                        ("C-c t s" . shell)
                        ("C-c t d" . dired-jump-other-window)
                        ("C-c t =" . fido-vertical-mode)))
@@ -426,7 +420,7 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (add-hook 'after-init-hook #'kdb-setup-keybindings)
 
-(defun kdb/keyboard-quit-dwim ()
+(defun kdb-keyboard-quit-dwim ()
   "Do-What-I-Mean behaviour for a general `keyboard-quit'."
   (interactive)
   (cond
@@ -439,7 +433,7 @@ If point is at the end of the line, kill the whole line including the newline."
    (t
     (keyboard-quit))))
 
-(define-key global-map (kbd "C-g") #'kdb/keyboard-quit-dwim)
+(define-key global-map (kbd "C-g") #'kdb-keyboard-quit-dwim)
 
 ;; (when (eq system-type 'darwin)
 ;;   (select-frame-set-input-focus (selected-frame))
@@ -834,9 +828,7 @@ If point is at the end of the line, kill the whole line including the newline."
         icomplete-hide-common-prefix nil
         icomplete-prospects-height 2
         icomplete-with-completion-tables t
-        icomplete-scroll t)
-
-)
+        icomplete-scroll t))
 
 
 (use-package minibuffer
