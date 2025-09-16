@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'password-cache)
 
 (defcustom kdb-encryption-method 'simple
   "Encryption method to use."
@@ -20,6 +21,40 @@
   "Files to automatically encrypt using simple method."
   :type '(repeat string)
   :group 'encryption)
+
+(defcustom kdb-encryption-cache-expiry 900
+  "Time in seconds to cache encryption passwords (default 15 minutes)."
+  :type 'integer
+  :group 'encryption)
+
+;; Configure password caching
+(setq password-cache t
+      password-cache-expiry kdb-encryption-cache-expiry)
+
+;; Password management helpers
+(defun kdb-encryption-cache-key (file)
+  "Generate a cache key for FILE."
+  (concat "kdb-encryption:" (expand-file-name file)))
+
+(defun kdb-get-encryption-password (file &optional confirm)
+  "Get encryption password for FILE, using cache if available.
+If CONFIRM is non-nil, ask for password twice."
+  (let ((cache-key (kdb-encryption-cache-key file)))
+    (or (password-read-from-cache cache-key)
+        (let ((password (read-passwd 
+                        (format "Encryption password for %s: " 
+                                (file-name-nondirectory file))
+                        confirm)))
+          (password-cache-add cache-key password)
+          password))))
+
+(defun kdb-clear-encryption-password (&optional file)
+  "Clear cached encryption password for FILE or all files."
+  (interactive)
+  (if file
+      (password-cache-remove (kdb-encryption-cache-key file))
+    (password-reset)
+    (message "All cached encryption passwords cleared")))
 
 ;; Built-in Secure Encryption (no external dependencies)
 (defun kdb-derive-key (password salt)
@@ -80,7 +115,9 @@
   (interactive)
   (pcase kdb-encryption-method
     ('simple
-     (let ((password (read-passwd "Encryption password: " t)))
+     (let ((password (kdb-get-encryption-password 
+                     (or buffer-file-name "buffer")
+                     t))) ; confirm password on encryption
        (when password
          (let ((content (buffer-string)))
            (erase-buffer)
@@ -99,7 +136,9 @@
   (when (save-excursion
           (goto-char (point-min))
           (looking-at ";; Encrypted with kdb-simple-encrypt"))
-    (let ((password (read-passwd "Decryption password: ")))
+    (let ((password (kdb-get-encryption-password 
+                    (or buffer-file-name "buffer")
+                    nil))) ; no confirm on decryption
       (when password
         (let* ((encrypted (buffer-substring
                           (save-excursion
@@ -114,7 +153,10 @@
                 (insert decrypted)
                 (set-buffer-modified-p nil)
                 (message "Buffer decrypted"))
-            (message "Decryption failed - wrong password?")))))))
+            ;; Wrong password - clear cache and retry
+            (progn
+              (kdb-clear-encryption-password buffer-file-name)
+              (message "Decryption failed - wrong password. Cache cleared."))))))))
 
 ;; Region encryption for org-mode
 (defun kdb-password-encrypt-region (start end password)
@@ -158,9 +200,14 @@
              (not (save-excursion
                     (goto-char (point-min))
                     (looking-at ";; Encrypted with kdb-simple-encrypt"))))
-    (when (y-or-n-p (format "Encrypt %s? " 
-                            (file-name-nondirectory buffer-file-name)))
-      (kdb-encrypt-buffer))))
+    ;; Auto-encrypt without prompting for auto-encrypt files
+    (let ((password (kdb-get-encryption-password buffer-file-name nil)))
+      (when password
+        (let ((content (buffer-string)))
+          (erase-buffer)
+          (insert ";; Encrypted with kdb-simple-encrypt\n")
+          (insert (kdb-simple-encrypt-string content password))
+          (message "Auto-encrypted %s" (file-name-nondirectory buffer-file-name)))))))
 
 (defun kdb-maybe-decrypt-on-find ()
   "Decrypt file content if it's encrypted."
@@ -249,11 +296,13 @@
 Method: %s
 GPG Available: %s
 Auto-encrypt files: %s
+Password cache expiry: %d seconds
 
 Commands:
   C-c s e - Encrypt buffer
   C-c s d - Decrypt buffer  
   C-c s m - Change method
+  C-c s c - Clear password cache
   C-c s h - This help
 
 Org-mode:
@@ -262,7 +311,8 @@ Org-mode:
   C-c C-x C-/ - Decrypt entry (requires GPG)"
            kdb-encryption-method
            (if (executable-find "gpg") "Yes" "No")
-           (mapconcat 'identity kdb-auto-encrypt-files ", ")))
+           (mapconcat 'identity kdb-auto-encrypt-files ", ")
+           kdb-encryption-cache-expiry))
 
 ;; Initialize GPG if selected
 (when (eq kdb-encryption-method 'gpg)
@@ -272,9 +322,12 @@ Org-mode:
 (global-set-key (kbd "C-c s e") 'kdb-encrypt-buffer)
 (global-set-key (kbd "C-c s d") 'kdb-decrypt-buffer)
 (global-set-key (kbd "C-c s m") 'kdb-set-encryption-method)
+(global-set-key (kbd "C-c s c") 'kdb-clear-encryption-password)
 (global-set-key (kbd "C-c s h") 'kdb-encryption-status)
 
-(message "Encryption loaded - Method: %s - Keys: C-c s [e/d/m/h]" kdb-encryption-method)
+(message "Encryption loaded - Method: %s - Cache: %ds - Keys: C-c s [e/d/m/c/h]" 
+         kdb-encryption-method 
+         kdb-encryption-cache-expiry)
 
 (provide 'init-encryption)
 ;;; init-encryption.el ends here

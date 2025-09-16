@@ -380,7 +380,7 @@ If point is at the end of the line, kill the whole line including the newline."
                        ("C-M-s" . isearch-forward-symbol-at-point)))
       (define-key map (kbd (car binding)) (cdr binding)))
 
-    ;; TODO navigation (hl-todo)
+    ;; TODOO navigation (hl-todo)
     (dolist (binding '(("M-[" . hl-todo-previous)
                        ("M-]" . hl-todo-next)
                        ("C-c o o" . hl-todo-occur)))
