@@ -122,6 +122,19 @@
 (when (display-graphic-p)
   (context-menu-mode))
 
+;; Platform-specific window configuration
+(when (display-graphic-p)
+  (cond
+   ;; macOS: open maximized
+   ((eq system-type 'darwin)
+    (add-to-list 'default-frame-alist '(fullscreen . maximized)))
+   ;; Windows: split to right side of screen
+   ((eq system-type 'windows-nt)
+    (add-to-list 'default-frame-alist '(left . 0.5))
+    (add-to-list 'default-frame-alist '(width . 0.5))
+    (add-to-list 'default-frame-alist '(top . 0))
+    (add-to-list 'default-frame-alist '(height . 1.0)))))
+
 
 ;; Recent files
 (use-package recentf
@@ -855,15 +868,14 @@ If point is at the end of the line, kill the whole line including the newline."
    minibuffer-visible-completions nil
    enable-recursive-minibuffers t
    completions-sort 'historical
-   read-answer-short t)
-  :bind (:map minibuffer-local-map
-              ("C-p" . minibuffer-previous-completion)
-              ("C-n" . minibuffer-next-completion))
-  :bind (:map completion-in-region-mode-map
-              ("C-p" . minibuffer-previous-completion)
-              ("C-n" . minibuffer-next-completion)
-              ("RET" . minibuffer-choose-completion)))
-
+   read-answer-short t))
+  ;; :bind (:map minibuffer-local-map
+  ;;             ("C-p" . minibuffer-previous-completion)
+  ;;             ("C-n" . minibuffer-next-completion))
+  ;; :bind (:map completion-in-region-mode-map
+  ;;             ("C-p" . minibuffer-previous-completion)
+  ;;             ("C-n" . minibuffer-next-completion)
+  ;;             ("RET" . minibuffer-choose-completion)))
 
 (use-package eglot
   :ensure nil

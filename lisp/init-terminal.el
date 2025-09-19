@@ -16,11 +16,6 @@
 
 ;; Terminal-specific settings
 (when kdb-terminal-mode
-  ;; Enable mouse support in terminal
-  (xterm-mouse-mode 1)
-  (global-set-key (kbd "<mouse-4>") 'scroll-down-line)
-  (global-set-key (kbd "<mouse-5>") 'scroll-up-line)
-  
   ;; Better clipboard integration
   (setq select-enable-clipboard t
         select-enable-primary t)
@@ -47,11 +42,8 @@
   ;; Fix colors for terminal
   (setq frame-background-mode 'dark))
 
-;; Tmux-specific optimizations
+;; Tmux-specific optimizations  
 (when kdb-in-tmux
-  ;; Fix escape key delay in tmux
-  (setq ttymouse-mode 'xterm2)
-  
   ;; Better key handling
   (define-key input-decode-map "\e[1;5A" [C-up])
   (define-key input-decode-map "\e[1;5B" [C-down])
@@ -61,9 +53,6 @@
   (define-key input-decode-map "\e[1;2B" [S-down])
   (define-key input-decode-map "\e[1;2C" [S-right])
   (define-key input-decode-map "\e[1;2D" [S-left])
-  
-  ;; Make C-t available since tmux uses it as prefix
-  ;; You're already using C-t as tmux prefix, so this is handled
   
   ;; Enable 256 colors
   (setq xterm-color-names-bright
@@ -93,45 +82,6 @@
   (global-set-key (kbd "M-o") 'other-window)
   (global-set-key (kbd "M-O") (lambda () (interactive) (other-window -1))))
 
-;; Fix terminal paste issues
-(when kdb-terminal-mode
-  ;; Bracketed paste mode support
-  (defun kdb-bracketed-paste-enable ()
-    "Enable bracketed paste mode."
-    (send-string-to-terminal "\e[?2004h"))
-  
-  (defun kdb-bracketed-paste-disable ()
-    "Disable bracketed paste mode."
-    (send-string-to-terminal "\e[?2004l"))
-  
-  (add-hook 'after-init-hook 'kdb-bracketed-paste-enable)
-  (add-hook 'kill-emacs-hook 'kdb-bracketed-paste-disable))
-
-;; Terminal color theme adjustments
-(defun kdb-optimize-theme-for-terminal ()
-  "Adjust current theme for better terminal visibility."
-  (when kdb-terminal-mode
-    ;; Make comments more visible
-    (set-face-attribute 'font-lock-comment-face nil :foreground "brightblack")
-    ;; Better region visibility
-    (set-face-attribute 'region nil :background "brightblack")
-    ;; Clearer mode line
-    (set-face-attribute 'mode-line nil :background "brightblack" :foreground "white")
-    (set-face-attribute 'mode-line-inactive nil :background "black" :foreground "brightblack")))
-
-(add-hook 'after-load-theme-hook 'kdb-optimize-theme-for-terminal)
-
-;; Special handling for eat terminal in terminal mode
-(when kdb-terminal-mode
-  ;; Don't try to use eat inside terminal Emacs
-  (with-eval-after-load 'init
-    (defun kdb-eat-new ()
-      "In terminal mode, use ansi-term instead of eat."
-      (interactive)
-      (if (fboundp 'ansi-term)
-          (ansi-term (or (getenv "SHELL") "/bin/bash"))
-        (term (or (getenv "SHELL") "/bin/bash"))))))
-
 ;; Tmux integration commands
 (when kdb-in-tmux
   (defun kdb-tmux-new-window ()
@@ -156,7 +106,7 @@
 
 ;; Message about terminal mode
 (when kdb-terminal-mode
-  (message "Terminal mode detected. Mouse support enabled.%s"
+  (message "Terminal mode detected.%s"
            (if kdb-in-tmux " Running in tmux." "")))
 
 (provide 'init-terminal)
