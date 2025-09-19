@@ -122,6 +122,32 @@
 (when (display-graphic-p)
   (context-menu-mode))
 
+;; Focus cursor when Messages buffer is displayed
+(defun kdb-focus-messages-buffer ()
+  "Focus the *Messages* buffer when it's displayed."
+  (when (string= (buffer-name) "*Messages*")
+    (goto-char (point-max))))
+
+(add-hook 'buffer-list-update-hook
+          (lambda ()
+            (when (and (get-buffer-window "*Messages*")
+                       (string= (buffer-name (window-buffer (get-buffer-window "*Messages*"))) "*Messages*"))
+              (with-current-buffer "*Messages*"
+                (goto-char (point-max))))))
+
+;; Alternative: advice on display-buffer for Messages
+(defun kdb-messages-buffer-advice (buffer &optional action frame)
+  "Focus Messages buffer when displayed."
+  (when (and buffer (string= (buffer-name buffer) "*Messages*"))
+    (with-current-buffer buffer
+      (goto-char (point-max)))
+    (let ((window (get-buffer-window buffer)))
+      (when window
+        (select-window window)
+        (goto-char (point-max))))))
+
+(advice-add 'display-buffer :after #'kdb-messages-buffer-advice)
+
 ;; Platform-specific window configuration
 (when (display-graphic-p)
   (cond
@@ -669,7 +695,7 @@ If point is at the end of the line, kill the whole line including the newline."
    dired-mouse-drag-files t)
 
   (when (eq system-type 'darwin)
-    (setq dired-use-ls-dired nil))     ; macOS ls doesn't support --dired
+    (setq dired-use-ls-dired nil)); macOS ls doesn't support --dired
 
   :bind (:map dired-mode-map
               ("E" . dired-toggle-read-only)
@@ -712,7 +738,6 @@ If point is at the end of the line, kill the whole line including the newline."
       ("Dired" (mode . dired-mode))
       ("Completion" (or (name . "^\\*Completions\\*")
                         (name . "^\\*Flymake")
-                        (name . "^\\*company")
                         (name . "^\\*corfu")))
       ("Help/Info" (or (name . "^\\*Help\\*")
                        (name . "^\\*Apropos\\*")
@@ -794,9 +819,6 @@ If point is at the end of the line, kill the whole line including the newline."
     :config
     (setq eat-kill-buffer-on-exit t
           eat-enable-mouse t)))
-
-;; Terminal functions already defined earlier in file
-
 
 (use-package orderless
   :ensure t
