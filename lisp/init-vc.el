@@ -317,6 +317,14 @@
   )
 
 ;; VC Transient Menu - provides Magit-like interface for VC
+(defun kdb-vc-dir-root ()
+  "Open vc-dir for the project root."
+  (interactive)
+  (let ((root (vc-root-dir)))
+    (if root
+        (vc-dir root)
+      (call-interactively 'vc-dir))))
+
 (defun kdb-vc-transient ()
   "Custom VC transient menu with Magit-like keybindings."
   (interactive)
@@ -324,6 +332,7 @@
   (transient-define-prefix kdb-vc-menu ()
     "VC operations menu"
     [["Status & Diff"
+      ("g" "Status (Root)" kdb-vc-dir-root)
       ("s" "Status" vc-dir)
       ("d" "Diff (unstaged)" kdb-vc-diff-enhanced)
       ("D" "Diff vs Branch" vc-root-diff)
