@@ -232,15 +232,20 @@
 (setopt line-spacing 4)
 
 (let* ((settings (cond
-                  ((eq system-type 'windows-nt) '(:size 110 :family "Rec Mono Semicasual"))
-                  ((eq system-type 'gnu/linux)  '(:size 120 :family "Inconsolata"))
-                  ((eq system-type 'darwin)     '(:size 150 :family "Overpass Mono"))))
+                  ((eq system-type 'windows-nt) '(:size 110 :families ("Rec Mono Semicasual" "Cascadia Code" "Consolas" "Courier New")))
+                  ((eq system-type 'gnu/linux)  '(:size 120 :families ("Inconsolata" "DejaVu Sans Mono" "Liberation Mono" "monospace")))
+                  ((eq system-type 'darwin)     '(:size 150 :families ("Overpass Mono" "Monaco" "Menlo" "monospace")))))
        (default-font-size (plist-get settings :size))
-       (default-font-family (plist-get settings :family)))
-  (set-face-attribute 'default nil
-                      :family default-font-family :weight 'light :height default-font-size)
-  (set-face-attribute 'fixed-pitch nil
-                      :family default-font-family :height 1.0)
+       (font-families (plist-get settings :families))
+       (default-font-family (cl-find-if (lambda (font) (find-font (font-spec :family font))) font-families)))
+
+  ;; Set the font if we found one available
+  (when default-font-family
+    (set-face-attribute 'default nil
+                        :family default-font-family :weight 'light :height default-font-size)
+    (set-face-attribute 'fixed-pitch nil
+                        :family default-font-family :height 1.0))
+
   (set-face-attribute 'variable-pitch nil
                       :family "FreeSans" :height 1.0 :weight 'regular))
 
@@ -929,9 +934,9 @@ If point is at the end of the line, kill the whole line including the newline."
   ;; Language Servers
   (add-to-list 'eglot-server-programs '(csharp-mode . ("csharp-ls")))
   (add-to-list 'eglot-server-programs '(typescript-ts-mode . ("typescript-language-server" "--stdio")))
-  ;; See https://github.com/olrtg/emmet-language-server
-  (add-to-list 'eglot-server-programs '(html-ts-mode . ("emmet-language-server" "--stdio")))
-  (add-to-list 'eglot-server-programs '(css-ts-mode . ("emmet-language-server" "--stdio")))
+  (add-to-list 'eglot-server-programs '(html-ts-mode . ("vscode-html-language-server" "--stdio")))
+  (add-to-list 'eglot-server-programs '(css-ts-mode . ("vscode-css-language-server" "--stdio")))
+  (add-to-list 'eglot-server-programs '(json-ts-mode . ("vscode-json-language-server" "--stdio")))
   (add-to-list 'eglot-server-programs '(rust-mode . ("rust-analyzer")))
   (add-to-list 'eglot-server-programs '(rustic-mode . ("rust-analyzer")))
   (add-to-list 'eglot-server-programs '((c++-mode c-mode)
@@ -1154,6 +1159,19 @@ If point is at the end of the line, kill the whole line including the newline."
   :config
   (treesit-auto-add-to-auto-mode-alist 'all)
   (global-treesit-auto-mode))
+
+(use-package markdown-mode
+  :mode ("README\\.md\\'" . gfm-mode)
+  :init (setq markdown-command "multimarkdown")
+  :bind (:map markdown-mode-map
+         ("C-c C-e" . markdown-do)))
+
+;; Enable markdown treesitter support if available
+(when (treesit-language-available-p 'markdown)
+  (add-to-list 'auto-mode-alist '("\\.md\\'" . markdown-ts-mode)))
+
+(when (treesit-language-available-p 'markdown-inline)
+  (add-to-list 'treesit-auto-langs 'markdown-inline))
 
 (use-package combobulate
   :vc (:url "https://github.com/mickeynp/combobulate" :rev :newest)

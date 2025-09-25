@@ -80,7 +80,7 @@ If CONFIRM is non-nil, ask for password twice."
     (base64-encode-string (concat salt result) t)))
 
 (defun kdb-simple-decrypt-string (encrypted-string password)
-  "Decrypt ENCRYPTED-STRING using PASSWORD."
+  "Decrypt ENCRYPTED-STRING using PASSWORD. Returns nil if decryption fails."
   (condition-case nil
       (let* ((decoded (base64-decode-string encrypted-string))
              ;; Salt is first 32 bytes (sha256 output)
@@ -93,8 +93,29 @@ If CONFIRM is non-nil, ask for password twice."
         (dotimes (i (length ciphertext))
           (aset result i (logxor (aref ciphertext i)
                                 (aref key-bytes (mod i (length key-bytes))))))
-        (decode-coding-string result 'utf-8))
+        (let ((decrypted (decode-coding-string result 'utf-8)))
+          ;; Validate decryption by checking if it contains readable text
+          (if (kdb-validate-decrypted-content decrypted)
+              decrypted
+            nil)))
     (error nil)))
+
+(defun kdb-validate-decrypted-content (content)
+  "Validate that CONTENT appears to be successfully decrypted text.
+Returns non-nil if content appears valid, nil otherwise."
+  (and content
+       (> (length content) 0)
+       ;; Check if content is mostly printable characters
+       (let ((printable-chars 0)
+             (total-chars (length content)))
+         (dotimes (i (min total-chars 200)) ; Check first 200 chars for efficiency
+           (when (or (and (>= (aref content i) 32) (<= (aref content i) 126)) ; Printable ASCII
+                     (memq (aref content i) '(9 10 13))) ; Tab, newline, carriage return
+             (cl-incf printable-chars)))
+         ;; Content should be at least 70% printable characters
+         (> (/ (* printable-chars 100.0) (min total-chars 200)) 70))
+       ;; Additional check: should not contain too many null bytes
+       (< (cl-count 0 (substring content 0 (min 100 (length content)))) 10)))
 
 ;; GPG Encryption (requires GnuPG)
 (defun kdb-setup-gpg ()
@@ -130,15 +151,23 @@ If CONFIRM is non-nil, ask for password twice."
          (call-interactively 'epa-encrypt-file)
        (message "GPG not installed. Use M-x kdb-set-encryption-method to switch to 'simple'")))))
 
-(defun kdb-decrypt-buffer ()
-  "Decrypt current buffer contents."
+(defun kdb-decrypt-buffer (&optional retry-count)
+  "Decrypt current buffer contents. RETRY-COUNT tracks failed attempts."
   (interactive)
+  (setq retry-count (or retry-count 0))
   (when (save-excursion
           (goto-char (point-min))
           (looking-at ";; Encrypted with kdb-simple-encrypt"))
-    (let ((password (kdb-get-encryption-password 
-                    (or buffer-file-name "buffer")
-                    nil))) ; no confirm on decryption
+    (let* ((cache-key (kdb-encryption-cache-key (or buffer-file-name "buffer")))
+           ;; Don't use cached password on retry attempts
+           (password (if (> retry-count 0)
+                         (read-passwd
+                          (format "Encryption password for %s (attempt %d): "
+                                  (file-name-nondirectory (or buffer-file-name "buffer"))
+                                  (1+ retry-count)))
+                       (kdb-get-encryption-password
+                        (or buffer-file-name "buffer")
+                        nil))))
       (when password
         (let* ((encrypted (buffer-substring
                           (save-excursion
@@ -147,16 +176,25 @@ If CONFIRM is non-nil, ask for password twice."
                             (point))
                           (point-max)))
                (decrypted (kdb-simple-decrypt-string (string-trim encrypted) password)))
-          (if (and decrypted (> (length decrypted) 0))
+          (if decrypted
               (progn
+                ;; Successful decryption - cache the password if it wasn't already cached
+                (when (> retry-count 0)
+                  (password-cache-add cache-key password))
                 (erase-buffer)
                 (insert decrypted)
                 (set-buffer-modified-p nil)
-                (message "Buffer decrypted"))
-            ;; Wrong password - clear cache and retry
+                (message "Buffer decrypted successfully"))
+            ;; Failed decryption
             (progn
-              (kdb-clear-encryption-password buffer-file-name)
-              (message "Decryption failed - wrong password. Cache cleared."))))))))
+              ;; Clear any cached wrong password
+              (password-cache-remove cache-key)
+              (if (< retry-count 2)
+                  (progn
+                    (message "Decryption failed - wrong password. Try again...")
+                    (sit-for 1)
+                    (kdb-decrypt-buffer (1+ retry-count)))
+                (message "Decryption failed after %d attempts. Giving up." (1+ retry-count))))))))
 
 ;; Region encryption for org-mode
 (defun kdb-password-encrypt-region (start end password)
