@@ -429,11 +429,10 @@
   "Revert the current file to the last committed version."
   (interactive)
   (when (vc-backend buffer-file-name)
-    (if (yes-or-no-p (format "Revert %s to last committed version? " 
+    (if (yes-or-no-p (format "Revert %s to last committed version? "
                              (file-name-nondirectory buffer-file-name)))
         (progn
-          (vc-revert buffer-file-name)
-          (revert-buffer t t)
+          (vc-revert-buffer-internal t t)
           (message "File reverted to last committed version"))
       (message "Revert cancelled"))))
 
@@ -870,7 +869,28 @@
   (defun kdb-vc-dir-help ()
     "Show vc-dir keybinding help."
     (interactive)
-    (message "VC-Dir: [d]iff [D]iff-all [SPC]mark [a]mark-same-type [c]ommit [C]onflicts [h/x]hide [s]ummary"))
+    (message "VC-Dir: [d]iff [D]iff-all [SPC]mark [a]mark-same-type [c]ommit [C]onflicts [h/x]hide [r]evert [s]ummary"))
+
+  (defun kdb-vc-dir-revert-file ()
+    "Revert the file at point to its last committed version."
+    (interactive)
+    (let ((file (vc-dir-current-file)))
+      (if file
+          (when (yes-or-no-p (format "Revert %s to last committed version? " file))
+            (let* ((root (vc-root-dir))
+                   (full-path (expand-file-name file root))
+                   (file-buffer (find-buffer-visiting full-path)))
+              (if file-buffer
+                  ;; File is open, revert it directly
+                  (with-current-buffer file-buffer
+                    (vc-revert-buffer-internal t t))
+                ;; File not open, use git directly
+                (let ((default-directory root))
+                  (shell-command (format "git checkout HEAD -- %s"
+                                       (shell-quote-argument file))))))
+            (vc-dir-refresh)
+            (message "File %s reverted to last committed version" file))
+        (message "No file at point"))))
   
   ;; Set up keybindings using define-key instead of :bind
   (with-eval-after-load 'vc-dir
@@ -886,6 +906,7 @@
     (define-key vc-dir-mode-map (kbd "l") 'vc-print-log)
     (define-key vc-dir-mode-map (kbd "=") 'vc-diff)
     (define-key vc-dir-mode-map (kbd "g") 'revert-buffer)
+    (define-key vc-dir-mode-map (kbd "r") 'kdb-vc-dir-revert-file)
     (define-key vc-dir-mode-map (kbd "k") 'vc-dir-delete-file)
     (define-key vc-dir-mode-map (kbd "!") 'vc-dir-ignore)
     ;; New diff-related keybindings

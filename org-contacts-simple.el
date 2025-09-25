@@ -6,9 +6,15 @@
 
 ;;; Code:
 
+;; Ensure org is loaded
+(require 'org)
+
 ;; File locations
-(defvar kdb/contacts-file "~/.org/contacts.org"
-  "File for storing contacts.")
+(defvar kdb/contacts-file 
+  (if (file-exists-p "~/.org/contacts.org.gpg")
+      "~/.org/contacts.org.gpg"
+    "~/.org/contacts.org")
+  "File for storing contacts, uses encrypted version if available.")
 
 (defvar kdb/notes-file "~/.org/notes.org"
   "File for storing general notes.")
@@ -22,7 +28,8 @@
         (email (read-string "Email: "))
         (phone (read-string "Phone: "))
         (notes (read-string "Initial note: ")))
-    (with-current-buffer (find-file-noselect kdb/contacts-file)
+    (condition-case err
+        (with-current-buffer (find-file-noselect kdb/contacts-file)
       (goto-char (point-max))
       (insert (format "\n* %s\n" name))
       (when (not (string-empty-p email))
@@ -33,7 +40,15 @@
         (insert (format "  Notes:\n  - %s\n" notes)))
       (insert "  Added: " (format-time-string "%Y-%m-%d") "\n")
       (save-buffer)
-      (message "Contact '%s' added" name))))
+      (message "Contact '%s' added" name))
+      (epg-error
+       (if (yes-or-no-p "Failed to decrypt contacts file. Retry? ")
+           (progn
+             (password-cache-remove kdb/contacts-file)
+             (kdb/add-contact))
+         (message "Contact addition cancelled")))
+      (file-error
+       (message "Error accessing contacts file: %s" (error-message-string err))))))
 
 (defun kdb/add-meeting-note ()
   "Add a meeting note for a contact."
@@ -216,25 +231,52 @@
 (defun kdb/search-contacts (search-term)
   "Search for SEARCH-TERM in contacts and notes."
   (interactive "sSearch: ")
-  (let ((files (list kdb/contacts-file kdb/notes-file)))
-    (multi-occur
-     (mapcar #'find-file-noselect files)
-     search-term)))
+  (condition-case err
+      (let ((files (list kdb/contacts-file kdb/notes-file)))
+        (if (fboundp 'multi-occur)
+            (multi-occur
+             (mapcar #'find-file-noselect files)
+             search-term)
+          ;; Fallback to basic occur in contacts file
+          (with-current-buffer (find-file-noselect kdb/contacts-file)
+            (occur search-term)
+            (switch-to-buffer (current-buffer)))))
+    (error
+     (message "Search error: %s" (error-message-string err)))))
+
+(defun kdb/get-all-contacts ()
+  "Get all contact names from the contacts file."
+  (let ((contacts '()))
+    (with-current-buffer (find-file-noselect kdb/contacts-file)
+      (save-excursion
+        (goto-char (point-min))
+        (while (re-search-forward "^\\* \\(.+\\)" nil t)
+          (push (match-string 1) contacts))))
+    (nreverse contacts)))
 
 (defun kdb/find-contact ()
   "Jump to a contact using completion."
   (interactive)
-  (let ((contacts (org-map-entries
-                   (lambda () (nth 4 (org-heading-components)))
-                   "LEVEL=1"
-                   (list kdb/contacts-file))))
+  (let ((contacts 
+         (condition-case nil
+             ;; Try org-map-entries if available
+             (with-current-buffer (find-file-noselect kdb/contacts-file)
+               (if (fboundp 'org-map-entries)
+                   (org-map-entries
+                    (lambda () (nth 4 (org-heading-components)))
+                    "LEVEL=1"
+                    (list kdb/contacts-file))
+                 (kdb/get-all-contacts)))
+           ;; Fallback on any error
+           (error (kdb/get-all-contacts)))))
     (when contacts
       (let ((contact (completing-read "Jump to contact: " contacts nil t)))
         (with-current-buffer (find-file-noselect kdb/contacts-file)
           (goto-char (point-min))
           (search-forward (format "* %s" contact))
           (switch-to-buffer (current-buffer))
-          (org-show-context)
+          (when (fboundp 'org-show-context)
+            (org-show-context))
           (recenter-top-bottom))))))
 
 ;; Better search with deadgrep if available
@@ -249,9 +291,18 @@
 ;; === FILE ACCESS === ;;
 
 (defun kdb/open-contacts ()
-  "Open contacts file."
+  "Open contacts file with decryption retry support."
   (interactive)
-  (find-file kdb/contacts-file))
+  (condition-case err
+      (find-file kdb/contacts-file)
+    (epg-error
+     (if (yes-or-no-p "Failed to decrypt contacts file. Retry? ")
+         (progn
+           (password-cache-remove kdb/contacts-file)
+           (find-file kdb/contacts-file))
+       (message "Cancelled opening contacts file")))
+    (file-error
+     (message "Error opening contacts file: %s" (error-message-string err)))))
 
 (defun kdb/open-notes ()
   "Open notes file."
