@@ -1228,6 +1228,58 @@ If point is at the end of the line, kill the whole line including the newline."
          ("C-c e e" . treesit-expand-region)
          ("C-c e q" . treesit-expand-reset)))
 
+;; Agent Shell for AI integration
+(use-package shell-maker
+  :ensure t)
+
+(use-package acp
+  :vc (:url "https://github.com/xenodium/acp.el" :rev :newest))
+
+(use-package agent-shell
+  :vc (:url "https://github.com/xenodium/agent-shell" :rev :newest)
+  :after (shell-maker acp)
+  :config
+  (defun agent-shell-anthropic-key ()
+    "Get Anthropic API key from environment or auth-source."
+    (or (getenv "ANTHROPIC_API_KEY")
+        (getenv "CLAUDE_API_KEY")))
+
+  (defun agent-shell-start-claude-code-agent ()
+    "Start an interactive Claude Code agent shell."
+    (interactive)
+    (agent-shell--start
+     :new-session t
+     :mode-line-name "Claude Code"
+     :buffer-name "Claude Code"
+     :shell-prompt "Claude Code> "
+     :shell-prompt-regexp "Claude Code> "
+     :client-maker (lambda ()
+                     (acp-make-client :command "claude-code-acp"
+                                      :environment-variables
+                                      (when (agent-shell-anthropic-key)
+                                        (list (format "ANTHROPIC_API_KEY=%s" (agent-shell-anthropic-key))))))))
+
+  :commands (agent-shell-start-claude-code-agent))
+
+;; Test function to check if agent-shell is working
+(defun test-agent-shell ()
+  "Test if agent-shell packages are loaded."
+  (interactive)
+  (if (fboundp 'agent-shell-start-claude-code-agent)
+      (progn
+        (message "Agent-shell is loaded, starting Claude Code...")
+        (agent-shell-start-claude-code-agent))
+    (message "Agent-shell packages not yet loaded. Try: M-x package-install RET shell-maker")))
+
+;; Claude Code EAT-based integration (autonomous AI coding)
+(use-package claude-code
+  :vc (:url "https://github.com/stevemolitor/claude-code.el" :rev :newest)
+  :after eat
+  :config
+  (claude-code-mode)
+  (setq claude-code-terminal-backend 'eat)
+  :bind (("C-c c" . claude-code-transient)))
+(global-set-key (kbd "C-c a c") 'agent-shell-start-claude-code-agent)
 
 (use-package multiple-cursors
   :bind (("C->" . mc/mark-next-like-this)
