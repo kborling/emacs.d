@@ -944,7 +944,8 @@
         log-edit-require-final-newline t
         log-edit-setup-add-author nil))
 
-(global-set-key (kbd "C-c g") 'kdb-vc-transient)
+;; Keybinding is set in init.el via autoload
+;; (global-set-key (kbd "C-c g") 'kdb-vc-transient)
 
 (provide 'init-vc)
 ;;; init-vc.el ends here

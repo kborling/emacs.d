@@ -233,7 +233,7 @@
 
 (let* ((settings (cond
                   ((eq system-type 'windows-nt) '(:size 110 :families ("Rec Mono Semicasual" "Cascadia Code" "Consolas" "Courier New")))
-                  ((eq system-type 'gnu/linux)  '(:size 120 :families ("Inconsolata" "DejaVu Sans Mono" "Liberation Mono" "monospace")))
+                  ((eq system-type 'gnu/linux)  '(:size 100 :families ("Jetbrains Mono" "DejaVu Sans Mono" "Liberation Mono" "monospace")))
                   ((eq system-type 'darwin)     '(:size 150 :families ("Overpass Mono" "Monaco" "Menlo" "monospace")))))
        (default-font-size (plist-get settings :size))
        (font-families (plist-get settings :families))
@@ -522,6 +522,7 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package grep
   :ensure nil
+  :defer t
   :config
   (setq grep-command "rg --color=never --no-heading --line-number --smart-case "
         ;; grep-find-command
@@ -532,13 +533,15 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package deadgrep
   :ensure t
+  :commands deadgrep
+  :bind ("C-x g" . deadgrep)
   :config
-  (setq deadgrep-extra-arguments '("--no-config" "--multiline"))
-  (global-set-key (kbd "C-x g") #'deadgrep))
+  (setq deadgrep-extra-arguments '("--no-config" "--multiline")))
 
 
 (use-package xref
   :ensure nil
+  :defer t
   :config
   (setq
    xref-show-definitions-function #'xref-show-definitions-completing-read
@@ -549,15 +552,12 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package which-key
   :ensure nil
-  :defer 0
-  :config
-  (which-key-mode))
+  :hook (after-init . which-key-mode))
 
 
 (use-package editorconfig
   :ensure nil
-  :config
-  (editorconfig-mode 1))
+  :hook (after-init . editorconfig-mode))
 
 
 (use-package isearch
@@ -827,7 +827,7 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package orderless
   :ensure t
-  :demand t
+  :defer t
   :after minibuffer
   :commands (orderless-filter)
   :bind (:map minibuffer-local-completion-map
@@ -838,12 +838,13 @@ If point is at the end of the line, kill the whole line including the newline."
 
 
 (use-package fussy
-  :config
+  :defer t
+  :init
   (setq fussy-use-cache t
         ;; fussy-filter-fn 'fussy-filter-default
         fussy-filter-fn 'fussy-filter-orderless-flex
         fussy-compare-same-score-fn 'fussy-histlen->strlen<)
-
+  :config
   (fussy-setup)
   (fussy-eglot-setup)
 
@@ -858,8 +859,7 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package icomplete
   :ensure nil
-  :init
-  (fido-mode)
+  :hook (after-init . fido-mode)
   :config
   (defun fussy-fido-setup ()
     "Use `fussy' with `fido-mode'."
@@ -878,7 +878,7 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package minibuffer
   :ensure nil
-  :demand t
+  :defer t
   :config
   (setq
    completions-format 'one-column
@@ -1061,8 +1061,8 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package eldoc
   :ensure nil
+  :hook (after-init . global-eldoc-mode)
   :config
-  (global-eldoc-mode 1)
   (setq
    eldoc-echo-area-use-multiline-p t))
 
@@ -1082,17 +1082,46 @@ If point is at the end of the line, kill the whole line including the newline."
 ;; Add lisp directory to load path
 (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
 
-;; Load VC configuration  
-(require 'init-vc)
+;; Load VC configuration when needed
+(defun kdb-load-init-vc ()
+  "Load init-vc configuration once."
+  (unless (featurep 'init-vc)
+    (require 'init-vc)))
 
-;; Load Org configuration
-(require 'init-org)
+;; Autoload the main VC transient command and bind it
+(autoload 'kdb-vc-transient "init-vc" "VC transient menu" t)
+(global-set-key (kbd "C-c g") 'kdb-vc-transient)
 
-;; Load encryption configuration
-(require 'init-encryption)
+;; Hook into various VC entry points for other VC commands
+(add-hook 'vc-dir-mode-hook #'kdb-load-init-vc)
+(with-eval-after-load 'vc-dir (kdb-load-init-vc))
+(with-eval-after-load 'log-view (kdb-load-init-vc))
 
-;; Load terminal optimizations
-(require 'init-terminal)
+;; Load Org configuration when org-mode is loaded
+(with-eval-after-load 'org
+  (require 'init-org))
+
+;; Load encryption configuration when needed
+(defun kdb-load-init-encryption ()
+  "Load init-encryption configuration once."
+  (unless (featurep 'init-encryption)
+    (require 'init-encryption)))
+
+;; Autoload interactive encryption commands
+(autoload 'kdb-decrypt-buffer "init-encryption" "Decrypt current buffer" t)
+(autoload 'kdb-encrypt-buffer "init-encryption" "Encrypt current buffer" t)
+(autoload 'kdb-clear-encryption-password "init-encryption" "Clear cached encryption password" t)
+(autoload 'kdb-set-encryption-method "init-encryption" "Set encryption method" t)
+(autoload 'kdb-encryption-status "init-encryption" "Show encryption status" t)
+
+;; Hook into .gpg file opening and epa
+(add-hook 'epa-file-handler-mode-hook #'kdb-load-init-encryption)
+(with-eval-after-load 'epa-file (kdb-load-init-encryption))
+(with-eval-after-load 'epg (kdb-load-init-encryption))
+
+;; Load terminal optimizations (load immediately if in terminal mode, otherwise skip)
+(when (not (display-graphic-p))
+  (require 'init-terminal))
 
 
 
