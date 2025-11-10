@@ -17,9 +17,9 @@
 ;; Set the number of workspaces
 (setq exwm-workspace-number 5)
 
-;; Make workspace 1 be the one where we land at startup
-(setq exwm-workspace-show-all-buffers nil)
-(setq exwm-layout-show-all-buffers nil)
+;; Allow buffers to be accessed from any workspace
+(setq exwm-workspace-show-all-buffers t)
+(setq exwm-layout-show-all-buffers t)
 
 ;;; Workspace Names ======================================================
 
@@ -427,20 +427,17 @@
           (message "Toggled Dark Reader in %d Firefox window(s)" count))
       (message "No Firefox windows found"))))
 
-(defun kdb-exwm-toggle-kitty-theme ()
-  "Toggle kitty terminal theme."
-  (interactive)
-  ;; Send Ctrl+Shift+F5 to toggle kitty theme (if configured)
-  (dolist (buffer (buffer-list))
-    (with-current-buffer buffer
-      (when (and (eq major-mode 'exwm-mode)
-                 (or (string-match-p "[Kk]itty" (or exwm-class-name ""))
-                     (string-match-p "kitty" (or exwm-class-name ""))))
-        ;; Kitty uses kitty @ set-colors for theme changes
-        ;; or you can send the configured shortcut
-        (start-process-shell-command
-         "kitty-theme" nil
-         "kitty @ --to unix:/tmp/mykitty set-colors --reset")))))
+
+(defun kdb-exwm-set-kitty-theme (theme)
+  "Set kitty terminal theme to THEME (light or dark)."
+  ;; Directly execute the sed command and reload kitty
+  (let ((config-file (expand-file-name "~/.config/kitty/kitty.conf"))
+        (old-theme (if (string= theme "light") "dark" "light")))
+    (start-process-shell-command
+     "kitty-theme" nil
+     (format "sed -i 's|include themes/%s.conf|include themes/%s.conf|g' %s && kill -SIGUSR1 $(pgrep kitty)"
+             old-theme theme config-file))
+    (message "Set kitty theme to %s" theme)))
 
 (defun kdb-exwm-set-light-mode ()
   "Switch to light mode: Acme theme, disable Dark Reader, light kitty."
@@ -462,6 +459,9 @@
   (when (eq kdb-exwm-darkreader-state 'on)
     (kdb-exwm-toggle-firefox-darkreader)
     (setq kdb-exwm-darkreader-state 'off))
+
+  ;; Set kitty to light theme
+  (kdb-exwm-set-kitty-theme "light")
 
   ;; Send message
   (message "Light mode activated"))
@@ -486,6 +486,9 @@
   (when (eq kdb-exwm-darkreader-state 'off)
     (kdb-exwm-toggle-firefox-darkreader)
     (setq kdb-exwm-darkreader-state 'on))
+
+  ;; Set kitty to dark theme
+  (kdb-exwm-set-kitty-theme "dark")
 
   ;; Send message
   (message "Dark mode activated"))
