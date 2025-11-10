@@ -229,11 +229,11 @@
 
 ;; Fonts ================================================ ;;
 
-(setopt line-spacing 4)
+(setopt line-spacing 8)
 
 (let* ((settings (cond
                   ((eq system-type 'windows-nt) '(:size 110 :families ("Rec Mono Semicasual" "Cascadia Code" "Consolas" "Courier New")))
-                  ((eq system-type 'gnu/linux)  '(:size 100 :families ("Jetbrains Mono" "DejaVu Sans Mono" "Liberation Mono" "monospace")))
+                  ((eq system-type 'gnu/linux)  '(:size 110 :families ("Comic Code" "Jetbrains Mono" "DejaVu Sans Mono" "Liberation Mono" "monospace")))
                   ((eq system-type 'darwin)     '(:size 150 :families ("Overpass Mono" "Monaco" "Menlo" "monospace")))))
        (default-font-size (plist-get settings :size))
        (font-families (plist-get settings :families))
@@ -1074,8 +1074,13 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package exec-path-from-shell
   :ensure t
   :if (memq window-system '(mac ns x))
+  :init
+  ;; Only check PATH for better performance
+  (setq exec-path-from-shell-variables '("PATH"))
+  ;; Disable debug and verbose output
+  (setq exec-path-from-shell-debug nil)
+  (setq exec-path-from-shell-check-startup-files nil)
   :config
-  ;; (setq exec-path-from-shell-variables '("PATH" "GOPATH"))
   (exec-path-from-shell-initialize))
 
 
@@ -1461,6 +1466,31 @@ If point is at the end of the line, kill the whole line including the newline."
          ("M-7" . winum-select-window-7)
          ("M-8" . winum-select-window-8)
          ("M-9" . winum-select-window-9)))
+
+;; EXWM - Emacs X Window Manager =================== ;;
+
+;; Load EXWM early if we're in X11 session
+(when (eq window-system 'x)
+  (require 'init-exwm))
+
+(use-package exwm
+  :ensure t
+  :defer t
+  :config
+  ;; Disable menu-bar, tool-bar and scroll-bar in EXWM
+  (menu-bar-mode -1)
+  (tool-bar-mode -1)
+  (scroll-bar-mode -1)
+
+  ;; Shrink fringes to 1 pixel
+  (fringe-mode 1)
+
+  ;; Turn on `display-time-mode' if you don't use an external bar
+  (setq display-time-default-load-average nil)
+  (display-time-mode t)
+
+  ;; Turn on `display-battery-mode' if you want battery info
+  (display-battery-mode t))
 
 
 ;; Local Variables:

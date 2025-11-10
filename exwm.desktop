@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=EXWM
+Comment=Emacs X Window Manager
+Exec=emacs -mm --debug-init
+TryExec=emacs
+Type=Application
+DesktopNames=EXWM
