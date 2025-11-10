@@ -181,7 +181,7 @@
         ([?\s-F] . exwm-floating-toggle-floating)
 
         ;; Close window
-        ([?\s-q] . kill-this-buffer)))
+        ([?\s-q] . (lambda () (interactive) (kill-buffer (current-buffer))))))
 
 ;;; Simulation Keys ======================================================
 
@@ -386,6 +386,119 @@
 ;; (setq-default mode-line-format
 ;;               (cons '(:eval (kdb-exwm-modeline-segment))
 ;;                     mode-line-format))
+
+;;; Theme Management - Light/Dark Mode ===================================
+
+(defvar kdb-exwm-current-mode 'dark
+  "Current theme mode: 'light or 'dark.")
+
+(defvar kdb-exwm-darkreader-state 'on
+  "Current Dark Reader state: 'on or 'off.")
+
+(defvar kdb-exwm-light-theme 'acme
+  "Theme to use for light mode.")
+
+(defvar kdb-exwm-dark-theme 'uwu
+  "Theme to use for dark mode.")
+
+(defun kdb-exwm-toggle-firefox-darkreader ()
+  "Toggle Dark Reader in all Firefox windows."
+  (interactive)
+  ;; Send Alt+Shift+D to toggle Dark Reader extension
+  ;; This requires Dark Reader to be installed with this shortcut configured
+  (let ((firefox-windows '())
+        (count 0))
+    ;; Find all Firefox window IDs
+    (dolist (buffer (buffer-list))
+      (with-current-buffer buffer
+        (when (and (eq major-mode 'exwm-mode)
+                   (or (string-match-p "Firefox" (or exwm-class-name ""))
+                       (string-match-p "firefox" (or exwm-class-name ""))))
+          (when (and (boundp 'exwm--id) exwm--id)
+            (push exwm--id firefox-windows)))))
+    (if firefox-windows
+        (progn
+          ;; Use xdotool to send keypress to each Firefox window
+          (dolist (window-id firefox-windows)
+            (start-process-shell-command
+             "darkreader-toggle" nil
+             (format "xdotool key --window %d alt+shift+d" window-id))
+            (setq count (1+ count)))
+          (message "Toggled Dark Reader in %d Firefox window(s)" count))
+      (message "No Firefox windows found"))))
+
+(defun kdb-exwm-toggle-kitty-theme ()
+  "Toggle kitty terminal theme."
+  (interactive)
+  ;; Send Ctrl+Shift+F5 to toggle kitty theme (if configured)
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (when (and (eq major-mode 'exwm-mode)
+                 (or (string-match-p "[Kk]itty" (or exwm-class-name ""))
+                     (string-match-p "kitty" (or exwm-class-name ""))))
+        ;; Kitty uses kitty @ set-colors for theme changes
+        ;; or you can send the configured shortcut
+        (start-process-shell-command
+         "kitty-theme" nil
+         "kitty @ --to unix:/tmp/mykitty set-colors --reset")))))
+
+(defun kdb-exwm-set-light-mode ()
+  "Switch to light mode: Acme theme, disable Dark Reader, light kitty."
+  (interactive)
+  (setq kdb-exwm-current-mode 'light)
+
+  ;; Disable all themes first, then load light theme
+  (mapc #'disable-theme custom-enabled-themes)
+  (load-theme kdb-exwm-light-theme t)
+
+  ;; Update systemtray background
+  (when (featurep 'exwm-systemtray)
+    (setq exwm-systemtray-background-color
+          (face-attribute 'default :background nil 'default))
+    (when (fboundp 'exwm-systemtray--refresh)
+      (exwm-systemtray--refresh)))
+
+  ;; Toggle Firefox Dark Reader off (if it's currently on)
+  (when (eq kdb-exwm-darkreader-state 'on)
+    (kdb-exwm-toggle-firefox-darkreader)
+    (setq kdb-exwm-darkreader-state 'off))
+
+  ;; Send message
+  (message "Light mode activated"))
+
+(defun kdb-exwm-set-dark-mode ()
+  "Switch to dark mode: Uwu theme, enable Dark Reader, dark kitty."
+  (interactive)
+  (setq kdb-exwm-current-mode 'dark)
+
+  ;; Disable all themes first, then load dark theme
+  (mapc #'disable-theme custom-enabled-themes)
+  (load-theme kdb-exwm-dark-theme t)
+
+  ;; Update systemtray background
+  (when (featurep 'exwm-systemtray)
+    (setq exwm-systemtray-background-color
+          (face-attribute 'default :background nil 'default))
+    (when (fboundp 'exwm-systemtray--refresh)
+      (exwm-systemtray--refresh)))
+
+  ;; Toggle Firefox Dark Reader on (if it's currently off)
+  (when (eq kdb-exwm-darkreader-state 'off)
+    (kdb-exwm-toggle-firefox-darkreader)
+    (setq kdb-exwm-darkreader-state 'on))
+
+  ;; Send message
+  (message "Dark mode activated"))
+
+(defun kdb-exwm-toggle-theme-mode ()
+  "Toggle between light and dark mode system-wide."
+  (interactive)
+  (if (eq kdb-exwm-current-mode 'dark)
+      (kdb-exwm-set-light-mode)
+    (kdb-exwm-set-dark-mode)))
+
+;; Bind theme toggle to Super+t
+(exwm-input-set-key (kbd "s-t") #'kdb-exwm-toggle-theme-mode)
 
 ;;; Power Management =====================================================
 
