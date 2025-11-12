@@ -14,27 +14,37 @@
 
 ;;; Code:
 
+;;; ============================================================
+;;;                    PERSONAL SETTINGS
+;;; ============================================================
+
 ;; Load personal settings if they exist (not tracked in git)
 (let ((personal-file (locate-user-emacs-file "personal.el")))
   (when (file-exists-p personal-file)
     (load personal-file)))
 
-
 (setq custom-file (locate-user-emacs-file "custom.el"))
 (load custom-file :no-error-if-file-is-missing)
 
+;;; ============================================================
+;;;                  PERFORMANCE SETTINGS
+;;; ============================================================
 
 (fset #'jsonrpc--log-event #'ignore)
 
-;; Native compilation settings to avoid battery drain
+;; Native compilation settings
 (setq native-comp-async-report-warnings-errors nil
       native-comp-async-jobs-number 4)
 
+;; Rendering optimizations
 (setq fast-but-imprecise-scrolling t
       redisplay-skip-fontification-on-input t
       jit-lock-defer-time 0
       jit-lock-stealth-time 0.2)
 
+;;; ============================================================
+;;;                   PACKAGE MANAGEMENT
+;;; ============================================================
 
 (setq package-archives
       '(("gnu-elpa" . "https://elpa.gnu.org/packages/")
@@ -56,6 +66,8 @@
 (unless (package-installed-p 'use-package)
   (package-install 'use-package))
 
+;;; Package Management ========================================= ;;
+
 (use-package use-package
   :custom
   (use-package-always-ensure t)
@@ -70,6 +82,9 @@
                (display-buffer-no-window)
                (allow-no-window . t)))
 
+;;; ============================================================
+;;;                DIRECTORIES AND FILE MANAGEMENT
+;;; ============================================================
 
 ;; Create var directory for cleaner organization
 (defvar user-emacs-var-directory
@@ -102,6 +117,9 @@
  abbrev-file-name (expand-file-name "abbrev_defs" user-emacs-var-directory)
  nsm-settings-file (expand-file-name "network-security.data" user-emacs-var-directory))
 
+;;; ============================================================
+;;;                  EDITOR BEHAVIOR
+;;; ============================================================
 
 (setq
  sentence-end-double-space nil
@@ -113,6 +131,10 @@
  load-prefer-newer t
  set-mark-command-repeat-pop t
  global-mark-ring-max 50000)
+
+;;; ============================================================
+;;;                 UI AND APPEARANCE
+;;; ============================================================
 
 ;; Cursor configuration - thick bar
 (setq-default cursor-type '(bar . 3))  ; Bar cursor with width of 3 pixels
@@ -161,8 +183,12 @@
     (add-to-list 'default-frame-alist '(top . 0))
     (add-to-list 'default-frame-alist '(height . 1.0)))))
 
+;;; ============================================================
+;;;                   SESSION MANAGEMENT
+;;; ============================================================
 
-;; Recent files
+;; Recent Files ============================================ ;;
+
 (use-package recentf
   :ensure nil
   :hook (after-init . recentf-mode)
@@ -179,6 +205,9 @@
                                  (recentf-save-list)))))
 
 ;; Save cursor position
+
+;; Save Place ============================================== ;;
+
 (use-package saveplace
   :ensure nil
   :hook (after-init . save-place-mode)
@@ -186,6 +215,9 @@
   (save-place-file (expand-file-name "saveplace" user-emacs-var-directory)))
 
 ;; Minibuffer history
+
+;; Save History ============================================ ;;
+
 (use-package savehist
   :ensure nil
   :hook (after-init . savehist-mode)
@@ -212,11 +244,17 @@
               js-switch-indent-offset 4)
 
 ;; Treat Camelcase as words
+
+;; Subword Mode ============================================ ;;
+
 (use-package subword-mode
   :ensure nil
   :hook (after-init . global-subword-mode))
 
 ;; Delete selection on insert
+
+;; Delete Selection ======================================== ;;
+
 (use-package delsel
   :ensure nil
   :hook (after-init . delete-selection-mode))
@@ -227,13 +265,17 @@
 (autoload 'zap-up-to-char "misc"
   "Kill up to, but not including ARGth occurrence of CHAR." t)
 
+;;; ============================================================
+;;;                    VISUAL APPEARANCE
+;;; ============================================================
+
 ;; Fonts ================================================ ;;
 
-(setopt line-spacing 8)
+(setopt line-spacing 4)
 
 (let* ((settings (cond
                   ((eq system-type 'windows-nt) '(:size 110 :families ("Rec Mono Semicasual" "Cascadia Code" "Consolas" "Courier New")))
-                  ((eq system-type 'gnu/linux)  '(:size 110 :families ("Comic Code" "Jetbrains Mono" "DejaVu Sans Mono" "Liberation Mono" "monospace")))
+                  ((eq system-type 'gnu/linux)  '(:size 110 :families ("JetBrains Mono" "DejaVu Sans Mono" "Liberation Mono" "monospace")))
                   ((eq system-type 'darwin)     '(:size 150 :families ("Overpass Mono" "Monaco" "Menlo" "monospace")))))
        (default-font-size (plist-get settings :size))
        (font-families (plist-get settings :families))
@@ -242,7 +284,7 @@
   ;; Set the font if we found one available
   (when default-font-family
     (set-face-attribute 'default nil
-                        :family default-font-family :weight 'light :height default-font-size)
+                        :family default-font-family :weight 'regular :height default-font-size)
     (set-face-attribute 'fixed-pitch nil
                         :family default-font-family :height 1.0))
 
@@ -273,6 +315,10 @@
    ("C-h x" . helpful-command)
    ("C-h k" . helpful-key)
    ("C-h v" . helpful-variable)))
+
+;;; ============================================================
+;;;                  CUSTOM FUNCTIONS
+;;; ============================================================
 
 ;; Custom Functions ======================================= ;;
 
@@ -515,10 +561,18 @@ If point is at the end of the line, kill the whole line including the newline."
 (eval-after-load "term"
   '(define-key term-raw-map (kbd "C-c C-y") 'term-paste))
 
+;;; ============================================================
+;;;                   ESSENTIAL PACKAGES
+;;; ============================================================
+
+;; Auto Revert ============================================= ;;
+
 (use-package autorevert
   :ensure nil
   :hook (after-init . global-auto-revert-mode))
 
+
+;; Grep ==================================================== ;;
 
 (use-package grep
   :ensure nil
@@ -531,6 +585,8 @@ If point is at the end of the line, kill the whole line including the newline."
         grep-use-null-device nil))
 
 
+;; Deadgrep ================================================ ;;
+
 (use-package deadgrep
   :ensure t
   :commands deadgrep
@@ -538,6 +594,8 @@ If point is at the end of the line, kill the whole line including the newline."
   :config
   (setq deadgrep-extra-arguments '("--no-config" "--multiline")))
 
+
+;; Xref ==================================================== ;;
 
 (use-package xref
   :ensure nil
@@ -550,15 +608,21 @@ If point is at the end of the line, kill the whole line including the newline."
 
 
 
+;; Which Key =============================================== ;;
+
 (use-package which-key
   :ensure nil
   :hook (after-init . which-key-mode))
 
 
+;; EditorConfig ============================================ ;;
+
 (use-package editorconfig
   :ensure nil
   :hook (after-init . editorconfig-mode))
 
+
+;; Isearch ================================================= ;;
 
 (use-package isearch
   :ensure nil
@@ -596,6 +660,8 @@ If point is at the end of the line, kill the whole line including the newline."
   (define-key minibuffer-local-isearch-map (kbd "M-/") #'isearch-complete-edit))
 
 
+;; Dabbrev ================================================= ;;
+
 (use-package dabbrev
   :ensure nil
   :commands (dabbrev-expand dabbrev-completion)
@@ -613,6 +679,8 @@ If point is at the end of the line, kill the whole line including the newline."
    dabbrev-ignored-buffer-modes
    '(archive-mode image-mode docview-mode pdf-view-mode)))
 
+
+;; Diff Mode =============================================== ;;
 
 (use-package diff-mode
   :ensure nil
@@ -664,6 +732,8 @@ If point is at the end of the line, kill the whole line including the newline."
               ("TAB" . diff-hunk-next)
               ("<backtab>" . diff-hunk-prev)))
 
+;; Ediff =================================================== ;;
+
 (use-package ediff
   :ensure nil
   :config
@@ -675,6 +745,8 @@ If point is at the end of the line, kill the whole line including the newline."
    ediff-split-window-function 'split-window-horizontally
    ediff-window-setup-function 'ediff-setup-windows-plain))
 
+
+;; Dired =================================================== ;;
 
 (use-package dired
   :ensure nil
@@ -708,6 +780,8 @@ If point is at the end of the line, kill the whole line including the newline."
               ("C-c C-e" . wdired-change-to-wdired-mode)))
 
 
+;; Ibuffer ================================================= ;;
+
 (use-package ibuffer
   :ensure nil
   :hook (ibuffer-mode . hl-line-mode)
@@ -724,6 +798,13 @@ If point is at the end of the line, kill the whole line including the newline."
    ibuffer-show-empty-filter-groups nil  ; Hide empty groups
    ibuffer-saved-filter-groups
    '(("Default"
+      ("EXWM: Browser" (or (and (mode . exwm-mode)
+                                (name . "Firefox"))
+                           (and (mode . exwm-mode)
+                                (name . "Chrome"))))
+      ("EXWM: Terminal" (and (mode . exwm-mode)
+                             (name . "kitty")))
+      ("EXWM: Other" (mode . exwm-mode))
       ("Emacs Config" (or (filename . "\\.emacs\\.d")
                           (name . "^\\*scratch\\*")
                           (name . "^\\*Messages\\*")))
@@ -759,6 +840,8 @@ If point is at the end of the line, kill the whole line including the newline."
               ("/" . ibuffer-filter-by-name)))
 
 
+;; Project ================================================= ;;
+
 (use-package project
   :ensure nil
   :config
@@ -766,6 +849,8 @@ If point is at the end of the line, kill the whole line including the newline."
    vc-directory-exclusion-list (nconc vc-directory-exclusion-list '("node_modules" "elpa" ".sl"))
    project-vc-extra-root-markers '(".envrc" "package.json" ".project" ".sl")))
 
+
+;; Async =================================================== ;;
 
 (use-package async
   :ensure t
@@ -777,6 +862,8 @@ If point is at the end of the line, kill the whole line including the newline."
   :config
   (async-bytecomp-package-mode 1))
 
+
+;; Eshell ================================================== ;;
 
 (use-package eshell
   :ensure nil
@@ -825,6 +912,8 @@ If point is at the end of the line, kill the whole line including the newline."
     (setq eat-kill-buffer-on-exit t
           eat-enable-mouse t)))
 
+;; Orderless =============================================== ;;
+
 (use-package orderless
   :ensure t
   :defer t
@@ -836,6 +925,8 @@ If point is at the end of the line, kill the whole line including the newline."
   :config
   (setq orderless-matching-styles '(orderless-prefixes orderless-regexp)))
 
+
+;; Fussy =================================================== ;;
 
 (use-package fussy
   :defer t
@@ -857,6 +948,8 @@ If point is at the end of the line, kill the whole line including the newline."
                           fussy-prefer-prefix nil))))
 
 
+;; Icomplete =============================================== ;;
+
 (use-package icomplete
   :ensure nil
   :hook (after-init . fido-mode)
@@ -875,6 +968,8 @@ If point is at the end of the line, kill the whole line including the newline."
         icomplete-with-completion-tables t
         icomplete-scroll t))
 
+
+;; Minibuffer ============================================== ;;
 
 (use-package minibuffer
   :ensure nil
@@ -903,6 +998,12 @@ If point is at the end of the line, kill the whole line including the newline."
   ;;             ("C-p" . minibuffer-previous-completion)
   ;;             ("C-n" . minibuffer-next-completion)
   ;;             ("RET" . minibuffer-choose-completion)))
+
+;;; ============================================================
+;;;                   DEVELOPMENT TOOLS
+;;; ============================================================
+
+;; Eglot (LSP) ============================================= ;;
 
 (use-package eglot
   :ensure nil
@@ -991,10 +1092,17 @@ If point is at the end of the line, kill the whole line including the newline."
 
 ;; NOTE: Be sure to grab the latest release 'https://github.com/blahgeek/emacs-lsp-booster/releases'
 ;; and place in PATH
+
+;; Eglot Booster =========================================== ;;
+
 (use-package eglot-booster
   :after eglot
   :vc (:url "https://github.com/jdtsmith/eglot-booster" :rev :newest)
-  :config (eglot-booster-mode))
+  :config
+  (when (executable-find "emacs-lsp-booster")
+    (eglot-booster-mode)))
+
+;; Flymake ================================================= ;;
 
 (use-package flymake
   :ensure nil
@@ -1059,6 +1167,8 @@ If point is at the end of the line, kill the whole line including the newline."
                           (delq 'flymake-eldoc-function eldoc-documentation-functions))))))
 
 
+;; Eldoc =================================================== ;;
+
 (use-package eldoc
   :ensure nil
   :hook (after-init . global-eldoc-mode)
@@ -1070,6 +1180,8 @@ If point is at the end of the line, kill the whole line including the newline."
 ;;   :after eldoc
 ;;   :hook (eglot-managed-mode-hook . eldoc-box-hover-mode))
 
+
+;; Exec Path From Shell ==================================== ;;
 
 (use-package exec-path-from-shell
   :ensure t
@@ -1130,6 +1242,8 @@ If point is at the end of the line, kill the whole line including the newline."
 
 
 
+;; Marginalia ============================================== ;;
+
 (use-package marginalia
   :ensure t
   :hook (after-init . marginalia-mode)
@@ -1138,10 +1252,14 @@ If point is at the end of the line, kill the whole line including the newline."
         marginalia-align-offset 10))
 
 
+;; HL Todo ================================================= ;;
+
 (use-package hl-todo
   :ensure t
   :hook (after-init . global-hl-todo-mode))
 
+
+;; Corfu (Completion) ====================================== ;;
 
 (use-package corfu
   :ensure t
@@ -1159,6 +1277,8 @@ If point is at the end of the line, kill the whole line including the newline."
     (add-to-list 'savehist-additional-variables 'corfu-history)))
 
 
+;; Cape ==================================================== ;;
+
 (use-package cape
   :config
   (dolist (func '(cape-dabbrev
@@ -1172,27 +1292,39 @@ If point is at the end of the line, kill the whole line including the newline."
   (advice-add 'eglot-completion-at-point :around #'cape-wrap-buster))
 
 
+;; Tempel (Templates) ====================================== ;;
+
 (use-package tempel
   :bind (("C-<tab>" . tempel-complete)
          ("M-+" . tempel-insert)
          ("C-1" . tempel-previous)
          ("C-2" . tempel-next)))
 
+;; Tempel Collection ======================================= ;;
+
 (use-package tempel-collection
   :after tempel)
 
-
-(use-package treesit
-  :ensure nil
-  :config
-  (setq treesit-font-lock-level 4))
+;; Tree-sitter Auto ======================================== ;;
 
 (use-package treesit-auto
-  :custom
-  (treesit-auto-install 'prompt)
+  ;; :custom
+  ;; (treesit-auto-install 'prompt)
   :config
+  ;; Add Zig language recipe for treesit-auto
+  (add-to-list 'treesit-auto-recipe-list
+               (make-treesit-auto-recipe
+                :lang 'zig
+                :ts-mode 'zig-ts-mode
+                :url "https://github.com/maxxnino/tree-sitter-zig"))
   (treesit-auto-add-to-auto-mode-alist 'all)
   (global-treesit-auto-mode))
+
+;;; ============================================================
+;;;                  PROGRAMMING LANGUAGES
+;;; ============================================================
+
+;; Markdown Mode =========================================== ;;
 
 (use-package markdown-mode
   :mode ("README\\.md\\'" . gfm-mode)
@@ -1206,6 +1338,8 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (when (treesit-language-available-p 'markdown-inline)
   (add-to-list 'treesit-auto-langs 'markdown-inline))
+
+;; Combobulate ============================================= ;;
 
 (use-package combobulate
   :vc (:url "https://github.com/mickeynp/combobulate" :rev :newest)
@@ -1254,6 +1388,8 @@ If point is at the end of the line, kill the whole line including the newline."
         ("C-c o e" . combobulate-envelope-dwim)))
 
 
+;; Tree-sitter Expand ====================================== ;;
+
 (use-package treesit-expand
   :ensure nil
   :vc (:url "https://github.com/kborling/treesit-expand" :rev :newest)
@@ -1262,58 +1398,8 @@ If point is at the end of the line, kill the whole line including the newline."
          ("C-c e e" . treesit-expand-region)
          ("C-c e q" . treesit-expand-reset)))
 
-;; Agent Shell for AI integration
-(use-package shell-maker
-  :ensure t)
 
-(use-package acp
-  :vc (:url "https://github.com/xenodium/acp.el" :rev :newest))
-
-(use-package agent-shell
-  :vc (:url "https://github.com/xenodium/agent-shell" :rev :newest)
-  :after (shell-maker acp)
-  :config
-  (defun agent-shell-anthropic-key ()
-    "Get Anthropic API key from environment or auth-source."
-    (or (getenv "ANTHROPIC_API_KEY")
-        (getenv "CLAUDE_API_KEY")))
-
-  (defun agent-shell-start-claude-code-agent ()
-    "Start an interactive Claude Code agent shell."
-    (interactive)
-    (agent-shell--start
-     :new-session t
-     :mode-line-name "Claude Code"
-     :buffer-name "Claude Code"
-     :shell-prompt "Claude Code> "
-     :shell-prompt-regexp "Claude Code> "
-     :client-maker (lambda ()
-                     (acp-make-client :command "claude-code-acp"
-                                      :environment-variables
-                                      (when (agent-shell-anthropic-key)
-                                        (list (format "ANTHROPIC_API_KEY=%s" (agent-shell-anthropic-key))))))))
-
-  :commands (agent-shell-start-claude-code-agent))
-
-;; Test function to check if agent-shell is working
-(defun test-agent-shell ()
-  "Test if agent-shell packages are loaded."
-  (interactive)
-  (if (fboundp 'agent-shell-start-claude-code-agent)
-      (progn
-        (message "Agent-shell is loaded, starting Claude Code...")
-        (agent-shell-start-claude-code-agent))
-    (message "Agent-shell packages not yet loaded. Try: M-x package-install RET shell-maker")))
-
-;; Claude Code EAT-based integration (autonomous AI coding)
-(use-package claude-code
-  :vc (:url "https://github.com/stevemolitor/claude-code.el" :rev :newest)
-  :after eat
-  :config
-  (claude-code-mode)
-  (setq claude-code-terminal-backend 'eat)
-  :bind (("C-c c" . claude-code-transient)))
-(global-set-key (kbd "C-c a c") 'agent-shell-start-claude-code-agent)
+;; Multiple Cursors ======================================== ;;
 
 (use-package multiple-cursors
   :bind (("C->" . mc/mark-next-like-this)
@@ -1322,10 +1408,14 @@ If point is at the end of the line, kill the whole line including the newline."
          ("C-S-c C-S-c" . mc/mark-edit-lines)))
 
 
+;; So Long ================================================= ;;
+
 (use-package so-long
   :ensure nil
   :hook (after-init . global-so-long-mode))
 
+
+;; Angular Mode ============================================ ;;
 
 (use-package angular-mode
   :vc (:url "https://github.com/kborling/angular-mode" :rev :newest)
@@ -1376,28 +1466,34 @@ If point is at the end of the line, kill the whole line including the newline."
   "A major mode derived from 'html-ts-mode', for editing angular template files with LSP support.")
 (add-to-list 'auto-mode-alist '("\\.component\\.html\\'" . angular-template-mode))
 
-;; HTML Mode ======================================= ;;
+;; HTML Mode =============================================== ;;
 
-(use-package html-mode
+(use-package mhtml-mode
   :ensure nil
-  :bind (:map html-mode-map
+  :bind (:map mhtml-mode-map
               ("C-c C-d" . nil))
   :config
-  (add-to-list 'auto-mode-alist '("\\.cshtml\\'" . html-mode)))
+  (add-to-list 'auto-mode-alist '("\\.cshtml\\'" . mhtml-mode)))
 
+
+;; Memmet Mode ============================================= ;;
 
 (use-package memmet-mode
   :vc (:url "https://github.com/kborling/memmet-mode" :rev :newest)
-  :bind (:map html-mode-map
+  :bind (:map mhtml-mode-map
               ("C-<tab>" . memmet-expand))
-  :hook (html-mode . memmet-mode))
+  :hook (mhtml-mode . memmet-mode))
 
 
-(use-package xml-mode
+;; XML Mode ================================================ ;;
+
+(use-package nxml-mode
   :ensure nil
   :config
-  (add-to-list 'auto-mode-alist '("\\.csproj\\'" . xml-mode)))
+  (add-to-list 'auto-mode-alist '("\\.csproj\\'" . nxml-mode)))
 
+
+;; Conf Mode =============================================== ;;
 
 (use-package conf-mode
   :ensure nil
@@ -1405,11 +1501,35 @@ If point is at the end of the line, kill the whole line including the newline."
   (add-to-list 'auto-mode-alist '("\\.sln\\'" . conf-mode)))
 
 
+;; Rust Mode =============================================== ;;
+
 (use-package rust-mode
   :init
-  (setq rust-mode-treesitter-derive t))
+  (setq rust-mode-treesitter-derive t)
+  :config
+  ;; Suppress tree-sitter version mismatch warning
+  (when (and (fboundp 'treesit-ready-p)
+             (not (treesit-ready-p 'rust t)))
+    ;; Silently handle version mismatch - grammar will be auto-updated on next treesit-install-language-grammar
+    (setq treesit-language-source-alist
+          (append treesit-language-source-alist
+                  '((rust "https://github.com/tree-sitter/tree-sitter-rust"))))))
 
-;; .NET ============================================ ;;
+;; Zig Mode ==================================================== ;;
+
+(use-package zig-mode
+  :mode "\\.zig\\'"
+  :config
+
+  ;; Set up eglot for Zig with ZLS
+  (with-eval-after-load 'eglot
+    (add-to-list 'eglot-server-programs
+                 '(zig-mode . ("zls"))))
+
+  ;; Enable eglot automatically for Zig files
+  (add-hook 'zig-mode-hook #'eglot-ensure))
+
+;; Dotnet ================================================== ;;
 
 (use-package dotnet
   :hook (csharp-mode)
@@ -1420,7 +1540,7 @@ If point is at the end of the line, kill the whole line including the newline."
           ("C-c n a" . dotnet-run-with-args)
           ("C-c n b" . dotnet-build))))
 
-;; EAT ============================================ ;;
+;; EAT (Terminal) ========================================== ;;
 
 (use-package eat
   :vc (:url "https://codeberg.org/akib/emacs-eat" :rev :newest)
@@ -1451,7 +1571,7 @@ If point is at the end of the line, kill the whole line including the newline."
               (define-key eat-semi-char-mode-map (kbd "C-c C-e") 'eat-emacs-mode)
               (define-key eat-semi-char-mode-map (kbd "C-c C-j") 'eat-char-mode))))
 
-;; Winum - Window Numbers ========================== ;;
+;; Winum (Window Numbers) ================================== ;;
 
 (use-package winum
   :ensure t
@@ -1467,11 +1587,13 @@ If point is at the end of the line, kill the whole line including the newline."
          ("M-8" . winum-select-window-8)
          ("M-9" . winum-select-window-9)))
 
-;; EXWM - Emacs X Window Manager =================== ;;
+;; EXWM (Window Manager) =================================== ;;
 
 ;; Load EXWM early if we're in X11 session
 (when (eq window-system 'x)
   (require 'init-exwm))
+
+;; EXWM (Window Manager) =================================== ;;
 
 (use-package exwm
   :ensure t

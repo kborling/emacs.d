@@ -15,7 +15,7 @@
 ;;; Basic EXWM Setup =====================================================
 
 ;; Set the number of workspaces
-(setq exwm-workspace-number 5)
+(setq exwm-workspace-number 10)
 
 ;; Allow buffers to be accessed from any workspace
 (setq exwm-workspace-show-all-buffers t)
@@ -23,11 +23,43 @@
 
 ;;; Workspace Names ======================================================
 
-(defun kdb-exwm-workspace-names ()
-  "Return a list of workspace names with icons."
-  (list "1:Main" "2:Web" "3:Code" "4:Chat" "5:Media"))
+(defun kdb-exwm-workspace-names (index)
+  "Return workspace name for INDEX (1-based numbering)."
+  (number-to-string (1+ index)))
 
-(setq exwm-workspace-index-map (lambda (index) (nth index (kdb-exwm-workspace-names))))
+(setq exwm-workspace-index-map #'kdb-exwm-workspace-names)
+
+;; Custom tab-bar format to show workspace info
+(defun kdb-exwm-tab-bar-workspace-name ()
+  "Show current EXWM workspace in tab bar."
+  (let ((ws-name (if (and (featurep 'exwm)
+                          (boundp 'exwm-workspace-current-index))
+                     (funcall exwm-workspace-index-map exwm-workspace-current-index)
+                   "N/A")))
+    `((exwm-workspace menu-item
+                      ,(format " [%s] " ws-name)
+                      ignore
+                      :help "Current workspace"))))
+
+(defun kdb-exwm-tab-bar-time ()
+  "Display current time in 24-hour format."
+  `((time menu-item
+          ,(format-time-string " %H:%M ")
+          ignore
+          :help ,(format-time-string "%A, %B %d, %Y %H:%M"))))
+
+(defun kdb-exwm-tab-bar-spacer ()
+  "Add spacing for systemtray on the right."
+  '((systemtray-spacer menu-item "     " ignore)))
+
+(defun kdb-exwm-setup-tab-bar ()
+  "Configure tab-bar for EXWM."
+  (setq tab-bar-format '(kdb-exwm-tab-bar-workspace-name
+                         tab-bar-format-align-right
+                         kdb-exwm-tab-bar-time
+                         kdb-exwm-tab-bar-spacer))
+  ;; Update time display every minute
+  (run-with-timer 0 60 #'force-mode-line-update t))
 
 ;;; Window Management ====================================================
 
@@ -90,15 +122,15 @@
 ;;; System Tray ==========================================================
 
 (defun kdb-exwm-enable-systemtray ()
-  "Enable EXWM system tray."
+  "Enable EXWM's built-in system tray."
   (condition-case err
       (progn
         (require 'exwm-systemtray)
+        ;; Configure systemtray
         (setq exwm-systemtray-height 20)
-        ;; Set background color for better icon visibility
-        (setq exwm-systemtray-background-color
-              (face-attribute 'default :background nil 'default))
-        ;; Use new API if available
+        ;; Position systemtray at top-right corner
+        (setq exwm-systemtray-position 'top)
+        ;; Enable systemtray (background will use default)
         (if (fboundp 'exwm-systemtray-mode)
             (exwm-systemtray-mode 1)
           (exwm-systemtray-enable)))
@@ -127,31 +159,34 @@
         ;; Reset to line-mode (from char-mode)
         ([?\s-r] . exwm-reset)
 
-        ;; Switch workspace with Super+number
+        ;; Switch workspace with Super+number (1-9 map to workspaces 0-8, 0 maps to workspace 9)
         ,@(mapcar (lambda (i)
-                    `(,(kbd (format "s-%d" i)) .
-                      (lambda ()
-                        (interactive)
-                        (exwm-workspace-switch-create ,i))))
+                    (let ((workspace (if (= i 0) 9 (1- i))))
+                      `(,(kbd (format "s-%d" i)) .
+                        (lambda ()
+                          (interactive)
+                          (exwm-workspace-switch-create ,workspace)))))
                   (number-sequence 0 9))
 
         ;; Move window to workspace with Super+Shift+number
         ,@(mapcar (lambda (i)
-                    `(,(kbd (format "s-S-%d" i)) .
-                      (lambda ()
-                        (interactive)
-                        (exwm-workspace-move-window ,i))))
+                    (let ((workspace (if (= i 0) 9 (1- i))))
+                      `(,(kbd (format "s-S-%d" i)) .
+                        (lambda ()
+                          (interactive)
+                          (exwm-workspace-move-window ,workspace)))))
                   (number-sequence 0 9))
 
-        ;; Alternative bindings for shifted numbers (!, @, #, etc.)
-        ([?\s-!] . (lambda () (interactive) (exwm-workspace-move-window 1)))
-        ([?\s-@] . (lambda () (interactive) (exwm-workspace-move-window 2)))
-        ([?\s-#] . (lambda () (interactive) (exwm-workspace-move-window 3)))
-        ([?\s-$] . (lambda () (interactive) (exwm-workspace-move-window 4)))
-        ([?\s-%] . (lambda () (interactive) (exwm-workspace-move-window 5)))
-        ([?\s-^] . (lambda () (interactive) (exwm-workspace-move-window 6)))
-        ([?\s-*] . (lambda () (interactive) (exwm-workspace-move-window 8)))
-        ([?\s-\(] . (lambda () (interactive) (exwm-workspace-move-window 9)))
+        ;; Alternative bindings for shifted numbers (!, @, #, etc.) - map to workspaces 0-8
+        ([?\s-!] . (lambda () (interactive) (exwm-workspace-move-window 0)))
+        ([?\s-@] . (lambda () (interactive) (exwm-workspace-move-window 1)))
+        ([?\s-#] . (lambda () (interactive) (exwm-workspace-move-window 2)))
+        ([?\s-$] . (lambda () (interactive) (exwm-workspace-move-window 3)))
+        ([?\s-%] . (lambda () (interactive) (exwm-workspace-move-window 4)))
+        ([?\s-^] . (lambda () (interactive) (exwm-workspace-move-window 5)))
+        ([?\s-*] . (lambda () (interactive) (exwm-workspace-move-window 7)))
+        ([?\s-\(] . (lambda () (interactive) (exwm-workspace-move-window 8)))
+        ([?\s-)] . (lambda () (interactive) (exwm-workspace-move-window 9)))
 
         ;; Launch applications (keeping s-& for shell command)
         ([?\s-&] . (lambda (command)
@@ -366,6 +401,11 @@
   (when (executable-find "dunst")
     (start-process-shell-command "dunst" nil "dunst"))
 
+  ;; Red night light (automatic based on time of day)
+  ;; Use -l to specify location manually, avoiding GeoClue issues
+  (when (executable-find "redshift")
+    (start-process-shell-command "redshift" nil "redshift -l 40.7:-74.0 -t 6500:3500"))
+
   ;; Set X resources
   (when (file-exists-p "~/.Xresources")
     (start-process-shell-command "xrdb" nil "xrdb -merge ~/.Xresources"))
@@ -392,40 +432,11 @@
 (defvar kdb-exwm-current-mode 'dark
   "Current theme mode: 'light or 'dark.")
 
-(defvar kdb-exwm-darkreader-state 'on
-  "Current Dark Reader state: 'on or 'off.")
-
 (defvar kdb-exwm-light-theme 'acme
   "Theme to use for light mode.")
 
 (defvar kdb-exwm-dark-theme 'uwu
   "Theme to use for dark mode.")
-
-(defun kdb-exwm-toggle-firefox-darkreader ()
-  "Toggle Dark Reader in all Firefox windows."
-  (interactive)
-  ;; Send Alt+Shift+D to toggle Dark Reader extension
-  ;; This requires Dark Reader to be installed with this shortcut configured
-  (let ((firefox-windows '())
-        (count 0))
-    ;; Find all Firefox window IDs
-    (dolist (buffer (buffer-list))
-      (with-current-buffer buffer
-        (when (and (eq major-mode 'exwm-mode)
-                   (or (string-match-p "Firefox" (or exwm-class-name ""))
-                       (string-match-p "firefox" (or exwm-class-name ""))))
-          (when (and (boundp 'exwm--id) exwm--id)
-            (push exwm--id firefox-windows)))))
-    (if firefox-windows
-        (progn
-          ;; Use xdotool to send keypress to each Firefox window
-          (dolist (window-id firefox-windows)
-            (start-process-shell-command
-             "darkreader-toggle" nil
-             (format "xdotool key --window %d alt+shift+d" window-id))
-            (setq count (1+ count)))
-          (message "Toggled Dark Reader in %d Firefox window(s)" count))
-      (message "No Firefox windows found"))))
 
 
 (defun kdb-exwm-set-kitty-theme (theme)
@@ -439,8 +450,34 @@
              old-theme theme config-file))
     (message "Set kitty theme to %s" theme)))
 
+(defun kdb-exwm-set-dunst-theme (theme)
+  "Set dunst notification theme to THEME (light or dark)."
+  (let ((dunst-config (expand-file-name "~/.config/dunst/dunstrc"))
+        (theme-config (expand-file-name (format "~/.config/dunst/dunstrc-%s" theme))))
+    ;; Update symlink
+    (when (file-exists-p theme-config)
+      (delete-file dunst-config)
+      (make-symbolic-link theme-config dunst-config)
+      ;; Restart dunst to apply new config
+      (start-process-shell-command
+       "dunst-restart" nil
+       "killall dunst; dunst &")
+      (message "Set dunst theme to %s" theme))))
+
+(defun kdb-exwm-set-gtk-theme (theme)
+  "Set GTK theme preference to THEME (light or dark) for Firefox prefers-color-scheme."
+  (let ((gtk-theme (if (string= theme "light") "Adwaita" "Adwaita-dark")))
+    ;; Set GTK theme which Firefox respects for prefers-color-scheme
+    (start-process-shell-command
+     "gtk-theme" nil
+     (format "gsettings set org.gnome.desktop.interface gtk-theme '%s'" gtk-theme))
+    (start-process-shell-command
+     "color-scheme" nil
+     (format "gsettings set org.gnome.desktop.interface color-scheme 'prefer-%s'" theme))
+    (message "Set system color scheme to %s" theme)))
+
 (defun kdb-exwm-set-light-mode ()
-  "Switch to light mode: Acme theme, disable Dark Reader, light kitty."
+  "Switch to light mode: Acme theme, light kitty, light dunst."
   (interactive)
   (setq kdb-exwm-current-mode 'light)
 
@@ -448,26 +485,20 @@
   (mapc #'disable-theme custom-enabled-themes)
   (load-theme kdb-exwm-light-theme t)
 
-  ;; Update systemtray background
-  (when (featurep 'exwm-systemtray)
-    (setq exwm-systemtray-background-color
-          (face-attribute 'default :background nil 'default))
-    (when (fboundp 'exwm-systemtray--refresh)
-      (exwm-systemtray--refresh)))
-
-  ;; Toggle Firefox Dark Reader off (if it's currently on)
-  (when (eq kdb-exwm-darkreader-state 'on)
-    (kdb-exwm-toggle-firefox-darkreader)
-    (setq kdb-exwm-darkreader-state 'off))
+  ;; Set system color scheme (for Firefox prefers-color-scheme)
+  (kdb-exwm-set-gtk-theme "light")
 
   ;; Set kitty to light theme
   (kdb-exwm-set-kitty-theme "light")
+
+  ;; Set dunst to light theme
+  (kdb-exwm-set-dunst-theme "light")
 
   ;; Send message
   (message "Light mode activated"))
 
 (defun kdb-exwm-set-dark-mode ()
-  "Switch to dark mode: Uwu theme, enable Dark Reader, dark kitty."
+  "Switch to dark mode: Uwu theme, dark kitty, dark dunst."
   (interactive)
   (setq kdb-exwm-current-mode 'dark)
 
@@ -475,20 +506,14 @@
   (mapc #'disable-theme custom-enabled-themes)
   (load-theme kdb-exwm-dark-theme t)
 
-  ;; Update systemtray background
-  (when (featurep 'exwm-systemtray)
-    (setq exwm-systemtray-background-color
-          (face-attribute 'default :background nil 'default))
-    (when (fboundp 'exwm-systemtray--refresh)
-      (exwm-systemtray--refresh)))
-
-  ;; Toggle Firefox Dark Reader on (if it's currently off)
-  (when (eq kdb-exwm-darkreader-state 'off)
-    (kdb-exwm-toggle-firefox-darkreader)
-    (setq kdb-exwm-darkreader-state 'on))
+  ;; Set system color scheme (for Firefox prefers-color-scheme)
+  (kdb-exwm-set-gtk-theme "dark")
 
   ;; Set kitty to dark theme
   (kdb-exwm-set-kitty-theme "dark")
+
+  ;; Set dunst to dark theme
+  (kdb-exwm-set-dunst-theme "dark")
 
   ;; Send message
   (message "Dark mode activated"))
@@ -505,14 +530,28 @@
 
 ;;; Power Management =====================================================
 
+(defun kdb-exwm-restart ()
+  "Restart EXWM cleanly by killing child processes first."
+  (interactive)
+  (when (y-or-n-p "Restart EXWM? ")
+    ;; Kill common systemtray/background processes that will be restarted
+    (start-process-shell-command "cleanup" nil
+                                 "killall nm-applet blueman-applet dunst picom 2>/dev/null || true")
+    ;; Wait a moment for cleanup
+    (run-with-timer 0.5 nil
+                    (lambda ()
+                      ;; Restart Emacs
+                      (restart-emacs)))))
+
 (defun kdb-exwm-power-menu ()
   "Show power management menu."
   (interactive)
   (let ((choice (completing-read "Power: "
-                                 '("Lock" "Logout" "Suspend" "Reboot" "Shutdown"))))
+                                 '("Lock" "Logout" "Restart EXWM" "Suspend" "Reboot" "Shutdown"))))
     (pcase choice
       ("Lock" (kdb-exwm-lock-screen))
       ("Logout" (save-buffers-kill-emacs))
+      ("Restart EXWM" (kdb-exwm-restart))
       ("Suspend" (start-process "" nil "systemctl" "suspend"))
       ("Reboot" (start-process "" nil "systemctl" "reboot"))
       ("Shutdown" (start-process "" nil "systemctl" "poweroff")))))
@@ -631,6 +670,13 @@
 (defun kdb-exwm-init ()
   "Initialize EXWM."
   (interactive)
+  ;; Enable tab-bar-mode for persistent top bar with systemtray
+  (setq tab-bar-show t  ; Always show tab bar
+        tab-bar-close-button-show nil
+        tab-bar-new-button-show nil)
+  (kdb-exwm-setup-tab-bar)
+  (tab-bar-mode 1)
+
   ;; Maximize the frame
   (set-frame-parameter nil 'fullscreen 'maximized)
 
@@ -650,6 +696,18 @@
 
       ;; Enable system tray
       (kdb-exwm-enable-systemtray)
+
+      ;; Place *Messages* and *Warnings* buffers on specific workspaces
+      (run-with-timer 2 nil
+        (lambda ()
+          ;; *Messages* buffer on workspace 9 (displays as "10")
+          (when (get-buffer "*Messages*")
+            (with-current-buffer "*Messages*"
+              (exwm-workspace-move-window 9)))
+          ;; *Warnings* buffer on workspace 8 (displays as "9")
+          (when (get-buffer "*Warnings*")
+            (with-current-buffer "*Warnings*"
+              (exwm-workspace-move-window 8)))))
 
       ;; Show a welcome notification
       (run-with-timer 1 nil #'kdb-exwm-notify "EXWM initialized successfully!"))))
