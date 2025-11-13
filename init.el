@@ -305,6 +305,11 @@
    uwu-use-variable-pitch t)
   (load-theme 'uwu t))
 
+(use-package fleury-theme
+  :vc (:url "https://github.com/kborling/fleury-theme.el" :rev :newest)
+  :config
+  (add-hook 'prog-mode-hook 'hl-line-mode))
+
 (use-package acme-theme)
 
 ;; UI Enhancements ======================================== ;;
@@ -1187,8 +1192,8 @@ If point is at the end of the line, kill the whole line including the newline."
   :ensure t
   :if (memq window-system '(mac ns x))
   :init
-  ;; Only check PATH for better performance
-  (setq exec-path-from-shell-variables '("PATH"))
+  ;; Only check PATH and SSH_AUTH_SOCK for better performance
+  (setq exec-path-from-shell-variables '("PATH" "SSH_AUTH_SOCK"))
   ;; Disable debug and verbose output
   (setq exec-path-from-shell-debug nil)
   (setq exec-path-from-shell-check-startup-files nil)
