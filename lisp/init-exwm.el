@@ -21,6 +21,10 @@
 (setq exwm-workspace-show-all-buffers t)
 (setq exwm-layout-show-all-buffers t)
 
+;; Mouse workflow improvements
+;; Automatically send the mouse cursor to the selected workspace's display
+(setq exwm-workspace-warp-cursor t)
+
 ;;; Workspace Names ======================================================
 
 (defun kdb-exwm-workspace-names (index)
@@ -121,6 +125,11 @@
 
 ;;; System Tray ==========================================================
 
+;; Configuration variable to choose between EXWM systemtray and Polybar
+(defvar kdb-exwm-use-polybar t
+  "If non-nil, use Polybar instead of EXWM's built-in systemtray.
+Toggle with `kdb-exwm-toggle-panel-mode'.")
+
 (defun kdb-exwm-enable-systemtray ()
   "Enable EXWM's built-in system tray."
   (condition-case err
@@ -130,11 +139,77 @@
         (setq exwm-systemtray-height 20)
         ;; Position systemtray at top-right corner
         (setq exwm-systemtray-position 'top)
-        ;; Enable systemtray (background will use default)
+        ;; Set background color to improve visibility in dark mode
+        ;; This will be dynamically updated based on theme
+        (setq exwm-systemtray-background-color
+              (face-attribute 'default :background nil 'default))
+        ;; Enable systemtray
         (if (fboundp 'exwm-systemtray-mode)
             (exwm-systemtray-mode 1)
           (exwm-systemtray-enable)))
     (error (message "EXWM systemtray not available: %s" err))))
+
+;;; Polybar Panel ========================================================
+
+(defvar kdb-exwm-polybar-process nil
+  "Holds the process of the running Polybar instance, if any.")
+
+(defun kdb-exwm-kill-panel ()
+  "Kill the running Polybar panel."
+  (interactive)
+  (when kdb-exwm-polybar-process
+    (ignore-errors
+      (kill-process kdb-exwm-polybar-process)))
+  (setq kdb-exwm-polybar-process nil))
+
+(defun kdb-exwm-start-panel ()
+  "Start the Polybar panel."
+  (interactive)
+  (kdb-exwm-kill-panel)
+  (setq kdb-exwm-polybar-process
+        (start-process-shell-command "polybar" nil "polybar exwm-panel")))
+
+(defun kdb-exwm-send-polybar-hook (module-name hook-index)
+  "Send a hook message to Polybar MODULE-NAME at HOOK-INDEX."
+  (start-process-shell-command
+   "polybar-msg" nil
+   (format "polybar-msg hook %s %s" module-name hook-index)))
+
+(defun kdb-exwm-send-polybar-exwm-workspace ()
+  "Update Polybar with current EXWM workspace."
+  (kdb-exwm-send-polybar-hook "exwm-workspace" 1))
+
+(defun kdb-exwm-toggle-panel-mode ()
+  "Toggle between EXWM systemtray and Polybar panel."
+  (interactive)
+  (if kdb-exwm-use-polybar
+      ;; Switch to EXWM systemtray
+      (progn
+        (setq kdb-exwm-use-polybar nil)
+        (kdb-exwm-kill-panel)
+        ;; Enable tab-bar for systemtray mode
+        (setq tab-bar-show t
+              tab-bar-close-button-show nil
+              tab-bar-new-button-show nil)
+        (kdb-exwm-setup-tab-bar)
+        (tab-bar-mode 1)
+        (kdb-exwm-enable-systemtray)
+        (message "Switched to EXWM built-in systemtray with tab-bar"))
+    ;; Switch to Polybar
+    (progn
+      (setq kdb-exwm-use-polybar t)
+      ;; Disable tab-bar (Polybar replaces it)
+      (tab-bar-mode -1)
+      ;; Disable EXWM systemtray
+      (when (featurep 'exwm-systemtray)
+        (if (fboundp 'exwm-systemtray-mode)
+            (exwm-systemtray-mode -1)
+          (exwm-systemtray-disable)))
+      (kdb-exwm-start-panel)
+      (message "Switched to Polybar panel (tab-bar disabled)"))))
+
+;; Update Polybar workspace indicator when workspace changes
+(add-hook 'exwm-workspace-switch-hook #'kdb-exwm-send-polybar-exwm-workspace)
 
 ;;; Global Keybindings ===================================================
 
@@ -435,7 +510,7 @@
 (defvar kdb-exwm-light-theme 'acme
   "Theme to use for light mode.")
 
-(defvar kdb-exwm-dark-theme 'uwu
+(defvar kdb-exwm-dark-theme 'fleury
   "Theme to use for dark mode.")
 
 
@@ -494,6 +569,17 @@
   ;; Set dunst to light theme
   (kdb-exwm-set-dunst-theme "light")
 
+  ;; Update systemtray background color
+  (when (featurep 'exwm-systemtray)
+    (setq exwm-systemtray-background-color
+          (face-attribute 'default :background nil 'default)))
+
+  ;; Switch Polybar to light theme if using Polybar
+  (when kdb-exwm-use-polybar
+    (start-process-shell-command
+     "polybar-theme" nil
+     "cd ~/.config/polybar && ln -sf config-light.ini config && polybar-msg cmd restart"))
+
   ;; Send message
   (message "Light mode activated"))
 
@@ -514,6 +600,17 @@
 
   ;; Set dunst to dark theme
   (kdb-exwm-set-dunst-theme "dark")
+
+  ;; Update systemtray background color
+  (when (featurep 'exwm-systemtray)
+    (setq exwm-systemtray-background-color
+          (face-attribute 'default :background nil 'default)))
+
+  ;; Switch Polybar to dark theme if using Polybar
+  (when kdb-exwm-use-polybar
+    (start-process-shell-command
+     "polybar-theme" nil
+     "cd ~/.config/polybar && ln -sf config.ini config && polybar-msg cmd restart"))
 
   ;; Send message
   (message "Dark mode activated"))
@@ -670,12 +767,15 @@
 (defun kdb-exwm-init ()
   "Initialize EXWM."
   (interactive)
-  ;; Enable tab-bar-mode for persistent top bar with systemtray
-  (setq tab-bar-show t  ; Always show tab bar
-        tab-bar-close-button-show nil
-        tab-bar-new-button-show nil)
-  (kdb-exwm-setup-tab-bar)
-  (tab-bar-mode 1)
+  ;; Tab-bar is disabled when using Polybar
+  ;; Polybar provides workspace info and system tray
+  (when (not kdb-exwm-use-polybar)
+    ;; Only enable tab-bar if using EXWM systemtray
+    (setq tab-bar-show t
+          tab-bar-close-button-show nil
+          tab-bar-new-button-show nil)
+    (kdb-exwm-setup-tab-bar)
+    (tab-bar-mode 1))
 
   ;; Maximize the frame
   (set-frame-parameter nil 'fullscreen 'maximized)
@@ -694,8 +794,10 @@
       ;; Enable RANDR (multi-monitor support)
       (kdb-exwm-enable-randr)
 
-      ;; Enable system tray
-      (kdb-exwm-enable-systemtray)
+      ;; Enable system tray or Polybar based on configuration
+      (if kdb-exwm-use-polybar
+          (kdb-exwm-start-panel)
+        (kdb-exwm-enable-systemtray))
 
       ;; Place *Messages* and *Warnings* buffers on specific workspaces
       (run-with-timer 2 nil

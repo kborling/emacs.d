@@ -200,9 +200,9 @@
   (recentf-exclude '(".gz" ".xz" ".zip" "/elpaca/" "/elpa/" "/opt/" "/.rustup/" "/elpa/" "/ssh:" "/sudo:" "/node_modules/" "/nix/"))
   :config
   ;; Save silently every 5 minutes
-  (run-at-time nil (* 5 60) (lambda () 
-                               (let ((inhibit-message t))
-                                 (recentf-save-list)))))
+  (run-at-time nil (* 5 60) (lambda ()
+                              (let ((inhibit-message t))
+                                (recentf-save-list)))))
 
 ;; Save cursor position
 
@@ -271,7 +271,7 @@
 
 ;; Fonts ================================================ ;;
 
-(setopt line-spacing 4)
+(setopt line-spacing 0.20)
 
 (let* ((settings (cond
                   ((eq system-type 'windows-nt) '(:size 110 :families ("Rec Mono Semicasual" "Cascadia Code" "Consolas" "Courier New")))
@@ -303,12 +303,22 @@
    uwu-distinct-line-numbers 'nil
    uwu-scale-org-headlines t
    uwu-use-variable-pitch t)
-  (load-theme 'uwu t))
+  ;; (load-theme 'uwu t)
+  )
 
 (use-package fleury-theme
   :vc (:url "https://github.com/kborling/fleury-theme.el" :rev :newest)
   :config
-  (add-hook 'prog-mode-hook 'hl-line-mode))
+  (load-theme 'fleury t)
+  (add-hook 'prog-mode-hook 'hl-line-mode)
+  (defun kdb-update-cursor-type ()
+    "Use a bar cursor in prog-mode and text-mode, box cursor otherwise."
+    (setq cursor-type
+          (if (derived-mode-p 'prog-mode 'text-mode)
+              '(bar . 3)  ; 3-pixel wide bar
+            'box)))
+
+  (add-hook 'post-command-hook 'kdb-update-cursor-type))
 
 (use-package acme-theme)
 
@@ -651,17 +661,17 @@ If point is at the end of the line, kill the whole line including the newline."
    isearch-repeat-on-direction-change t
    isearch-regexp-lax-whitespace t
    lazy-highlight-initial-delay 0.1)
-  
+
   ;; Occur integration - show all matches in a buffer
   (define-key isearch-mode-map (kbd "M-s o") 'isearch-occur)
-  
+
   (defun kdb-isearch-remove-failed-part ()
     "Remove the failing part of the search string."
     (interactive)
     (while (isearch-fail-pos)
       (isearch-pop-state)))
   (define-key isearch-mode-map (kbd "C-<backspace>") 'kdb-isearch-remove-failed-part)
-  
+
   (define-key minibuffer-local-isearch-map (kbd "M-/") #'isearch-complete-edit))
 
 
@@ -703,7 +713,7 @@ If point is at the end of the line, kill the whole line including the newline."
    diff-update-on-the-fly t
    diff-advance-after-apply-hunk t
    diff-default-read-only t)  ; Make diff buffers read-only by default
-  
+
   (defun kdb-diff-toggle-refine ()
     "Toggle diff refinement between 'navigation and nil."
     (interactive)
@@ -712,16 +722,16 @@ If point is at the end of the line, kill the whole line including the newline."
         (diff-refine-hunk)
       (diff-unrefine-hunk))
     (message "Diff refinement: %s" (if diff-refine "enabled" "disabled")))
-  
+
   (defun kdb-diff-navigate-and-refine (orig-fun &rest args)
     "Automatically refine hunk after navigation."
     (apply orig-fun args)
     (when diff-refine
       (diff-refine-hunk)))
-  
+
   (advice-add 'diff-hunk-next :around #'kdb-diff-navigate-and-refine)
   (advice-add 'diff-hunk-prev :around #'kdb-diff-navigate-and-refine)
-  
+
   :bind (:map diff-mode-map
               ("C-c C-r" . kdb-diff-toggle-refine)
               ("n" . diff-hunk-next)
@@ -877,13 +887,13 @@ If point is at the end of the line, kill the whole line including the newline."
         eshell-buffer-maximum-lines 10000
         eshell-scroll-to-bottom-on-input t
         eshell-destroy-buffer-when-process-dies t)
-  
+
   (defun kdb-eshell-prompt ()
     "Custom Eshell prompt."
     (concat
      (propertize (abbreviate-file-name (eshell/pwd)) 'face 'font-lock-keyword-face)
      (if (zerop (user-uid)) " # " " $ ")))
-  
+
   (setq eshell-prompt-function 'kdb-eshell-prompt
         eshell-prompt-regexp "^[^#$\n]* [#$] "))
 
@@ -996,13 +1006,13 @@ If point is at the end of the line, kill the whole line including the newline."
    enable-recursive-minibuffers t
    completions-sort 'historical
    read-answer-short t))
-  ;; :bind (:map minibuffer-local-map
-  ;;             ("C-p" . minibuffer-previous-completion)
-  ;;             ("C-n" . minibuffer-next-completion))
-  ;; :bind (:map completion-in-region-mode-map
-  ;;             ("C-p" . minibuffer-previous-completion)
-  ;;             ("C-n" . minibuffer-next-completion)
-  ;;             ("RET" . minibuffer-choose-completion)))
+;; :bind (:map minibuffer-local-map
+;;             ("C-p" . minibuffer-previous-completion)
+;;             ("C-n" . minibuffer-next-completion))
+;; :bind (:map completion-in-region-mode-map
+;;             ("C-p" . minibuffer-previous-completion)
+;;             ("C-n" . minibuffer-next-completion)
+;;             ("RET" . minibuffer-choose-completion)))
 
 ;;; ============================================================
 ;;;                   DEVELOPMENT TOOLS
@@ -1145,7 +1155,7 @@ If point is at the end of the line, kill the whole line including the newline."
     "Go to next error, skipping warnings and notes."
     (interactive)
     (flymake-goto-next-error nil '(:error)))
-  
+
   (defun kdb-flymake-goto-prev-error-only ()
     "Go to previous error, skipping warnings and notes."
     (interactive)
@@ -1335,7 +1345,7 @@ If point is at the end of the line, kill the whole line including the newline."
   :mode ("README\\.md\\'" . gfm-mode)
   :init (setq markdown-command "multimarkdown")
   :bind (:map markdown-mode-map
-         ("C-c C-e" . markdown-do)))
+              ("C-c C-e" . markdown-do)))
 
 ;; Enable markdown treesitter support if available
 (when (treesit-language-available-p 'markdown)
@@ -1556,20 +1566,20 @@ If point is at the end of the line, kill the whole line including the newline."
         eat-enable-yank-to-terminal t
         eat-enable-directory-tracking t
         eat-enable-shell-command-history t)
-  
+
   ;; Windows-specific settings
   (when (eq system-type 'windows-nt)
     (setq eat-shell (or (executable-find "pwsh")
                         (executable-find "powershell")
                         (executable-find "bash")
                         "cmd.exe")))
-  
+
   (setq eat-term-name "xterm-256color")
-  
+
   ;; Eshell integration
   (add-hook 'eshell-load-hook #'eat-eshell-mode)
   (add-hook 'eshell-load-hook #'eat-eshell-visual-command-mode)
-  
+
   (add-hook 'eat-mode-hook
             (lambda ()
               (define-key eat-semi-char-mode-map (kbd "C-c C-c") 'eat-self-input)
