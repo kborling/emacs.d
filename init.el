@@ -1210,37 +1210,6 @@ If point is at the end of the line, kill the whole line including the newline."
   :config
   (exec-path-from-shell-initialize))
 
-;; SSH Agent Configuration ================================= ;;
-
-;; Fix SSH_AUTH_SOCK for git/SSH operations in Emacs
-(defun kdb-fix-ssh-auth-sock ()
-  "Fix SSH_AUTH_SOCK to point to the correct ssh-agent socket."
-  (interactive)
-  (let ((ssh-sock (or (getenv "SSH_AUTH_SOCK")
-                      (car (directory-files "/tmp" t "^ssh-.*/agent\\.[0-9]+$")))))
-    (when ssh-sock
-      (if (file-exists-p ssh-sock)
-          (progn
-            (setenv "SSH_AUTH_SOCK" ssh-sock)
-            (message "SSH_AUTH_SOCK set to: %s" ssh-sock))
-        ;; Socket doesn't exist, find a valid one
-        (let ((valid-sock (car (seq-filter #'file-exists-p
-                                          (directory-files "/tmp" t "^ssh-.*/agent\\.[0-9]+$")))))
-          (when valid-sock
-            (setenv "SSH_AUTH_SOCK" valid-sock)
-            (message "SSH_AUTH_SOCK set to: %s" valid-sock)))))))
-
-;; Set SSH_ASKPASS for GUI password prompts
-(when (eq window-system 'x)
-  (setenv "SSH_ASKPASS" "/usr/bin/ssh-askpass")
-  (setenv "DISPLAY" ":0")
-  ;; Fix SSH_AUTH_SOCK on startup
-  (kdb-fix-ssh-auth-sock))
-
-;; Also fix SSH_AUTH_SOCK when opening VC operations
-(add-hook 'vc-before-checkin-hook #'kdb-fix-ssh-auth-sock)
-(add-hook 'magit-credential-hook #'kdb-fix-ssh-auth-sock)
-
 
 ;; Add lisp directory to load path
 (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
@@ -1628,8 +1597,10 @@ If point is at the end of the line, kill the whole line including the newline."
 
 ;; EXWM (Window Manager) =================================== ;;
 
+;; Load EXWM early if we're in X11 session
 (use-package exwm
   :ensure t
+  :if (memq window-system '(x))
   :defer t
   :config
   ;; Disable menu-bar, tool-bar and scroll-bar in EXWM
@@ -1647,8 +1618,7 @@ If point is at the end of the line, kill the whole line including the newline."
   ;; Turn on `display-battery-mode' if you want battery info
   (display-battery-mode t))
 
-;; Load EXWM early if we're in X11 session
-(when (eq window-system 'x)
+(when (memq window-system '(x))
   (require 'init-exwm))
 
 ;; Local Variables:
