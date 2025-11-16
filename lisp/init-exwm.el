@@ -488,6 +488,12 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
   (when (file-exists-p "~/.Xresources")
     (start-process-shell-command "xrdb" nil "xrdb -merge ~/.Xresources"))
 
+  ;; Load SSH keys into agent
+  (when (file-exists-p "~/.ssh/id_ed25519")
+    (start-process-shell-command
+     "ssh-add" nil
+     "SSH_ASKPASS=~/.local/bin/ssh-askpass DISPLAY=:0 ssh-add ~/.ssh/id_ed25519 < /dev/null"))
+
   ;; Set keyboard layout and options
   (start-process-shell-command "setxkbmap" nil "setxkbmap -option ctrl:nocaps")
 
