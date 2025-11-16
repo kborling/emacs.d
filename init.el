@@ -276,7 +276,7 @@
 (let* ((settings (cond
                   ((eq system-type 'windows-nt) '(:size 110 :families ("Rec Mono Semicasual" "Cascadia Code" "Consolas" "Courier New")))
                   ((eq system-type 'gnu/linux)  '(:size 110 :families ("JetBrains Mono" "DejaVu Sans Mono" "Liberation Mono" "monospace")))
-                  ((eq system-type 'darwin)     '(:size 150 :families ("Overpass Mono" "Monaco" "Menlo" "monospace")))))
+                  ((eq system-type 'darwin)     '(:size 140 :families ("Overpass Mono" "Monaco" "Menlo" "monospace")))))
        (default-font-size (plist-get settings :size))
        (font-families (plist-get settings :families))
        (default-font-family (cl-find-if (lambda (font) (find-font (font-spec :family font))) font-families)))

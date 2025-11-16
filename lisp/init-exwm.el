@@ -478,8 +478,11 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
 
   ;; Red night light (automatic based on time of day)
   ;; Use -l to specify location manually, avoiding GeoClue issues
+  ;; Only start redshift during evening/night hours (18:00-06:00)
   (when (executable-find "redshift")
-    (start-process-shell-command "redshift" nil "redshift -l 40.7:-74.0 -t 6500:3500"))
+    (let ((hour (string-to-number (format-time-string "%H"))))
+      (when (or (>= hour 18) (< hour 6))
+        (start-process-shell-command "redshift" nil "redshift -l 40.7:-74.0 -t 6500:3500"))))
 
   ;; Set X resources
   (when (file-exists-p "~/.Xresources")
