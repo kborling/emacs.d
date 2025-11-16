@@ -10,7 +10,7 @@
 
 ;;; Code:
 
-(require 'exwm nil t)
+(require 'exwm)
 
 ;;; Basic EXWM Setup =====================================================
 

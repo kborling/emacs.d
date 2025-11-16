@@ -1347,13 +1347,6 @@ If point is at the end of the line, kill the whole line including the newline."
   :bind (:map markdown-mode-map
               ("C-c C-e" . markdown-do)))
 
-;; Enable markdown treesitter support if available
-(when (treesit-language-available-p 'markdown)
-  (add-to-list 'auto-mode-alist '("\\.md\\'" . markdown-ts-mode)))
-
-(when (treesit-language-available-p 'markdown-inline)
-  (add-to-list 'treesit-auto-langs 'markdown-inline))
-
 ;; Combobulate ============================================= ;;
 
 (use-package combobulate
@@ -1604,12 +1597,6 @@ If point is at the end of the line, kill the whole line including the newline."
 
 ;; EXWM (Window Manager) =================================== ;;
 
-;; Load EXWM early if we're in X11 session
-(when (eq window-system 'x)
-  (require 'init-exwm))
-
-;; EXWM (Window Manager) =================================== ;;
-
 (use-package exwm
   :ensure t
   :defer t
@@ -1629,6 +1616,9 @@ If point is at the end of the line, kill the whole line including the newline."
   ;; Turn on `display-battery-mode' if you want battery info
   (display-battery-mode t))
 
+;; Load EXWM early if we're in X11 session
+(when (eq window-system 'x)
+  (require 'init-exwm))
 
 ;; Local Variables:
 ;; no-byte-compile: t
