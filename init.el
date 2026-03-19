@@ -485,7 +485,7 @@ If point is at the end of the line, kill the whole line including the newline."
                        ("C-M-s" . isearch-forward-symbol-at-point)))
       (define-key map (kbd (car binding)) (cdr binding)))
 
-    ;; TODOO navigation (hl-todo)
+    ;; TODO navigation (hl-todo)
     (dolist (binding '(("M-[" . hl-todo-previous)
                        ("M-]" . hl-todo-next)
                        ("C-c o o" . hl-todo-occur)))
@@ -524,7 +524,7 @@ If point is at the end of the line, kill the whole line including the newline."
       (define-key map (kbd (car binding)) (cdr binding)))
 
     ;; Toggling features
-    (dolist (binding '(("C-c t h" . toggle-theme)  ; Changed from t t to t h
+    (dolist (binding '(("C-c t h" . toggle-theme)
                        ("C-c t f" . toggle-frame-fullscreen)))
       (define-key map (kbd (car binding)) (cdr binding)))))
 
