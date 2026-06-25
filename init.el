@@ -5,7 +5,7 @@
 ;; Keywords: configuration
 ;; URL: https://github.com/kborling/emacs.d
 ;; Homepage: https://github.com/kborling/emacs.d
-;; Package-Requires: ((emacs "30"))
+;; Package-Requires: ((emacs "31"))
 
 ;;; Commentary:
 
@@ -58,13 +58,9 @@
         ("nongnu" . 1)))
 
 (require 'package)
-(unless package--initialized
-  (package-initialize))
+(package-initialize)
 (unless package-archive-contents
   (package-refresh-contents))
-
-(unless (package-installed-p 'use-package)
-  (package-install 'use-package))
 
 ;;; Package Management ========================================= ;;
 
@@ -130,7 +126,11 @@
  require-final-newline t
  load-prefer-newer t
  set-mark-command-repeat-pop t
- global-mark-ring-max 50000)
+ global-mark-ring-max 50000
+ ;; Emacs 31
+ kill-region-dwim 'kill-word
+ split-window-preferred-direction 'longest
+ mode-line-collapse-minor-modes t)
 
 ;;; ============================================================
 ;;;                 UI AND APPEARANCE
@@ -262,6 +262,9 @@
 ;; Smooth scrolling
 (add-hook 'after-init-hook #'pixel-scroll-precision-mode)
 
+;; Inline completion preview (ghost text)
+(add-hook 'prog-mode-hook #'completion-preview-mode)
+
 (autoload 'zap-up-to-char "misc"
   "Kill up to, but not including ARGth occurrence of CHAR." t)
 
@@ -274,9 +277,9 @@
 (setopt line-spacing 0.20)
 
 (let* ((settings (cond
-                  ((eq system-type 'windows-nt) '(:size 110 :families ("Rec Mono Semicasual" "Cascadia Code" "Consolas" "Courier New")))
-                  ((eq system-type 'gnu/linux)  '(:size 110 :families ("JetBrains Mono" "DejaVu Sans Mono" "Liberation Mono" "monospace")))
-                  ((eq system-type 'darwin)     '(:size 140 :families ("Overpass Mono" "Monaco" "Menlo" "monospace")))))
+                  ((eq system-type 'windows-nt)    '(:size 110 :families ("Rec Mono Semicasual" "Cascadia Code" "Consolas" "Courier New")))
+                  ((eq system-type 'darwin)        '(:size 140 :families ("Overpass Mono" "Monaco" "Menlo" "monospace")))
+                  (t '(:size 110 :families ("JetBrains Mono" "DejaVu Sans Mono" "Liberation Mono" "monospace")))))  ; Linux, BSD, etc.
        (default-font-size (plist-get settings :size))
        (font-families (plist-get settings :families))
        (default-font-family (cl-find-if (lambda (font) (find-font (font-spec :family font))) font-families)))
@@ -451,13 +454,6 @@ If point is at the end of the line, kill the whole line including the newline."
     (kill-line)))
 
 
-(defun kdb-create-tags (dir-name)
-  "Create tags file using DIR-NAME."
-  (interactive "DDirectory: ")
-  (shell-command
-   (format "%s -f TAGS -e -R %s" (locate-file "ctags" exec-path) (directory-file-name dir-name))))
-
-
 (defun kdb-setup-keybindings ()
   "Set up all custom keybindings."
   (let ((map global-map))
@@ -554,12 +550,6 @@ If point is at the end of the line, kill the whole line including the newline."
 ;;         mac-command-modifier 'meta))
 
 
-(defadvice kdb-ansi-term (before force-bash)
-  "Set the default shell to bash."
-  (interactive (list (or (locate-file "zsh" exec-path)
-                         "bash"))))
-(ad-activate 'kdb-ansi-term)
-
 (defun kdb-term-exec-hook ()
   "Kill the terminal after exit."
   (let* ((buff (current-buffer))
@@ -573,8 +563,8 @@ If point is at the end of the line, kill the whole line including the newline."
 (add-hook 'term-exec-hook 'kdb-term-exec-hook)
 
 ;; Paste into term
-(eval-after-load "term"
-  '(define-key term-raw-map (kbd "C-c C-y") 'term-paste))
+(with-eval-after-load 'term
+  (define-key term-raw-map (kbd "C-c C-y") 'term-paste))
 
 ;;; ============================================================
 ;;;                   ESSENTIAL PACKAGES
@@ -816,7 +806,9 @@ If point is at the end of the line, kill the whole line including the newline."
       ("EXWM: Browser" (or (and (mode . exwm-mode)
                                 (name . "Firefox"))
                            (and (mode . exwm-mode)
-                                (name . "Chrome"))))
+                                (name . "Librewolf"))
+                           (and (mode . exwm-mode)
+                                (name . "Icecat"))))
       ("EXWM: Terminal" (and (mode . exwm-mode)
                              (name . "kitty")))
       ("EXWM: Other" (mode . exwm-mode))
@@ -828,6 +820,9 @@ If point is at the end of the line, kill the whole line including the newline."
                     (name . "^\\*git-")
                     (mode . diff-mode)
                     (mode . log-view-mode)))
+      ("AI/Claude" (or (name . "^\\*Claude")
+                      (name . "^\\*gptel")
+                      (mode . gptel-mode)))
       ("Terminal" (or (mode . eshell-mode)
                       (mode . shell-mode)
                       (mode . term-mode)
@@ -862,7 +857,8 @@ If point is at the end of the line, kill the whole line including the newline."
   :config
   (setq
    vc-directory-exclusion-list (nconc vc-directory-exclusion-list '("node_modules" "elpa" ".sl"))
-   project-vc-extra-root-markers '(".envrc" "package.json" ".project" ".sl")))
+   project-vc-extra-root-markers '(".envrc" "package.json" ".project" ".sl")
+   project-prune-zombie-projects t))
 
 
 ;; Async =================================================== ;;
@@ -897,35 +893,6 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq eshell-prompt-function 'kdb-eshell-prompt
         eshell-prompt-regexp "^[^#$\n]* [#$] "))
 
-(defun kdb-eshell-new ()
-  "Create a new eshell buffer with a unique name."
-  (interactive)
-  (let ((eshell-buffer-name (generate-new-buffer-name "*eshell*")))
-    (eshell)))
-
-(defun kdb-eshell-toggle ()
-  "Toggle eshell window at bottom of frame and focus it."
-  (interactive)
-  (let ((eshell-window (get-buffer-window "*eshell*")))
-    (if eshell-window
-        (if (eq (selected-window) eshell-window)
-            ;; If already in eshell, close it
-            (delete-window eshell-window)
-          ;; If eshell visible but not focused, focus it
-          (select-window eshell-window))
-      ;; If not visible, create/show and focus it
-      (let ((buf (or (get-buffer "*eshell*")
-                     (save-window-excursion (eshell)))))
-        (select-window
-         (display-buffer buf
-                         '((display-buffer-at-bottom)
-                           (window-height . 0.3))))))))
-
-(when (package-installed-p 'eat)
-  (use-package eat
-    :config
-    (setq eat-kill-buffer-on-exit t
-          eat-enable-mouse t)))
 
 ;; Orderless =============================================== ;;
 
@@ -933,34 +900,13 @@ If point is at the end of the line, kill the whole line including the newline."
   :ensure t
   :defer t
   :after minibuffer
-  :commands (orderless-filter)
   :bind (:map minibuffer-local-completion-map
               ("SPC" . nil)
               ("?" . nil))
   :config
-  (setq orderless-matching-styles '(orderless-prefixes orderless-regexp)))
-
-
-;; Fussy =================================================== ;;
-
-(use-package fussy
-  :defer t
-  :init
-  (setq fussy-use-cache t
-        ;; fussy-filter-fn 'fussy-filter-default
-        fussy-filter-fn 'fussy-filter-orderless-flex
-        fussy-compare-same-score-fn 'fussy-histlen->strlen<)
-  :config
-  (fussy-setup)
-  (fussy-eglot-setup)
-
-  (advice-add 'corfu--capf-wrapper :before 'fussy-wipe-cache)
-
-  (add-hook 'corfu-mode-hook
-            (lambda ()
-              (setq-local fussy-max-candidate-limit (if (eq system-type 'windows-nt) 3000 5000)
-                          fussy-default-regex-fn 'fussy-pattern-first-letter
-                          fussy-prefer-prefix nil))))
+  (setq orderless-matching-styles '(orderless-prefixes orderless-regexp orderless-flex)
+        completion-styles '(orderless basic)
+        completion-category-overrides '((file (styles basic partial-completion)))))
 
 
 ;; Icomplete =============================================== ;;
@@ -969,10 +915,6 @@ If point is at the end of the line, kill the whole line including the newline."
   :ensure nil
   :hook (after-init . fido-mode)
   :config
-  (defun fussy-fido-setup ()
-    "Use `fussy' with `fido-mode'."
-    (setq-local completion-styles '(fussy basic)))
-  (advice-add 'icomplete--fido-mode-setup :after 'fussy-fido-setup)
   (setq icomplete-tidy-shadowed-file-names t
         icomplete-show-matches-on-no-input t
         icomplete-compute-delay 0
@@ -1200,13 +1142,11 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package exec-path-from-shell
   :ensure t
-  :if (memq window-system '(mac ns x))
+  :if (eq system-type 'darwin)
   :init
-  ;; Only check PATH and SSH_AUTH_SOCK for better performance
-  (setq exec-path-from-shell-variables '("PATH" "SSH_AUTH_SOCK"))
-  ;; Disable debug and verbose output
-  (setq exec-path-from-shell-debug nil)
-  (setq exec-path-from-shell-check-startup-files nil)
+  (setq exec-path-from-shell-variables '("PATH" "SSH_AUTH_SOCK")
+        exec-path-from-shell-debug nil
+        exec-path-from-shell-check-startup-files nil)
   :config
   (exec-path-from-shell-initialize))
 
@@ -1320,20 +1260,16 @@ If point is at the end of the line, kill the whole line including the newline."
 (use-package tempel-collection
   :after tempel)
 
-;; Tree-sitter Auto ======================================== ;;
+;; Tree-sitter (Built-in Emacs 31) ======================== ;;
 
-(use-package treesit-auto
-  ;; :custom
-  ;; (treesit-auto-install 'prompt)
-  :config
-  ;; Add Zig language recipe for treesit-auto
-  (add-to-list 'treesit-auto-recipe-list
-               (make-treesit-auto-recipe
-                :lang 'zig
-                :ts-mode 'zig-ts-mode
-                :url "https://github.com/maxxnino/tree-sitter-zig"))
-  (treesit-auto-add-to-auto-mode-alist 'all)
-  (global-treesit-auto-mode))
+;; Automatically use tree-sitter modes when grammars are available
+(setq treesit-enabled-modes t                ; Remap all supported modes
+      treesit-auto-install-grammar 'prompt)  ; Prompt to install missing grammars
+
+;; Additional grammar sources (for languages not in default list)
+(with-eval-after-load 'treesit
+  (add-to-list 'treesit-language-source-alist
+               '(zig "https://github.com/maxxnino/tree-sitter-zig")))
 
 ;;; ============================================================
 ;;;                  PROGRAMMING LANGUAGES
@@ -1620,6 +1556,51 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (when (memq window-system '(x))
   (require 'init-exwm))
+
+;; Tab Bar (Workspaces) ==================================== ;;
+
+(use-package tab-bar
+  :ensure nil
+  :hook (after-init . tab-bar-mode)
+  :config
+  (setq tab-bar-show t
+        tab-bar-close-button-show nil
+        tab-bar-new-button-show nil
+        tab-bar-tab-hints t            ; Show tab numbers in tab names
+        tab-bar-format '(tab-bar-format-tabs tab-bar-separator))
+  :bind (("C-c TAB n" . tab-bar-new-tab)
+         ("C-c TAB r" . tab-bar-rename-tab)
+         ("C-c TAB k" . tab-bar-close-tab)
+         ("C-c TAB l" . tab-bar-switch-to-tab)
+         ("C-c TAB f" . tab-bar-switch-to-next-tab)
+         ("C-c TAB b" . tab-bar-switch-to-prev-tab)))
+
+
+;; gptel (Claude Chat + Org Integration) ================== ;;
+
+(use-package gptel
+  :ensure t
+  :config
+  ;; Set API key in personal.el: (setq gptel-api-key "sk-ant-...")
+  (setq gptel-model 'claude-sonnet-4-5
+        gptel-default-mode 'org-mode     ; Chat buffers open in org-mode
+        gptel-backend (gptel-make-anthropic "Claude" :stream t))
+
+  ;; Org-mode integration: send subtrees, heading context, branching
+  (setq gptel-org-branching-context t    ; Each org heading is its own context branch
+        gptel-use-header-line t)
+
+  ;; After a response, move point to end so next prompt is ready
+  (add-hook 'gptel-post-response-functions #'gptel-end-of-response)
+
+  :bind (("C-c l l" . gptel)            ; Open/switch to chat buffer
+         ("C-c l s" . gptel-send)        ; Send prompt at point
+         ("C-c l r" . gptel-rewrite)     ; Rewrite selected region in-place
+         ("C-c l m" . gptel-menu)        ; Transient menu (model, params, etc.)
+         ("C-c l a" . gptel-add)         ; Add region/buffer to context
+         ("C-c l f" . gptel-add-file)    ; Add file to context
+         ("C-c l c" . gptel-context-remove-all)))  ; Clear context
+
 
 ;; Local Variables:
 ;; no-byte-compile: t

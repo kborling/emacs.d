@@ -323,7 +323,7 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
 (defun kdb-exwm-counsel-linux-app ()
   "Launch a Linux application using Emacs completion."
   (interactive)
-  (let* ((apps-dir '("/usr/share/applications" "~/.local/share/applications"))
+  (let* ((apps-dir '("/usr/share/applications" "~/.local/share/applications" "/var/guix/profiles/per-user/kevin/guix-profile/bin"))
          (desktop-files '())
          (apps '()))
     ;; Find all .desktop files
@@ -368,8 +368,11 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
   (interactive)
   (cond
    ((executable-find "firefox") (start-process "" nil "firefox"))
-   ((executable-find "google-chrome") (start-process "" nil "google-chrome"))
+   ((executable-find "librewolf") (start-process "" nil "librewolf"))
+   ((executable-find "icecat") (start-process "" nil "icecat"))
+   ((executable-find "brave") (start-process "" nil "brave"))
    ((executable-find "chromium") (start-process "" nil "chromium"))
+   ((executable-find "google-chrome") (start-process "" nil "google-chrome"))
    (t (message "No browser found"))))
 
 (defun kdb-exwm-launch-terminal ()
@@ -388,6 +391,7 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
    ((executable-find "thunar") (start-process "" nil "thunar"))
    ((executable-find "nautilus") (start-process "" nil "nautilus"))
    ((executable-find "pcmanfm") (start-process "" nil "pcmanfm"))
+   ((executable-find "ranger") (start-process "" nil "ranger"))
    (t (dired "~"))))
 
 ;; Bind application launchers
@@ -411,25 +415,34 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
 
 ;;; Audio Control ========================================================
 
+(defvar kdb-pactl (executable-find "pactl")
+  "Full path to pactl — needed since EXWM shells don't inherit the login PATH.")
+
 (defun kdb-exwm-volume-up ()
   "Increase volume."
   (interactive)
-  (start-process-shell-command "volume-up" nil "pactl set-sink-volume @DEFAULT_SINK@ +5%"))
+  (start-process-shell-command "volume-up" nil (concat kdb-pactl " set-sink-volume @DEFAULT_SINK@ +5%")))
 
 (defun kdb-exwm-volume-down ()
   "Decrease volume."
   (interactive)
-  (start-process-shell-command "volume-down" nil "pactl set-sink-volume @DEFAULT_SINK@ -5%"))
+  (start-process-shell-command "volume-down" nil (concat kdb-pactl " set-sink-volume @DEFAULT_SINK@ -5%")))
 
 (defun kdb-exwm-volume-mute ()
-  "Toggle mute."
+  "Toggle speaker mute."
   (interactive)
-  (start-process-shell-command "volume-mute" nil "pactl set-sink-mute @DEFAULT_SINK@ toggle"))
+  (start-process-shell-command "volume-mute" nil (concat kdb-pactl " set-sink-mute @DEFAULT_SINK@ toggle")))
+
+(defun kdb-exwm-mic-mute ()
+  "Toggle microphone mute."
+  (interactive)
+  (start-process-shell-command "mic-mute" nil (concat kdb-pactl " set-source-mute @DEFAULT_SOURCE@ toggle")))
 
 ;; Media keys
 (exwm-input-set-key (kbd "<XF86AudioRaiseVolume>") #'kdb-exwm-volume-up)
 (exwm-input-set-key (kbd "<XF86AudioLowerVolume>") #'kdb-exwm-volume-down)
 (exwm-input-set-key (kbd "<XF86AudioMute>") #'kdb-exwm-volume-mute)
+(exwm-input-set-key (kbd "<XF86AudioMicMute>") #'kdb-exwm-mic-mute)
 
 ;;; Brightness Control ===================================================
 
@@ -494,11 +507,12 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
      "ssh-add" nil
      "SSH_ASKPASS=~/.local/bin/ssh-askpass DISPLAY=:0 ssh-add ~/.ssh/id_ed25519 < /dev/null"))
 
-  ;; Set keyboard layout and options
-  (start-process-shell-command "setxkbmap" nil "setxkbmap -option ctrl:nocaps")
+  ;; Key repeat: EXWM re-grabs the keyboard on init so this must run after it starts.
+  ;; ServerFlags AutoRepeat in Xorg config conflicts with EXWM's keyboard grabbing.
+  (start-process-shell-command "xset" nil "xset r rate 250 30")
 
-  ;; Set keyboard rate (delay 250ms, rate 40/sec for fast repeat)
-  (start-process-shell-command "xset" nil "xset r rate 250 40"))
+  ;; Spotify daemon — appears as a Spotify Connect device named "guix"
+  (start-process-shell-command "spotifyd" nil "spotifyd"))
 
 ;;; Modeline Integration =================================================
 
@@ -642,7 +656,7 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
   (when (y-or-n-p "Restart EXWM? ")
     ;; Kill common systemtray/background processes that will be restarted
     (start-process-shell-command "cleanup" nil
-                                 "killall nm-applet blueman-applet dunst picom 2>/dev/null || true")
+                                 "killall redshift nm-applet blueman-applet dunst picom 2>/dev/null || true")
     ;; Wait a moment for cleanup
     (run-with-timer 0.5 nil
                     (lambda ()
