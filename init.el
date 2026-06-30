@@ -133,9 +133,7 @@
  mode-line-collapse-minor-modes t
  ;; Built-in defaults
  view-read-only t
- completion-cycle-threshold 5
- duplicate-region-final-position -1
- duplicate-line-final-position -1)
+ completion-cycle-threshold 5)
 
 ;;; ============================================================
 ;;;                 UI AND APPEARANCE
@@ -910,15 +908,22 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package orderless
   :ensure t
-  :defer t
-  :after minibuffer
   :bind (:map minibuffer-local-completion-map
               ("SPC" . nil)
               ("?" . nil))
   :config
-  (setq orderless-matching-styles '(orderless-initialism orderless-regexp)
-        completion-styles '(orderless flex basic)
-        completion-category-overrides '((file (styles basic partial-completion)))))
+  (setq orderless-matching-styles '(orderless-initialism orderless-flex orderless-regexp)
+        completion-styles '(orderless basic)
+        completion-category-overrides '((file (styles basic partial-completion))))
+
+  ;; fido-mode forces completion-styles to (flex) on every minibuffer entry.
+  ;; Override it after fido's setup hook runs.
+  (defun kdb-orderless-override-fido ()
+    "Restore orderless as the completion style in fido-mode."
+    (when (and (bound-and-true-p icomplete-mode)
+               (not (eq (car-safe completion-styles) 'orderless)))
+      (setq-local completion-styles '(orderless basic))))
+  (add-hook 'minibuffer-setup-hook #'kdb-orderless-override-fido 10))
 
 
 ;; Icomplete =============================================== ;;
@@ -1275,8 +1280,8 @@ If point is at the end of the line, kill the whole line including the newline."
 ;; Tree-sitter (Built-in Emacs 31) ======================== ;;
 
 ;; Automatically use tree-sitter modes when grammars are available
-(setq treesit-enabled-modes t                ; Remap all supported modes
-      treesit-auto-install-grammar 'prompt)  ; Prompt to install missing grammars
+(setq treesit-enabled-modes t              ; Remap all supported modes
+      treesit-auto-install-grammar 'ask)   ; Prompt to install missing grammars
 
 ;; Additional grammar sources (for languages not in default list)
 (with-eval-after-load 'treesit
