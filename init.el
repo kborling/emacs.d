@@ -1283,10 +1283,28 @@ If point is at the end of the line, kill the whole line including the newline."
 (setq treesit-enabled-modes t              ; Remap all supported modes
       treesit-auto-install-grammar 'ask)   ; Prompt to install missing grammars
 
-;; Additional grammar sources (for languages not in default list)
+;; Grammar sources for treesit-install-language-grammar
 (with-eval-after-load 'treesit
-  (add-to-list 'treesit-language-source-alist
-               '(zig "https://github.com/maxxnino/tree-sitter-zig")))
+  (dolist (source '((typescript "https://github.com/tree-sitter/tree-sitter-typescript" "master" "typescript/src")
+                    (tsx "https://github.com/tree-sitter/tree-sitter-typescript" "master" "tsx/src")
+                    (javascript "https://github.com/tree-sitter/tree-sitter-javascript")
+                    (python "https://github.com/tree-sitter/tree-sitter-python")
+                    (json "https://github.com/tree-sitter/tree-sitter-json")
+                    (css "https://github.com/tree-sitter/tree-sitter-css")
+                    (html "https://github.com/tree-sitter/tree-sitter-html")
+                    (yaml "https://github.com/tree-sitter-grammars/tree-sitter-yaml")
+                    (toml "https://github.com/tree-sitter/tree-sitter-toml")
+                    (bash "https://github.com/tree-sitter/tree-sitter-bash")
+                    (c "https://github.com/tree-sitter/tree-sitter-c")
+                    (cpp "https://github.com/tree-sitter/tree-sitter-cpp")
+                    (rust "https://github.com/tree-sitter/tree-sitter-rust")
+                    (go "https://github.com/tree-sitter/tree-sitter-go")
+                    (zig "https://github.com/maxxnino/tree-sitter-zig")
+                    (dockerfile "https://github.com/camdencheek/tree-sitter-dockerfile")
+                    (java "https://github.com/tree-sitter/tree-sitter-java")
+                    (markdown "https://github.com/tree-sitter-grammars/tree-sitter-markdown" "split_parser" "tree-sitter-markdown/src")
+                    (markdown-inline "https://github.com/tree-sitter-grammars/tree-sitter-markdown" "split_parser" "tree-sitter-markdown-inline/src")))
+    (add-to-list 'treesit-language-source-alist source)))
 
 ;;; ============================================================
 ;;;                  PROGRAMMING LANGUAGES
@@ -1300,53 +1318,6 @@ If point is at the end of the line, kill the whole line including the newline."
   :bind (:map markdown-mode-map
               ("C-c C-e" . markdown-do)))
 
-;; Combobulate ============================================= ;;
-
-(use-package combobulate
-  :vc (:url "https://github.com/mickeynp/combobulate" :rev :newest)
-  :custom
-  (combobulate-key-prefix "C-c O")
-  (combobulate-flash-node t)
-  (combobulate-dimmer-mode t)
-  (combobulate-envelope-indent-region-function #'indent-region)
-  :hook
-  ((python-ts-mode . combobulate-mode)
-   (js-ts-mode . combobulate-mode)
-   (tsx-ts-mode . combobulate-mode)
-   (typescript-ts-mode . combobulate-mode)
-   (json-ts-mode . combobulate-mode)
-   (css-ts-mode . combobulate-mode)
-   (yaml-ts-mode . combobulate-mode)
-   (html-ts-mode . combobulate-mode)
-   (toml-ts-mode . combobulate-mode)
-   (go-ts-mode . combobulate-mode)
-   (rust-ts-mode . combobulate-mode))
-  :bind
-  ;; Override some default keybindings for easier access
-  (:map combobulate-key-map
-        ;; Navigation
-        ("C-M-f" . combobulate-navigate-next)
-        ("C-M-b" . combobulate-navigate-previous)
-        ("C-M-u" . combobulate-navigate-up)
-        ("C-M-d" . combobulate-navigate-down)
-        ("C-M-n" . combobulate-navigate-sequence-next)
-        ("C-M-p" . combobulate-navigate-sequence-previous)
-        ;; Logical navigation (beginning/end of blocks)
-        ("C-M-a" . combobulate-navigate-logical-previous)
-        ("C-M-e" . combobulate-navigate-logical-next)
-        ;; Marking and selection
-        ("C-M-SPC" . combobulate-mark-node-dwim)
-        ;; Editing
-        ("C-M-k" . combobulate-kill-node-dwim)
-        ("C-M-y" . combobulate-yank)
-        ("C-M-/" . combobulate-comment-dwim)
-        ;; Manipulation
-        ("M-<up>" . combobulate-drag-up)
-        ("M-<down>" . combobulate-drag-down)
-        ("M-<left>" . combobulate-splice-self)
-        ("M-<right>" . combobulate-splice-parent)
-        ;; Envelopes (wrapping)
-        ("C-c o e" . combobulate-envelope-dwim)))
 
 
 ;; Tree-sitter Expand ====================================== ;;
