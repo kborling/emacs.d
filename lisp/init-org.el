@@ -87,6 +87,27 @@
      (restclient . t)
      (python . t)))
 
+  ;; Capture templates — single inbox, then refile
+  (setq org-capture-templates
+        '(("t" "Todo" entry (file "~/.org/inbox.org")
+           "* TODO %?\n%U\n" :empty-lines 1)
+          ("n" "Note" entry (file "~/.org/inbox.org")
+           "* %?\n%U\n" :empty-lines 1)
+          ("j" "Journal" entry (file+olp+datetree "~/.org/journal.org")
+           "* %?\n%U\n" :empty-lines 1)
+          ("w" "Work note" entry (file+olp+datetree "~/.org/work.org")
+           "* %?\n%U\n" :empty-lines 1)
+          ("l" "Link" entry (file "~/.org/inbox.org")
+           "* %?\n%U\n%a\n" :empty-lines 1)
+          ("c" "Claude artifact" entry (file "~/.org/inbox.org")
+           "* %?\n%U\n#+begin_src markdown\n%x\n#+end_src\n" :empty-lines 1)))
+
+  (setq org-refile-targets '(("~/.org/notes.org" :maxlevel . 3)
+                              ("~/.org/todo.org" :maxlevel . 2)
+                              ("~/.org/work.org" :maxlevel . 2))
+        org-refile-use-outline-path 'file
+        org-outline-path-complete-in-steps nil)
+
   :bind (("C-c o a" . org-agenda)
          ("C-c o c" . org-capture)))
 
@@ -148,6 +169,26 @@
         org-appear-autokeywords t
         org-appear-inside-latex t))
 
+;; Deft — fast note search and creation
+(use-package deft
+  :ensure t
+  :commands deft
+  :config
+  (setq deft-directory "~/.org"
+        deft-recursive t
+        deft-extensions '("org" "md" "txt")
+        deft-default-extension "org"
+        deft-use-filename-as-title t
+        deft-use-filter-string-for-filename t
+        deft-auto-save-interval 0
+        deft-strip-summary-regexp
+        (concat "\\("
+                "[\n\t]" ;; blank
+                "\\|^#\\+[[:alpha:]_]+:.*$" ;; org-mode metadata
+                "\\|^---$" ;; yaml frontmatter
+                "\\)"))
+  :bind ("C-c o d" . deft))
+
 ;; Smart word wrapping that preserves tables
 (defun kdb/org-setup-wrapping ()
   "Set up smart word wrapping for org-mode."
@@ -184,7 +225,7 @@
     (global-set-key (kbd "C-c o A") 'kdb/add-accomplishment)
     (global-set-key (kbd "C-c o w") 'kdb/quick-win)
     (global-set-key (kbd "C-c o v") 'kdb/view-accomplishments)
-    (global-set-key (kbd "C-c o d") 'kdb/daily-notes)
+    (global-set-key (kbd "C-c o D") 'kdb/daily-notes)
     (global-set-key (kbd "C-c o W") 'kdb/weekly-review)
     (global-set-key (kbd "C-c o f") 'kdb/search-all)
     (global-set-key (kbd "C-c o j") 'kdb/find-contact)
@@ -269,6 +310,57 @@
         org-html-validation-link nil
         org-html-head-include-default-style nil
         org-html-head-include-scripts nil))
+
+;; Markdown preview — render markdown buffers as HTML in EWW
+(defun kdb/markdown-preview ()
+  "Preview current markdown buffer rendered as HTML in EWW."
+  (interactive)
+  (let* ((content (buffer-substring-no-properties (point-min) (point-max)))
+         (html-file (make-temp-file "md-preview-" nil ".html"))
+         (css "body{font-family:sans-serif;max-width:50em;margin:2em auto;padding:0 1em;line-height:1.6}
+               pre{background:#f4f4f4;padding:1em;overflow-x:auto;border-radius:4px}
+               code{background:#f4f4f4;padding:0.2em 0.4em;border-radius:3px}
+               blockquote{border-left:3px solid #ccc;margin:1em 0;padding-left:1em;color:#555}
+               h1,h2,h3{margin-top:1.5em}
+               table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:0.5em}"))
+    (with-temp-file html-file
+      (insert "<!DOCTYPE html><html><head><meta charset='utf-8'>")
+      (insert (format "<style>%s</style></head><body>" css))
+      ;; Use markdown-mode's export if available, otherwise basic conversion
+      (if (fboundp 'markdown-export-body-to-html)
+          (let ((md-buf (generate-new-buffer " *md-tmp*")))
+            (with-current-buffer md-buf
+              (insert content)
+              (markdown-mode)
+              (insert (markdown-export-body-to-html)))
+            (kill-buffer md-buf))
+        ;; Basic markdown to HTML conversion
+        (let ((text content))
+          ;; Code blocks
+          (setq text (replace-regexp-in-string
+                      "```\\([a-z]*\\)\n\\(\\(?:.*\n\\)*?\\)```"
+                      "<pre><code class=\"\\1\">\\2</code></pre>" text))
+          ;; Headers
+          (setq text (replace-regexp-in-string "^### \\(.*\\)$" "<h3>\\1</h3>" text))
+          (setq text (replace-regexp-in-string "^## \\(.*\\)$" "<h2>\\1</h2>" text))
+          (setq text (replace-regexp-in-string "^# \\(.*\\)$" "<h1>\\1</h1>" text))
+          ;; Bold/italic
+          (setq text (replace-regexp-in-string "\\*\\*\\([^*]+\\)\\*\\*" "<strong>\\1</strong>" text))
+          (setq text (replace-regexp-in-string "\\*\\([^*]+\\)\\*" "<em>\\1</em>" text))
+          ;; Inline code
+          (setq text (replace-regexp-in-string "`\\([^`]+\\)`" "<code>\\1</code>" text))
+          ;; Links
+          (setq text (replace-regexp-in-string "\\[\\([^]]+\\)\\](\\([^)]+\\))" "<a href=\"\\2\">\\1</a>" text))
+          ;; List items
+          (setq text (replace-regexp-in-string "^- \\(.*\\)$" "<li>\\1</li>" text))
+          ;; Paragraphs
+          (setq text (replace-regexp-in-string "\n\n" "</p><p>" text))
+          (insert "<p>" text "</p>")))
+      (insert "</body></html>"))
+    (eww-open-file html-file)))
+
+(with-eval-after-load 'markdown-mode
+  (define-key markdown-mode-map (kbd "C-c C-p") #'kdb/markdown-preview))
 
 (provide 'init-org)
 ;;; init-org.el ends here

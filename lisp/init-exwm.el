@@ -323,7 +323,9 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
 (defun kdb-exwm-counsel-linux-app ()
   "Launch a Linux application using Emacs completion."
   (interactive)
-  (let* ((apps-dir '("/usr/share/applications" "~/.local/share/applications" "/var/guix/profiles/per-user/kevin/guix-profile/bin"))
+  (let* ((xdg-dirs (mapcar (lambda (d) (expand-file-name "applications" d))
+                           (split-string (or (getenv "XDG_DATA_DIRS") "/usr/share:/usr/local/share") ":")))
+         (apps-dir (append (list (expand-file-name "~/.local/share/applications")) xdg-dirs))
          (desktop-files '())
          (apps '()))
     ;; Find all .desktop files

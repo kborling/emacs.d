@@ -130,7 +130,12 @@
  ;; Emacs 31
  kill-region-dwim 'kill-word
  split-window-preferred-direction 'longest
- mode-line-collapse-minor-modes t)
+ mode-line-collapse-minor-modes t
+ ;; Built-in defaults
+ view-read-only t
+ completion-cycle-threshold 5
+ duplicate-region-final-position -1
+ duplicate-line-final-position -1)
 
 ;;; ============================================================
 ;;;                 UI AND APPEARANCE
@@ -261,6 +266,9 @@
 
 ;; Smooth scrolling
 (add-hook 'after-init-hook #'pixel-scroll-precision-mode)
+
+;; Repeat mode — after C-x o, press o to keep switching windows, etc.
+(add-hook 'after-init-hook #'repeat-mode)
 
 ;; Inline completion preview (ghost text)
 (add-hook 'prog-mode-hook #'completion-preview-mode)
@@ -472,7 +480,7 @@ If point is at the end of the line, kill the whole line including the newline."
                        ("C-o" . occur)
                        ("C-z" . undo)
                        ("C-c b" . copy-whole-buffer)
-                       ("C-c C-d" . duplicate-line)
+                       ("C-c C-d" . duplicate-dwim)
                        ("C-x C-r" . recentf)
                        ("C-x f" . project-find-file)
                        ("C-c C-r" . replace-regexp)
@@ -512,6 +520,10 @@ If point is at the end of the line, kill the whole line including the newline."
                        ("C-c t s" . shell)
                        ("C-c t d" . dired-jump-other-window)
                        ("C-c t =" . fido-vertical-mode)))
+      (define-key map (kbd (car binding)) (cdr binding)))
+
+    ;; Help extensions
+    (dolist (binding '(("C-h M-k" . find-function-on-key)))
       (define-key map (kbd (car binding)) (cdr binding)))
 
     ;; Configuration shortcuts
@@ -858,7 +870,7 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq
    vc-directory-exclusion-list (nconc vc-directory-exclusion-list '("node_modules" "elpa" ".sl"))
    project-vc-extra-root-markers '(".envrc" "package.json" ".project" ".sl")
-   project-prune-zombie-projects t))
+   project-prune-zombie-projects '((prompt . project-prune-zombies-default))))
 
 
 ;; Async =================================================== ;;
@@ -904,8 +916,8 @@ If point is at the end of the line, kill the whole line including the newline."
               ("SPC" . nil)
               ("?" . nil))
   :config
-  (setq orderless-matching-styles '(orderless-prefixes orderless-regexp orderless-flex)
-        completion-styles '(orderless basic)
+  (setq orderless-matching-styles '(orderless-initialism orderless-regexp)
+        completion-styles '(orderless flex basic)
         completion-category-overrides '((file (styles basic partial-completion)))))
 
 
@@ -1593,6 +1605,90 @@ If point is at the end of the line, kill the whole line including the newline."
   ;; After a response, move point to end so next prompt is ready
   (add-hook 'gptel-post-response-functions #'gptel-end-of-response)
 
+  ;; Tools — give Claude access to your Emacs environment
+  (gptel-make-tool
+   :function (lambda (path)
+               (with-temp-buffer
+                 (insert-file-contents (expand-file-name path))
+                 (buffer-string)))
+   :name "read_file"
+   :description "Read the contents of a file and return it as text"
+   :args (list '(:name "path" :type string :description "File path to read"))
+   :category "filesystem")
+
+  (gptel-make-tool
+   :function (lambda (directory)
+               (mapconcat #'identity
+                          (directory-files (expand-file-name directory) nil "^[^.]")
+                          "\n"))
+   :name "list_directory"
+   :description "List files in a directory (excluding hidden files)"
+   :args (list '(:name "directory" :type string :description "Directory path to list"))
+   :category "filesystem")
+
+  (gptel-make-tool
+   :function (lambda (path content)
+               (let ((dir (file-name-directory (expand-file-name path))))
+                 (when dir (make-directory dir t))
+                 (with-temp-file (expand-file-name path)
+                   (insert content))
+                 (format "Wrote %s" path)))
+   :name "write_file"
+   :description "Write content to a file (creates parent directories if needed)"
+   :args (list '(:name "path" :type string :description "File path to write")
+               '(:name "content" :type string :description "Content to write"))
+   :confirm t
+   :category "filesystem")
+
+  (gptel-make-tool
+   :function (lambda (pattern directory)
+               (let ((default-directory (expand-file-name (or directory "."))))
+                 (shell-command-to-string
+                  (format "rg --no-heading --line-number --smart-case %s %s"
+                          (shell-quote-argument pattern)
+                          (shell-quote-argument default-directory)))))
+   :name "search_codebase"
+   :description "Search for a pattern in files using ripgrep. Returns matching lines with file paths and line numbers."
+   :args (list '(:name "pattern" :type string :description "Search pattern (regex)")
+               '(:name "directory" :type string :description "Directory to search in" :optional t))
+   :category "search")
+
+  (gptel-make-tool
+   :function (lambda (command)
+               (with-temp-buffer
+                 (shell-command command (current-buffer))
+                 (buffer-string)))
+   :name "run_shell_command"
+   :description "Run a shell command and return its output"
+   :args (list '(:name "command" :type string :description "Shell command to execute"))
+   :confirm t
+   :category "system")
+
+  (gptel-make-tool
+   :function (lambda ()
+               (mapconcat
+                (lambda (buf)
+                  (format "%s (%s)" (buffer-name buf)
+                          (with-current-buffer buf (symbol-name major-mode))))
+                (cl-remove-if (lambda (b) (string-prefix-p " " (buffer-name b)))
+                              (buffer-list))
+                "\n"))
+   :name "list_buffers"
+   :description "List all open Emacs buffers with their major modes"
+   :args nil
+   :category "emacs")
+
+  (gptel-make-tool
+   :function (lambda (buffer-name)
+               (if-let* ((buf (get-buffer buffer-name)))
+                   (with-current-buffer buf
+                     (buffer-substring-no-properties (point-min) (point-max)))
+                 (format "Buffer %s not found" buffer-name)))
+   :name "read_buffer"
+   :description "Read the contents of an open Emacs buffer"
+   :args (list '(:name "buffer_name" :type string :description "Name of the buffer to read"))
+   :category "emacs")
+
   :bind (("C-c l l" . gptel)            ; Open/switch to chat buffer
          ("C-c l s" . gptel-send)        ; Send prompt at point
          ("C-c l r" . gptel-rewrite)     ; Rewrite selected region in-place
@@ -1600,6 +1696,16 @@ If point is at the end of the line, kill the whole line including the newline."
          ("C-c l a" . gptel-add)         ; Add region/buffer to context
          ("C-c l f" . gptel-add-file)    ; Add file to context
          ("C-c l c" . gptel-context-remove-all)))  ; Clear context
+
+;; Claude Desktop Export Browser ========================== ;;
+
+;; Set kdb-claude-export-directory in personal.el
+(autoload 'kdb-claude-browse "init-claude" "Browse Claude conversations" t)
+(autoload 'kdb-claude-search "init-claude" "Search Claude conversations" t)
+(autoload 'kdb-claude-import-export "init-claude" "Import Claude export" t)
+(global-set-key (kbd "C-c l b") #'kdb-claude-browse)
+(global-set-key (kbd "C-c l /") #'kdb-claude-search)
+(global-set-key (kbd "C-c l i") #'kdb-claude-import-export)
 
 
 ;; Local Variables:

@@ -6,14 +6,15 @@
  ;; If there is more than one, they won't work right.
  '(package-selected-packages
    '(acme-theme agent-shell angular-mode async auto-sudoedit cape
-                claude-code combobulate corfu deadgrep deferred dotnet
-                eat eglot-booster exec-path-from-shell exwm
+                claude-code combobulate corfu deadgrep deferred deft
+                dotnet eat eglot-booster exec-path-from-shell exwm
                 fleury-theme flycheck fussy geiser-guile gptel guix
                 helpful hl-todo marginalia markdown-mode memmet-mode
                 multi-vterm multiple-cursors oauth2 orderless
-                rust-mode simple-httpd sudo-edit tempel-collection
-                treesit-auto treesit-expand uwu-theme vc-msg
-                web-server websocket winum with-editor zig-mode))
+                org-appear org-modern rust-mode simple-httpd sudo-edit
+                tempel-collection treesit-auto treesit-expand
+                uwu-theme vc-msg web-server websocket winum
+                with-editor zig-mode))
  '(package-vc-selected-packages
    '((fleury-theme :url "https://github.com/kborling/fleury-theme.el")
      (eat :url "https://codeberg.org/akib/emacs-eat")
