@@ -829,10 +829,11 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
 
 ;;; Start EXWM automatically ============================================
 
-;; Auto-start EXWM when running as a window manager
+;; Auto-start EXWM when running as the window manager
+;; .xsession sets DESKTOP_SESSION=exwm; the Guix exwm.desktop also sets it.
 (when (and (eq window-system 'x)
            (not (daemonp))
-           (getenv "DESKTOP_SESSION"))
+           (equal (getenv "DESKTOP_SESSION") "exwm"))
   (kdb-exwm-init))
 
 (provide 'init-exwm)
