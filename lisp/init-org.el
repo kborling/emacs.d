@@ -68,7 +68,7 @@
             (todo "DONE"
                   ((org-agenda-overriding-header "This Week's Accomplishments")
                    (org-agenda-skip-function
-                    '(org-agenda-skip-entry-if 'notregexp "\\[2025-.*\\]"))))))))
+                    `(org-agenda-skip-entry-if 'notregexp ,(format "\\[%s-.*\\]" (format-time-string "%Y"))))))))))
 
   (setq org-structure-template-alist
         '(("s" . "src")
@@ -84,7 +84,6 @@
    'org-babel-load-languages
    '((emacs-lisp . t)
      (shell . t)
-     (restclient . t)
      (python . t)))
 
   ;; Capture templates — single inbox, then refile
@@ -134,30 +133,20 @@
   :after org
   :hook (org-mode . org-modern-mode)
   :config
-  ;; Set up Unicode font fallback for Windows
   (when (eq system-type 'windows-nt)
-    ;; Add Segoe UI Symbol and Symbola as fallback fonts for symbols
     (set-fontset-font "fontset-default" 'unicode "Segoe UI Symbol" nil 'append)
     (set-fontset-font "fontset-default" 'unicode "Segoe UI Emoji" nil 'append)
     (set-fontset-font "fontset-default" 'unicode "Noto Color Emoji" nil 'append)
-
     (setq org-modern-star '("◉" "○" "✸" "✿" "✤" "✜" "◆" "▶")
-          org-modern-list '((?+ . "•") (?- . "–") (?* . "•"))
           org-modern-block-name '("▼" . "▶")
           org-modern-keyword nil
           org-modern-checkbox '((?X . "☑") (?- . "◐") (?\s . "☐"))
           org-modern-horizontal-rule "─"))
 
-  ;; General org-modern settings for better appearance
   (setq org-modern-table-vertical 1
         org-modern-table-horizontal 0.2
         org-modern-list '((?+ . "•") (?- . "–") (?* . "•"))
-        org-modern-block-fringe 4
-        org-modern-keyword t
-        org-modern-timestamp t
-        org-modern-todo t
-        org-modern-tag t
-        org-modern-priority t))
+        org-modern-block-fringe 4))
 
 
 (use-package org-appear
@@ -194,21 +183,19 @@
   "Set up smart word wrapping for org-mode."
   (visual-line-mode 1)
   (setq-local word-wrap t
-              truncate-lines nil)
-
-  ;; Add advice to disable wrapping in tables
-  (advice-add 'org-table-align :before
-              (lambda (&rest _)
-                (when (org-at-table-p)
-                  (setq-local truncate-lines t))))
-
-  ;; Re-enable wrapping when leaving tables
-  (advice-add 'org-table-next-field :after
-              (lambda (&rest _)
-                (unless (org-at-table-p)
-                  (setq-local truncate-lines nil)))))
+              truncate-lines nil))
 
 (add-hook 'org-mode-hook #'kdb/org-setup-wrapping)
+
+;; Disable wrapping in tables (advice added once, not per-buffer)
+(advice-add 'org-table-align :before
+            (lambda (&rest _)
+              (when (org-at-table-p)
+                (setq-local truncate-lines t))))
+(advice-add 'org-table-next-field :after
+            (lambda (&rest _)
+              (unless (org-at-table-p)
+                (setq-local truncate-lines nil))))
 
 ;; Load org-templates and org-contacts
 (let ((org-templates-file (expand-file-name "org-templates.el" user-emacs-directory))

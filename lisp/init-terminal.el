@@ -54,17 +54,7 @@
   (define-key input-decode-map "\e[1;2C" [S-right])
   (define-key input-decode-map "\e[1;2D" [S-left])
   
-  ;; Enable 256 colors
-  (setq xterm-color-names-bright
-        ["#3c3836" ; black
-         "#fb4934" ; red
-         "#b8bb26" ; green
-         "#fabd2f" ; yellow
-         "#83a598" ; blue
-         "#d3869b" ; magenta
-         "#8ec07c" ; cyan
-         "#ebdbb2"]; white
-        ))
+)
 
 ;; Terminal-friendly keybindings
 (when kdb-terminal-mode

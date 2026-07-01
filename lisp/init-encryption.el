@@ -179,7 +179,5 @@
 (global-set-key (kbd "C-c s c") 'kdb-clear-encryption-password)
 (global-set-key (kbd "C-c s h") 'kdb-encryption-status)
 
-(message "Encryption loaded - Method: %s - Keys: C-c s [e/d/m/c/h]" kdb-encryption-method)
-
 (provide 'init-encryption)
 ;;; init-encryption.el ends here
