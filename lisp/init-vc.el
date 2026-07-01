@@ -13,12 +13,14 @@
   :config
   (setq vc-follow-symlinks t
         vc-handled-backends '(Git)
-        vc-git-diff-switches '("--histogram" "--patience" "--no-prefix")
+        vc-git-diff-switches '("--histogram" "--color=never")
         vc-git-print-log-follow t
         vc-git-log-edit-summary-target-len 50
         vc-git-log-edit-summary-max-len 70
-        vc-git-log-switches '("--graph" 
-                              "--pretty=format:%h %s" 
+        vc-suppress-confirm t
+        vc-command-messages t
+        vc-git-log-switches '("--graph"
+                              "--pretty=format:%h %s"
                               "--abbrev-commit"
                               "--date=short"))
   
@@ -301,20 +303,7 @@
         vc-msg-time-format "%Y-%m-%d %H:%M"
         vc-msg-persist-popup t)
   
-  ;; Use built-in vc backend
-  (setq vc-msg-git-show-commit-function 'vc-msg-git-show-commit-internal)
-  
-  ;; Remove box/border from popup
-  (add-hook 'vc-msg-mode-hook
-            (lambda ()
-              (when (facep 'vc-msg-face)
-                (set-face-attribute 'vc-msg-face nil
-                                    :box nil
-                                    :background "#232A2C"  ; uwu-bright-black
-                                    :foreground "#C5C8C9")))) ; uwu-fg
-  
-  ;; Available in VC transient menu as 'm'
-  )
+  (setq vc-msg-git-show-commit-function 'vc-msg-git-show-commit-internal))
 
 ;; VC Transient Menu - provides Magit-like interface for VC
 (defun kdb-vc-dir-root ()
@@ -599,14 +588,7 @@
                  (format "git show --stat --format='%%h %%s%%n%%aD %%an' %s" (shell-quote-argument hash)))))
     (message "%s" (string-trim output))))
 
-(defun kdb-vc-clone ()
-  "Clone a repository. Requires Emacs 29.1 or later."
-  (interactive)
-  (if (>= emacs-major-version 31)
-      (if (fboundp 'vc-clone)
-          (call-interactively 'vc-clone)
-        (message "vc-clone not available in this Emacs build"))
-    (message "vc-clone requires Emacs 31.1 or later. Current version: %s" emacs-version)))
+(defalias 'kdb-vc-clone 'vc-clone)
 
 (defun kdb-vc-remote-list ()
   "List all remotes with their URLs."
@@ -636,31 +618,17 @@
   
   ;; Smerge mode for handling merge conflicts
   (use-package smerge-mode
-    :ensure nil  ; Built-in
-    :hook (find-file . smerge-mode)
+    :ensure nil
     :bind (:map smerge-mode-map
-           ("C-c m n" . smerge-next)         ; Next conflict
-           ("C-c m p" . smerge-prev)         ; Previous conflict
-           ("C-c m a" . smerge-keep-mine)    ; Accept mine (ours)
-           ("C-c m b" . smerge-keep-other)   ; Accept theirs  
-           ("C-c m m" . smerge-keep-all)     ; Merge both
-           ("C-c m c" . smerge-keep-current) ; Keep current
-           ("C-c m e" . smerge-ediff)        ; Launch ediff
-           ("C-c m r" . smerge-resolve)      ; Auto-resolve or mark resolved
-           ("C-c m R" . smerge-refine))      ; Refine highlighting
-    :config
-    ;; Automatically enable smerge-mode for files with conflict markers
-    (defun enable-smerge-maybe ()
-      "Auto-enable smerge-mode when merge conflict markers are detected."
-      (save-excursion
-        (goto-char (point-min))
-        (when (re-search-forward "^<<<<<<< \\|^=======$\\|^>>>>>>> " nil t)
-          (smerge-mode 1))))
-    (add-hook 'find-file-hook 'enable-smerge-maybe)
-    
-    ;; Better conflict highlighting
-    (set-face-background 'smerge-refined-added "#22aa22")
-    (set-face-background 'smerge-refined-removed "#aa2222"))
+           ("C-c m n" . smerge-next)
+           ("C-c m p" . smerge-prev)
+           ("C-c m a" . smerge-keep-mine)
+           ("C-c m b" . smerge-keep-other)
+           ("C-c m m" . smerge-keep-all)
+           ("C-c m c" . smerge-keep-current)
+           ("C-c m e" . smerge-ediff)
+           ("C-c m r" . smerge-resolve)
+           ("C-c m R" . smerge-refine)))
 
   ;; Useful VC helper functions from emacs-solo
   (defun kdb-vc-browse-remote ()
@@ -931,18 +899,11 @@
               ;; Show summary on startup
               (run-at-time 0.1 nil 'kdb-vc-dir-summary))))
 
-;; Additional VC customizations for better experience
-(with-eval-after-load 'vc
-  ;; Faster git operations
-  (setq vc-git-diff-switches '("--histogram" "--color=never")
-        vc-suppress-confirm t  ; Don't ask for confirmation on every operation
-        vc-command-messages t)  ; Show VC command messages
-  
-  ;; Better commit message interface
-  (setq log-edit-confirm 'changed  ; Only confirm if buffer changed
-        log-edit-keep-buffer nil  ; Don't keep log buffer after commit
-        log-edit-require-final-newline t
-        log-edit-setup-add-author nil))
+;; Better commit message interface
+(setq log-edit-confirm 'changed
+      log-edit-keep-buffer nil
+      log-edit-require-final-newline t
+      log-edit-setup-add-author nil)
 
 ;; Keybinding is set in init.el via autoload
 ;; (global-set-key (kbd "C-c g") 'kdb-vc-transient)

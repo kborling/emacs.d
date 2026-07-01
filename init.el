@@ -147,29 +147,14 @@
 (when (display-graphic-p)
   (context-menu-mode))
 
-;; Focus cursor when Messages buffer is displayed
-(defun kdb-focus-messages-buffer ()
-  "Focus the *Messages* buffer when it's displayed."
-  (when (string= (buffer-name) "*Messages*")
-    (goto-char (point-max))))
-
-(add-hook 'buffer-list-update-hook
-          (lambda ()
-            (when (and (get-buffer-window "*Messages*")
-                       (string= (buffer-name (window-buffer (get-buffer-window "*Messages*"))) "*Messages*"))
-              (with-current-buffer "*Messages*"
-                (goto-char (point-max))))))
-
-;; Alternative: advice on display-buffer for Messages
-(defun kdb-messages-buffer-advice (buffer &optional action frame)
-  "Focus Messages buffer when displayed."
+;; Auto-scroll Messages buffer when displayed
+(defun kdb-messages-buffer-advice (buffer &optional _action _frame)
+  "Scroll *Messages* to bottom when displayed."
   (when (and buffer (string= (buffer-name buffer) "*Messages*"))
     (with-current-buffer buffer
       (goto-char (point-max)))
-    (let ((window (get-buffer-window buffer)))
-      (when window
-        (select-window window)
-        (goto-char (point-max))))))
+    (when-let* ((window (get-buffer-window buffer)))
+      (set-window-point window (point-max)))))
 
 (advice-add 'display-buffer :after #'kdb-messages-buffer-advice)
 
@@ -200,14 +185,12 @@
   (recentf-max-saved-items 1000)
   (recentf-max-menu-items 20)
   (recentf-auto-cleanup 'never)
-  (recentf-exclude '(".gz" ".xz" ".zip" "/elpaca/" "/elpa/" "/opt/" "/.rustup/" "/elpa/" "/ssh:" "/sudo:" "/node_modules/" "/nix/"))
+  (recentf-exclude '(".gz" ".xz" ".zip" "/elpa/" "/opt/" "/.rustup/" "/ssh:" "/sudo:" "/node_modules/" "/nix/"))
   :config
   ;; Save silently every 5 minutes
   (run-at-time nil (* 5 60) (lambda ()
                               (let ((inhibit-message t))
                                 (recentf-save-list)))))
-
-;; Save cursor position
 
 ;; Save Place ============================================== ;;
 
@@ -216,8 +199,6 @@
   :hook (after-init . save-place-mode)
   :custom
   (save-place-file (expand-file-name "saveplace" user-emacs-var-directory)))
-
-;; Minibuffer history
 
 ;; Save History ============================================ ;;
 
@@ -246,15 +227,11 @@
               typescript-ts-mode-indent-offset 4
               js-switch-indent-offset 4)
 
-;; Treat Camelcase as words
-
 ;; Subword Mode ============================================ ;;
 
 (use-package subword-mode
   :ensure nil
   :hook (after-init . global-subword-mode))
-
-;; Delete selection on insert
 
 ;; Delete Selection ======================================== ;;
 
@@ -319,26 +296,10 @@
   :vc (:url "https://github.com/kborling/fleury-theme.el" :rev :newest)
   :config
   (load-theme 'fleury t)
-  (add-hook 'prog-mode-hook 'hl-line-mode)
-  (defun kdb-update-cursor-type ()
-    "Use a bar cursor in prog-mode and text-mode, box cursor otherwise."
-    (setq cursor-type
-          (if (derived-mode-p 'prog-mode 'text-mode)
-              '(bar . 3)  ; 3-pixel wide bar
-            'box)))
-
-  (add-hook 'post-command-hook 'kdb-update-cursor-type))
+  (add-hook 'prog-mode-hook 'hl-line-mode))
 
 (use-package acme-theme)
 
-;; UI Enhancements ======================================== ;;
-
-(use-package helpful
-  :bind
-  (("C-h f" . helpful-function)
-   ("C-h x" . helpful-command)
-   ("C-h k" . helpful-key)
-   ("C-h v" . helpful-variable)))
 
 ;;; ============================================================
 ;;;                  CUSTOM FUNCTIONS
@@ -355,11 +316,6 @@
   "Reload ~/.emacs.d/init.el at runtime."
   (interactive)
   (load-file (expand-file-name (locate-user-emacs-file "init.el"))))
-
-(defun kill-current-buffer ()
-  "Kill the current buffer."
-  (interactive)
-  (kill-buffer (current-buffer)))
 
 (defun kill-buffer-other-window ()
   "Kill buffer in the other window."
@@ -849,7 +805,7 @@ If point is at the end of the line, kill the whole line including the newline."
                        (name . "^\\*Apropos\\*")
                        (name . "^\\*info\\*")
                        (name . "^\\*Man ")
-                       (mode . helpful-mode)))
+))
       ("Special" (name . "^\\*")))))
 
   (add-hook 'ibuffer-mode-hook
@@ -1012,9 +968,9 @@ If point is at the end of the line, kill the whole line including the newline."
   (add-to-list 'eglot-server-programs '(html-ts-mode . ("vscode-html-language-server" "--stdio")))
   (add-to-list 'eglot-server-programs '(css-ts-mode . ("vscode-css-language-server" "--stdio")))
   (add-to-list 'eglot-server-programs '(json-ts-mode . ("vscode-json-language-server" "--stdio")))
-  (add-to-list 'eglot-server-programs '(rust-mode . ("rust-analyzer")))
-  (add-to-list 'eglot-server-programs '(rustic-mode . ("rust-analyzer")))
-  (add-to-list 'eglot-server-programs '((c++-mode c-mode)
+  (add-to-list 'eglot-server-programs '(rust-ts-mode . ("rust-analyzer")))
+  (add-to-list 'eglot-server-programs '(zig-ts-mode . ("zls")))
+  (add-to-list 'eglot-server-programs '((c++-ts-mode c-ts-mode)
                                         . ("clangd"
                                            "-j=8"
                                            "--log=error"
@@ -1027,20 +983,18 @@ If point is at the end of the line, kill the whole line including the newline."
                                            "--header-insertion=never"
                                            "--header-insertion-decorators=0")))
 
-  ;; FIXME: This doesn't always work initially (eval-buffer usually fixes it)
-  (let* ((global-prefix (string-trim (shell-command-to-string "npm config get --global prefix")))
-         (modules-path (if (eq system-type 'windows-nt)
-                           "node_modules"
-                         "lib/node_modules"))
-         (node-modules-path (expand-file-name modules-path global-prefix)))
-    ;; See https://v17.angular.io/guide/language-service#neovim
-    (add-to-list 'eglot-server-programs
-                 `(angular-template-mode . ("ngserver"
-                                            "--stdio"
-                                            "--tsProbeLocations"
-                                            ,(concat node-modules-path "/typescript/lib")
-                                            "--ngProbeLocations"
-                                            ,(concat node-modules-path "/@angular/language-server/bin")))))
+  ;; Angular Language Server (only when npm is available)
+  (when (executable-find "npm")
+    (let* ((global-prefix (string-trim (shell-command-to-string "npm config get --global prefix")))
+           (modules-path (if (eq system-type 'windows-nt) "node_modules" "lib/node_modules"))
+           (node-modules-path (expand-file-name modules-path global-prefix)))
+      (add-to-list 'eglot-server-programs
+                   `(angular-template-mode . ("ngserver"
+                                              "--stdio"
+                                              "--tsProbeLocations"
+                                              ,(concat node-modules-path "/typescript/lib")
+                                              "--ngProbeLocations"
+                                              ,(concat node-modules-path "/@angular/language-server/bin"))))))
 
   ;; Show all of the available eldoc information when we want it. This way Flymake errors
   ;; don't just get clobbered by docstrings.
@@ -1056,11 +1010,12 @@ If point is at the end of the line, kill the whole line including the newline."
   (dolist (mode '(html-ts-mode
                   angular-template-mode
                   typescript-ts-mode
-                  css-mode
-                  js-mode
-                  c-mode
-                  c++-mode
-                  rust-mode
+                  css-ts-mode
+                  js-ts-mode
+                  c-ts-mode
+                  c++-ts-mode
+                  rust-ts-mode
+                  zig-ts-mode
                   csharp-mode))
     (add-hook (intern (concat (symbol-name mode) "-hook")) #'eglot-ensure)))
 
@@ -1095,12 +1050,6 @@ If point is at the end of the line, kill the whole line including the newline."
      flymake-mode-line-warning-counter
      flymake-mode-line-note-counter ""))
 
-  (set-face-attribute 'flymake-error nil
-                      :underline '(:style wave :color "red"))
-  (set-face-attribute 'flymake-warning nil
-                      :underline '(:style wave :color "yellow"))
-  (set-face-attribute 'flymake-note nil
-                      :underline '(:style wave :color "blue"))
 
   (defun kdb-flymake-quickfix ()
     "Apply quickfix at point if available."
@@ -1433,34 +1382,6 @@ If point is at the end of the line, kill the whole line including the newline."
   (add-to-list 'auto-mode-alist '("\\.sln\\'" . conf-mode)))
 
 
-;; Rust Mode =============================================== ;;
-
-(use-package rust-mode
-  :init
-  (setq rust-mode-treesitter-derive t)
-  :config
-  ;; Suppress tree-sitter version mismatch warning
-  (when (and (fboundp 'treesit-ready-p)
-             (not (treesit-ready-p 'rust t)))
-    ;; Silently handle version mismatch - grammar will be auto-updated on next treesit-install-language-grammar
-    (setq treesit-language-source-alist
-          (append treesit-language-source-alist
-                  '((rust "https://github.com/tree-sitter/tree-sitter-rust"))))))
-
-;; Zig Mode ==================================================== ;;
-
-(use-package zig-mode
-  :mode "\\.zig\\'"
-  :config
-
-  ;; Set up eglot for Zig with ZLS
-  (with-eval-after-load 'eglot
-    (add-to-list 'eglot-server-programs
-                 '(zig-mode . ("zls"))))
-
-  ;; Enable eglot automatically for Zig files
-  (add-hook 'zig-mode-hook #'eglot-ensure))
-
 ;; Dotnet ================================================== ;;
 
 (use-package dotnet
@@ -1503,21 +1424,6 @@ If point is at the end of the line, kill the whole line including the newline."
               (define-key eat-semi-char-mode-map (kbd "C-c C-e") 'eat-emacs-mode)
               (define-key eat-semi-char-mode-map (kbd "C-c C-j") 'eat-char-mode))))
 
-;; Winum (Window Numbers) ================================== ;;
-
-(use-package winum
-  :ensure t
-  :config
-  (winum-mode)
-  :bind (("M-1" . winum-select-window-1)
-         ("M-2" . winum-select-window-2)
-         ("M-3" . winum-select-window-3)
-         ("M-4" . winum-select-window-4)
-         ("M-5" . winum-select-window-5)
-         ("M-6" . winum-select-window-6)
-         ("M-7" . winum-select-window-7)
-         ("M-8" . winum-select-window-8)
-         ("M-9" . winum-select-window-9)))
 
 ;; EXWM (Window Manager) =================================== ;;
 
