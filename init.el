@@ -315,6 +315,7 @@
             ("ripgrep (rg)" "rg" t "Grep, xref, deadgrep")
             ("Git" "git" t "Version control")
             ("GCC" "gcc" nil "Compile treesit grammars")
+            ("GnuPG (gpg)" "gpg" t "File encryption (.gpg)")
             ;; Development
             ("Node.js (npm)" "npm" nil "Angular LSP, JS tooling")
             ("eglot-booster" "emacs-lsp-booster" nil "Faster LSP")
@@ -412,12 +413,10 @@
   (whitespace-cleanup))
 
 (defun copy-whole-buffer ()
-  "Copy the current buffer while maintaining cursor position."
+  "Copy the entire buffer to the kill ring."
   (interactive)
-  (save-excursion
-    (goto-char (point-min))
-    (push-mark (point-max) nil t)
-    (copy-region-as-kill 1 (buffer-size))))
+  (kill-new (buffer-string))
+  (message "Buffer copied"))
 
 ;; Terminal management functions (defined early for keybindings)
 (defun kdb-eshell-new ()
@@ -445,29 +444,13 @@
                            (window-height . 0.3))))))))
 
 (defun kdb-eat-new ()
-  "Create a new terminal with unique name, using best available for platform."
+  "Create a new terminal using eat (GUI) or term (terminal)."
   (interactive)
-  (cond
-   ;; In terminal mode, always use ansi-term
-   ((not (display-graphic-p))
-    (if (fboundp 'ansi-term)
-        (ansi-term (or (getenv "SHELL") (getenv "COMSPEC") "/bin/bash"))
-      (term (or (getenv "SHELL") (getenv "COMSPEC") "/bin/bash"))))
-   ;; On Windows, use ansi-term or term
-   ((eq system-type 'windows-nt)
-    (if (fboundp 'ansi-term)
-        (ansi-term (or (getenv "COMSPEC") "cmd.exe"))
-      (term (or (getenv "COMSPEC") "cmd.exe"))))
-   ;; On GUI systems, try eat first, fall back to ansi-term
-   ((and (fboundp 'eat) (display-graphic-p))
-    (let ((eat-buffer-name (generate-new-buffer-name "*eat*")))
-      (eat)))
-   ;; Fallback to ansi-term
-   ((fboundp 'ansi-term)
-    (ansi-term (or (getenv "SHELL") "/bin/bash")))
-   ;; Last resort: basic term
-   (t
-    (term (or (getenv "SHELL") "/bin/bash")))))
+  (let ((shell (or (getenv "SHELL") (getenv "COMSPEC") "/bin/bash")))
+    (if (and (display-graphic-p) (fboundp 'eat))
+        (let ((eat-buffer-name (generate-new-buffer-name "*eat*")))
+          (eat))
+      (term shell))))
 
 
 (defun toggle-theme ()
@@ -578,41 +561,22 @@ If point is at the end of the line, kill the whole line including the newline."
   "Do-What-I-Mean behaviour for a general `keyboard-quit'."
   (interactive)
   (cond
-   ((region-active-p)
-    (keyboard-quit))
-   ((derived-mode-p 'completion-list-mode)
-    (delete-completion-window))
-   ((> (minibuffer-depth) 0)
-    (abort-recursive-edit))
-   (t
-    (keyboard-quit))))
+   ((region-active-p) (keyboard-quit))
+   ((> (minibuffer-depth) 0) (abort-recursive-edit))
+   (t (keyboard-quit))))
 
 (define-key global-map (kbd "C-g") #'kdb-keyboard-quit-dwim)
 
-;; (when (eq system-type 'darwin)
-;;   (select-frame-set-input-focus (selected-frame))
-;;   (setq mac-option-modifier nil
-;;         ns-function-modifier 'super
-;;         mac-right-command-modifier 'hyper
-;;         mac-right-option-modifier 'alt
-;;         mac-command-modifier 'meta))
 
-
-(defun kdb-term-exec-hook ()
-  "Kill the terminal after exit."
-  (let* ((buff (current-buffer))
-         (proc (get-buffer-process buff)))
-    (set-process-sentinel
-     proc
-     `(lambda (process event)
-        (if (string= event "finished\n")
-            (kill-buffer ,buff))))))
-
-(add-hook 'term-exec-hook 'kdb-term-exec-hook)
-
-;; Paste into term
-(with-eval-after-load 'term
-  (define-key term-raw-map (kbd "C-c C-y") 'term-paste))
+;; Auto-kill term buffer on exit
+(add-hook 'term-exec-hook
+          (lambda ()
+            (let ((buf (current-buffer)))
+              (set-process-sentinel
+               (get-buffer-process buf)
+               (lambda (_proc event)
+                 (when (string= event "finished\n")
+                   (kill-buffer buf)))))))
 
 ;;; ============================================================
 ;;;                   ESSENTIAL PACKAGES
@@ -632,9 +596,6 @@ If point is at the end of the line, kill the whole line including the newline."
   :defer t
   :config
   (setq grep-command "rg --color=never --no-heading --line-number --smart-case "
-        ;; grep-find-command
-        ;; (concat "fd --type f --hidden --follow --exclude .git | "
-        ;;         "xargs rg --color=never --no-heading --line-number --smart-case ")
         grep-use-null-device nil))
 
 
@@ -932,8 +893,7 @@ If point is at the end of the line, kill the whole line including the newline."
       ("Emacs Config" (or (filename . "\\.emacs\\.d")
                           (name . "^\\*scratch\\*")
                           (name . "^\\*Messages\\*")))
-      ("VC/Git" (or (name . "^\\*magit")
-                    (name . "^\\*vc-")
+      ("VC/Git" (or (name . "^\\*vc-")
                     (name . "^\\*git-")
                     (mode . diff-mode)
                     (mode . log-view-mode)))
@@ -976,19 +936,6 @@ If point is at the end of the line, kill the whole line including the newline."
    vc-directory-exclusion-list (nconc vc-directory-exclusion-list '("node_modules" "elpa" ".sl"))
    project-vc-extra-root-markers '(".envrc" "package.json" ".project" ".sl")
    project-prune-zombie-projects '((prompt . project-prune-zombies-default))))
-
-
-;; Async =================================================== ;;
-
-(use-package async
-  :ensure t
-  :defer t
-  :init
-  (with-eval-after-load 'dired
-    (require 'dired-async)
-    (dired-async-mode 1))
-  :config
-  (async-bytecomp-package-mode 1))
 
 
 ;; Eshell ================================================== ;;
@@ -1054,7 +1001,6 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package minibuffer
   :ensure nil
-  :defer t
   :config
   (setq
    completions-format 'one-column
@@ -1072,13 +1018,6 @@ If point is at the end of the line, kill the whole line including the newline."
    enable-recursive-minibuffers t
    completions-sort 'historical
    read-answer-short t))
-;; :bind (:map minibuffer-local-map
-;;             ("C-p" . minibuffer-previous-completion)
-;;             ("C-n" . minibuffer-next-completion))
-;; :bind (:map completion-in-region-mode-map
-;;             ("C-p" . minibuffer-previous-completion)
-;;             ("C-n" . minibuffer-next-completion)
-;;             ("RET" . minibuffer-choose-completion)))
 
 ;;; ============================================================
 ;;;                   DEVELOPMENT TOOLS
@@ -1250,11 +1189,6 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq
    eldoc-echo-area-use-multiline-p t))
 
-;; (use-package eldoc-box
-;;   :after eldoc
-;;   :hook (eglot-managed-mode-hook . eldoc-box-hover-mode))
-
-
 ;; Exec Path From Shell ==================================== ;;
 
 (use-package exec-path-from-shell
@@ -1290,23 +1224,49 @@ If point is at the end of the line, kill the whole line including the newline."
 (with-eval-after-load 'org
   (require 'init-org))
 
-;; Load encryption configuration when needed
-(defun kdb-load-init-encryption ()
-  "Load init-encryption configuration once."
-  (unless (featurep 'init-encryption)
-    (require 'init-encryption)))
+;; EPA — built-in GPG encryption (symmetric, password-based)
+(setq epa-file-encrypt-to nil              ; Always prompt (symmetric by default)
+      epa-file-select-keys nil             ; Skip public key selection → symmetric
+      epa-file-cache-passphrase-for-symmetric-encryption t
+      epa-armor t)                         ; ASCII armor for version control
 
-;; Autoload interactive encryption commands
-(autoload 'kdb-decrypt-buffer "init-encryption" "Decrypt current buffer" t)
-(autoload 'kdb-encrypt-buffer "init-encryption" "Encrypt current buffer" t)
-(autoload 'kdb-clear-encryption-password "init-encryption" "Clear cached encryption password" t)
-(autoload 'kdb-set-encryption-method "init-encryption" "Set encryption method" t)
-(autoload 'kdb-encryption-status "init-encryption" "Show encryption status" t)
+(defun kdb-encrypt-file ()
+  "Encrypt current file. Saves as .gpg and deletes the original."
+  (interactive)
+  (let* ((file (or buffer-file-name (user-error "Buffer has no file")))
+         (gpg-file (concat file ".gpg")))
+    (when (string-suffix-p ".gpg" file)
+      (user-error "File is already encrypted"))
+    (when (yes-or-no-p (format "Encrypt %s and delete unencrypted copy? "
+                               (file-name-nondirectory file)))
+      (let ((content (buffer-string)))
+        (with-temp-file gpg-file
+          (insert content))
+        (delete-file file)
+        (kill-buffer)
+        (find-file gpg-file)
+        (message "Encrypted to %s" (file-name-nondirectory gpg-file))))))
 
-;; Hook into .gpg file opening and epa
-(add-hook 'epa-file-handler-mode-hook #'kdb-load-init-encryption)
-(with-eval-after-load 'epa-file (kdb-load-init-encryption))
-(with-eval-after-load 'epg (kdb-load-init-encryption))
+(defun kdb-decrypt-file ()
+  "Decrypt current .gpg file. Saves without .gpg and deletes the encrypted copy."
+  (interactive)
+  (let* ((file (or buffer-file-name (user-error "Buffer has no file"))))
+    (unless (string-suffix-p ".gpg" file)
+      (user-error "File is not encrypted (.gpg)"))
+    (let ((plain-file (string-remove-suffix ".gpg" file)))
+      (when (yes-or-no-p (format "Decrypt to %s and delete encrypted copy? "
+                                 (file-name-nondirectory plain-file)))
+        (let ((content (buffer-string)))
+          (with-temp-file plain-file
+            (insert content))
+          (delete-file file)
+          (kill-buffer)
+          (find-file plain-file)
+          (message "Decrypted to %s" (file-name-nondirectory plain-file)))))))
+
+(global-set-key (kbd "C-c s e") #'kdb-encrypt-file)
+(global-set-key (kbd "C-c s d") #'kdb-decrypt-file)
+(global-set-key (kbd "C-c s c") #'epa-dired-do-encrypt)
 
 ;; Load terminal optimizations (load immediately if in terminal mode, otherwise skip)
 (when (not (display-graphic-p))
@@ -1535,14 +1495,47 @@ If point is at the end of the line, kill the whole line including the newline."
 
 ;; Dotnet ================================================== ;;
 
-(use-package dotnet
-  :hook (csharp-mode)
-  :bind ((("C-c n n" . dotnet-new)
-          ("C-c n c" . dotnet-clean)
-          ("C-c n t" . dotnet-test)
-          ("C-c n r" . dotnet-run)
-          ("C-c n a" . dotnet-run-with-args)
-          ("C-c n b" . dotnet-build))))
+(defun kdb-dotnet--find-project ()
+  "Find the nearest .csproj, .fsproj, or .sln file."
+  (let ((root (or (locate-dominating-file default-directory
+                    (lambda (d) (directory-files d nil "\\.\\(csproj\\|fsproj\\|sln\\)$")))
+                  default-directory)))
+    (car (directory-files root t "\\.\\(sln\\|csproj\\|fsproj\\)$"))))
+
+(defun kdb-dotnet-run ()
+  "Run the current .NET project."
+  (interactive)
+  (let ((proj (kdb-dotnet--find-project)))
+    (compile (if proj
+                 (format "dotnet run --project %s" (shell-quote-argument proj))
+               "dotnet run"))))
+
+(defun kdb-dotnet-build ()
+  "Build the current .NET project."
+  (interactive)
+  (let ((proj (kdb-dotnet--find-project)))
+    (compile (format "dotnet build -v n %s"
+                     (if proj (shell-quote-argument proj) "")))))
+
+(defun kdb-dotnet-test ()
+  "Run tests for the current .NET project."
+  (interactive)
+  (let ((proj (kdb-dotnet--find-project)))
+    (compile (format "dotnet test %s"
+                     (if proj (shell-quote-argument proj) "")))))
+
+(defun kdb-dotnet-command ()
+  "Run a dotnet CLI command."
+  (interactive)
+  (let ((cmd (read-string "dotnet ")))
+    (compile (concat "dotnet " cmd))))
+
+(with-eval-after-load 'csharp-mode
+  (dolist (binding '(("C-c n r" . kdb-dotnet-run)
+                     ("C-c n b" . kdb-dotnet-build)
+                     ("C-c n t" . kdb-dotnet-test)
+                     ("C-c n !" . kdb-dotnet-command)))
+    (define-key csharp-mode-map (kbd (car binding)) (cdr binding))))
 
 ;; EAT (Terminal) ========================================== ;;
 

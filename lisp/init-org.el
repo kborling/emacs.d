@@ -296,6 +296,43 @@
 (with-eval-after-load 'org
   (define-key org-mode-map (kbd "C-c o b") 'kdb/org-wrap-source-block))
 
+;; Screenshots and image paste
+(setq org-yank-image-save-method "~/.org/images/"
+      org-yank-image-file-name-function 'org-yank-image-autogen-filename)
+
+(defun kdb/org-screenshot ()
+  "Take a screenshot and insert into current org buffer.
+macOS: interactive region select. Linux: scrot/maim. Windows: snippingtool."
+  (interactive)
+  (let* ((dir (expand-file-name "~/.org/images/"))
+         (filename (format "screenshot_%s.png" (format-time-string "%Y%m%d_%H%M%S")))
+         (filepath (expand-file-name filename dir)))
+    (make-directory dir t)
+    (cond
+     ((eq system-type 'darwin)
+      (call-process "screencapture" nil nil nil "-i" filepath))
+     ((executable-find "maim")
+      (call-process "maim" nil nil nil "-s" filepath))
+     ((executable-find "scrot")
+      (call-process "scrot" nil nil nil "-s" filepath))
+     ((eq system-type 'windows-nt)
+      (shell-command (format "snippingtool /clip"))
+      ;; On Windows, fall back to yank-media after clipboard capture
+      (message "Use yank-media (C-c o y) to paste from clipboard")
+      (setq filepath nil))
+     (t (user-error "No screenshot tool found")))
+    (when (and filepath (file-exists-p filepath))
+      (insert (format "[[file:%s]]\n" filepath))
+      (org-display-inline-images nil t)
+      (message "Screenshot inserted"))))
+
+(with-eval-after-load 'org
+  (define-key org-mode-map (kbd "C-c o S") #'kdb/org-screenshot)
+  (define-key org-mode-map (kbd "C-c o y") #'yank-media))
+
+;; Show images inline by default
+(setq org-startup-with-inline-images t)
+
 ;; Global keybindings
 (global-set-key (kbd "C-c o M") 'kdb/markdown-to-org)
 (global-set-key (kbd "C-c o x") 'kdb/export-deliverable)
