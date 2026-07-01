@@ -824,20 +824,8 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
           (kdb-exwm-start-panel)
         (kdb-exwm-enable-systemtray))
 
-      ;; Place *Messages* and *Warnings* buffers on specific workspaces
-      (run-with-timer 2 nil
-        (lambda ()
-          ;; *Messages* buffer on workspace 9 (displays as "10")
-          (when (get-buffer "*Messages*")
-            (with-current-buffer "*Messages*"
-              (exwm-workspace-move-window 9)))
-          ;; *Warnings* buffer on workspace 8 (displays as "9")
-          (when (get-buffer "*Warnings*")
-            (with-current-buffer "*Warnings*"
-              (exwm-workspace-move-window 8)))))
-
       ;; Show a welcome notification
-      (run-with-timer 1 nil #'kdb-exwm-notify "EXWM initialized successfully!"))))
+      (kdb-exwm-notify "EXWM initialized successfully!"))))
 
 ;;; Start EXWM automatically ============================================
 

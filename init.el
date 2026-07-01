@@ -158,18 +158,11 @@
 
 (advice-add 'display-buffer :after #'kdb-messages-buffer-advice)
 
-;; Platform-specific window configuration
-(when (display-graphic-p)
-  (cond
-   ;; macOS: open maximized
-   ((eq system-type 'darwin)
-    (add-to-list 'default-frame-alist '(fullscreen . maximized)))
-   ;; Windows: split to right side of screen
-   ((eq system-type 'windows-nt)
-    (add-to-list 'default-frame-alist '(left . 0.5))
-    (add-to-list 'default-frame-alist '(width . 0.5))
-    (add-to-list 'default-frame-alist '(top . 0))
-    (add-to-list 'default-frame-alist '(height . 1.0)))))
+;; Frame sizing — large but not fullscreen (EXWM handles its own)
+(unless (memq window-system '(x))  ; Skip on EXWM
+  (when (display-graphic-p)
+    (add-to-list 'default-frame-alist '(width . 120))
+    (add-to-list 'default-frame-alist '(height . 45))))
 
 ;;; ============================================================
 ;;;                   SESSION MANAGEMENT
