@@ -223,7 +223,7 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
         ?\M-&
         ?\M-:
         ?\C-\M-j  ;; Buffer list
-        ?\C-\ ))  ;; Ctrl+Space
+        ?\C-@))   ;; Ctrl+Space (set-mark-command)
 
 ;; Ctrl+q to enable the next key to be sent directly to application
 (define-key exwm-mode-map [?\C-q] 'exwm-input-send-next-key)
