@@ -1406,53 +1406,7 @@ If point is at the end of the line, kill the whole line including the newline."
 ;; Angular Mode ============================================ ;;
 
 (use-package angular-mode
-  :vc (:url "https://github.com/kborling/angular-mode" :rev :newest)
-  :config
-  (defun angular-console-log-thing-at-point ()
-    "Insert a console.log statement for the full JavaScript expression at point, including function calls."
-    (interactive)
-    (let ((expr ""))
-      (save-excursion
-        ;; Move backward to get start of dotted expression
-        (while (or (looking-back "\\(?:\\sw\\|\\s_\\|\\.\\)" (1- (point)))
-                   (looking-back ")" (1- (point))))
-          (backward-char))
-        (let ((start (point)))
-          ;; Move forward through symbol, dot, and optional function calls
-          (while (looking-at "\\(?:\\sw\\|\\s_\\|\\.\\)+")
-            (forward-sexp))
-          ;; If it's a function call, include the parentheses
-          (when (looking-at "(")
-            (forward-sexp))
-          (setq expr (buffer-substring-no-properties start (point)))))
-      (when (not (string-empty-p expr))
-        (save-excursion
-          (end-of-line)
-          (newline-and-indent)
-          (insert (format "console.log('%s', %s);" expr expr))))))
-
-  (defun angular-remove-all-console-logs ()
-    "Delete all lines containing console.log(...) in the current buffer."
-    (interactive)
-    (save-excursion
-      (goto-char (point-min))
-      ;; Loop through each occurrence and delete the whole line
-      (while (re-search-forward "\\bconsole\\.log\\s-*(" nil t)
-        (beginning-of-line)
-        (kill-whole-line))))
-
-  (defun angular-open-interface ()
-    "Open an Angular interface file in the project."
-    (interactive)
-    (angular-open-file "interface"))
-  :bind (:map angular-mode-map
-              ("C-c a o f" . angular-open-interface)
-              ("C-c a c" . angular-console-log-thing-at-point)
-              ("C-c a d" . angular-remove-all-console-logs)))
-
-(define-derived-mode angular-template-mode html-ts-mode "Angular Template "
-  "A major mode derived from 'html-ts-mode', for editing angular template files with LSP support.")
-(add-to-list 'auto-mode-alist '("\\.component\\.html\\'" . angular-template-mode))
+  :vc (:url "https://github.com/kborling/angular-mode" :rev :newest))
 
 ;; HTML Mode =============================================== ;;
 
@@ -1751,15 +1705,18 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
          ("C-c l k" . kdb-gptel-code)              ; Code session (current buffer)
          ("C-c l p" . kdb-gptel-add-project)))     ; Add project to context
 
-;; Claude Desktop Export Browser ========================== ;;
+;; Claude Session Archive ================================= ;;
 
-;; Set kdb-claude-export-directory in personal.el
-(autoload 'kdb-claude-browse "init-claude" "Browse Claude conversations" t)
-(autoload 'kdb-claude-search "init-claude" "Search Claude conversations" t)
-(autoload 'kdb-claude-import-export "init-claude" "Import Claude export" t)
+;; Archive defaults to ~/.claude-archive
+;; Set kdb-claude-export-directory in personal.el for Desktop exports
+(autoload 'kdb-claude-sync "init-claude" "Sync all Claude sessions" t)
+(autoload 'kdb-claude-browse "init-claude" "Browse Claude sessions" t)
+(autoload 'kdb-claude-search "init-claude" "Search Claude sessions" t)
+(autoload 'kdb-claude-import-export "init-claude" "Import Desktop export" t)
 (global-set-key (kbd "C-c l b") #'kdb-claude-browse)
 (global-set-key (kbd "C-c l /") #'kdb-claude-search)
 (global-set-key (kbd "C-c l i") #'kdb-claude-import-export)
+(global-set-key (kbd "C-c l S") #'kdb-claude-sync)
 
 
 ;; Local Variables:
