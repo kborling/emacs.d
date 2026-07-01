@@ -420,9 +420,10 @@
 
 ;; Terminal management functions (defined early for keybindings)
 (defun kdb-eshell-new ()
-  "Create a new eshell buffer with a unique name."
+  "Create a new eshell buffer named after the directory."
   (interactive)
-  (let ((eshell-buffer-name (generate-new-buffer-name "*eshell*")))
+  (let ((eshell-buffer-name (generate-new-buffer-name
+                             (format "*eshell: %s*" (abbreviate-file-name default-directory)))))
     (eshell)))
 
 (defun kdb-eshell-toggle ()
@@ -444,11 +445,13 @@
                            (window-height . 0.3))))))))
 
 (defun kdb-eat-new ()
-  "Create a new terminal using eat (GUI) or term (terminal)."
+  "Create a new terminal using eat (GUI) or term (terminal).
+Names buffer after the directory for easier identification."
   (interactive)
-  (let ((shell (or (getenv "SHELL") (getenv "COMSPEC") "/bin/bash")))
+  (let ((shell (or (getenv "SHELL") (getenv "COMSPEC") "/bin/bash"))
+        (name (format "*eat: %s*" (abbreviate-file-name default-directory))))
     (if (and (display-graphic-p) (fboundp 'eat))
-        (let ((eat-buffer-name (generate-new-buffer-name "*eat*")))
+        (let ((eat-buffer-name (generate-new-buffer-name name)))
           (eat))
       (term shell))))
 
@@ -1688,53 +1691,27 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
   ;; After a response, move point to end so next prompt is ready
   (add-hook 'gptel-post-response-functions #'gptel-end-of-response)
 
-  ;; Tools — give Claude access to your Emacs environment
+  ;; Tools — for actions Claude can take (context is handled by gptel-add/gptel-add-file)
   (gptel-make-tool
-   :function (lambda (path)
-               (with-temp-buffer
-                 (insert-file-contents (expand-file-name path))
-                 (buffer-string)))
-   :name "read_file"
-   :description "Read the contents of a file and return it as text"
-   :args (list '(:name "path" :type string :description "File path to read"))
-   :category "filesystem")
-
-  (gptel-make-tool
-   :function (lambda (directory)
-               (mapconcat #'identity
-                          (directory-files (expand-file-name directory) nil "^[^.]")
-                          "\n"))
-   :name "list_directory"
-   :description "List files in a directory (excluding hidden files)"
-   :args (list '(:name "directory" :type string :description "Directory path to list"))
-   :category "filesystem")
-
-  (gptel-make-tool
-   :function (lambda (path content)
-               (let ((dir (file-name-directory (expand-file-name path))))
-                 (when dir (make-directory dir t))
-                 (with-temp-file (expand-file-name path)
-                   (insert content))
-                 (format "Wrote %s" path)))
-   :name "write_file"
-   :description "Write content to a file (creates parent directories if needed)"
-   :args (list '(:name "path" :type string :description "File path to write")
-               '(:name "content" :type string :description "Content to write"))
+   :function (lambda (path old-text new-text)
+               (let ((file (expand-file-name path)))
+                 (unless (file-exists-p file)
+                   (error "File not found: %s" path))
+                 (with-current-buffer (find-file-noselect file)
+                   (goto-char (point-min))
+                   (if (search-forward old-text nil t)
+                       (progn
+                         (replace-match new-text t t)
+                         (save-buffer)
+                         (format "Replaced in %s" path))
+                     (format "Text not found in %s" path)))))
+   :name "edit_file"
+   :description "Make a targeted edit in a file by replacing old_text with new_text."
+   :args (list '(:name "path" :type string :description "File path")
+               '(:name "old_text" :type string :description "Exact text to find and replace")
+               '(:name "new_text" :type string :description "Replacement text"))
    :confirm t
    :category "filesystem")
-
-  (gptel-make-tool
-   :function (lambda (pattern directory)
-               (let ((default-directory (expand-file-name (or directory "."))))
-                 (shell-command-to-string
-                  (format "rg --no-heading --line-number --smart-case %s %s"
-                          (shell-quote-argument pattern)
-                          (shell-quote-argument default-directory)))))
-   :name "search_codebase"
-   :description "Search for a pattern in files using ripgrep. Returns matching lines with file paths and line numbers."
-   :args (list '(:name "pattern" :type string :description "Search pattern (regex)")
-               '(:name "directory" :type string :description "Directory to search in" :optional t))
-   :category "search")
 
   (gptel-make-tool
    :function (lambda (command)
@@ -1747,30 +1724,29 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
    :confirm t
    :category "system")
 
-  (gptel-make-tool
-   :function (lambda ()
-               (mapconcat
-                (lambda (buf)
-                  (format "%s (%s)" (buffer-name buf)
-                          (with-current-buffer buf (symbol-name major-mode))))
-                (cl-remove-if (lambda (b) (string-prefix-p " " (buffer-name b)))
-                              (buffer-list))
-                "\n"))
-   :name "list_buffers"
-   :description "List all open Emacs buffers with their major modes"
-   :args nil
-   :category "emacs")
+  ;; Quick coding session — adds current buffer as context
+  (defun kdb-gptel-code ()
+    "Start a gptel session with current buffer added as context."
+    (interactive)
+    (gptel-add-file (or buffer-file-name
+                                (let ((tmp (make-temp-file "gptel-" nil
+                                             (when (derived-mode-p 'prog-mode)
+                                               (concat "." (file-name-extension (symbol-name major-mode)))))))
+                                  (write-region (point-min) (point-max) tmp)
+                                  tmp)))
+    (gptel))
 
-  (gptel-make-tool
-   :function (lambda (buffer-name)
-               (if-let* ((buf (get-buffer buffer-name)))
-                   (with-current-buffer buf
-                     (buffer-substring-no-properties (point-min) (point-max)))
-                 (format "Buffer %s not found" buffer-name)))
-   :name "read_buffer"
-   :description "Read the contents of an open Emacs buffer"
-   :args (list '(:name "buffer_name" :type string :description "Name of the buffer to read"))
-   :category "emacs")
+  ;; Add project directory as context
+  (defun kdb-gptel-add-project ()
+    "Add the current project's files to gptel context."
+    (interactive)
+    (let ((root (if (project-current)
+                    (project-root (project-current))
+                  (read-directory-name "Project root: "))))
+      (gptel-add-file root)
+      (message "Project %s added to context" root)))
+
+  (setq gptel-log-file (expand-file-name "gptel-log.org" "~/.org/"))
 
   :bind (("C-c l l" . gptel)            ; Open/switch to chat buffer
          ("C-c l s" . gptel-send)        ; Send prompt at point
@@ -1778,7 +1754,9 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
          ("C-c l m" . gptel-menu)        ; Transient menu (model, params, etc.)
          ("C-c l a" . gptel-add)         ; Add region/buffer to context
          ("C-c l f" . gptel-add-file)    ; Add file to context
-         ("C-c l c" . gptel-context-remove-all)))  ; Clear context
+         ("C-c l c" . gptel-context-remove-all)    ; Clear context
+         ("C-c l k" . kdb-gptel-code)              ; Code session (current buffer)
+         ("C-c l p" . kdb-gptel-add-project)))     ; Add project to context
 
 ;; Claude Desktop Export Browser ========================== ;;
 
