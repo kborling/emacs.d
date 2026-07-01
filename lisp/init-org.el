@@ -36,11 +36,12 @@
         '((sequence "TODO(t)" "WAITING(w)" "FOLLOWUP(f)" "|" "DONE(d)" "CANCELLED(c)")))
 
   ;; Check for encrypted version first, fall back to regular org file
-  (setq org-agenda-files 
-        (list (if (file-exists-p "~/.org/contacts.org.gpg")
-                  "~/.org/contacts.org.gpg"
-                "~/.org/contacts.org")
-              "~/.org/notes.org")
+  (setq org-agenda-files
+        (list "~/.org/inbox.org"
+              "~/.org/todo.org"
+              "~/.org/notes.org"
+              "~/.org/projects.org"
+              "~/.org/work.org")
         org-log-done 'time
         org-agenda-include-diary nil
         org-agenda-start-on-weekday nil
@@ -84,9 +85,10 @@
    'org-babel-load-languages
    '((emacs-lisp . t)
      (shell . t)
-     (python . t)))
+     (python . t)
+     (sql . t)))
 
-  ;; Capture templates — single inbox, then refile
+  ;; Capture templates
   (setq org-capture-templates
         '(("t" "Todo" entry (file "~/.org/inbox.org")
            "* TODO %?\n%U\n" :empty-lines 1)
@@ -99,11 +101,23 @@
           ("l" "Link" entry (file "~/.org/inbox.org")
            "* %?\n%U\n%a\n" :empty-lines 1)
           ("c" "Claude artifact" entry (file "~/.org/inbox.org")
-           "* %?\n%U\n#+begin_src markdown\n%x\n#+end_src\n" :empty-lines 1)))
+           "* %?\n%U\n#+begin_src markdown\n%x\n#+end_src\n" :empty-lines 1)
+          ;; Management
+          ("m" "Meeting" entry (file+olp+datetree "~/.org/work.org")
+           "* %? :meeting:\n%U\n** Attendees\n- \n** Notes\n\n** Action Items\n- [ ] \n" :empty-lines 1)
+          ("1" "1:1" entry (file+olp+datetree "~/.org/work.org")
+           "* 1:1 with %? :1on1:\n%U\n** Updates\n\n** Discussion\n\n** Action Items\n- [ ] \n" :empty-lines 1)
+          ("p" "Project" entry (file+olp "~/.org/projects.org" "Active")
+           "* %?\n:PROPERTIES:\n:STATUS: planning\n:OWNER: \n:END:\n%U\n** Overview\n\n** Requirements\n\n** Tasks\n- [ ] \n" :empty-lines 1)
+          ("d" "Decision" entry (file "~/.org/decisions.org")
+           "* %?\n%U\n** Context\n\n** Options Considered\n1. \n2. \n\n** Decision\n\n** Rationale\n" :empty-lines 1)
+          ("s" "Spec/Doc" entry (file "~/.org/inbox.org")
+           "* %?\n%U\n** Purpose\n\n** Requirements\n\n** Design\n\n** Implementation\n\n** Open Questions\n- \n" :empty-lines 1)))
 
   (setq org-refile-targets '(("~/.org/notes.org" :maxlevel . 3)
                               ("~/.org/todo.org" :maxlevel . 2)
-                              ("~/.org/work.org" :maxlevel . 2))
+                              ("~/.org/work.org" :maxlevel . 2)
+                              ("~/.org/projects.org" :maxlevel . 2))
         org-refile-use-outline-path 'file
         org-outline-path-complete-in-steps nil)
 
@@ -209,16 +223,19 @@
     
     (global-set-key (kbd "C-c o n") 'kdb/add-contact)
     (global-set-key (kbd "C-c o m") 'kdb/add-meeting-note)
-    (global-set-key (kbd "C-c o A") 'kdb/add-accomplishment)
-    (global-set-key (kbd "C-c o w") 'kdb/quick-win)
-    (global-set-key (kbd "C-c o v") 'kdb/view-accomplishments)
+    (global-set-key (kbd "C-c o w") 'kdb/log-win)
+    (global-set-key (kbd "C-c o i") 'kdb/log-issue)
+    (global-set-key (kbd "C-c o F") 'kdb/log-feedback)
+    (global-set-key (kbd "C-c o v") 'kdb/view-person)
+    (global-set-key (kbd "C-c o V") 'kdb/view-person-all-years)
     (global-set-key (kbd "C-c o D") 'kdb/daily-notes)
     (global-set-key (kbd "C-c o W") 'kdb/weekly-review)
     (global-set-key (kbd "C-c o f") 'kdb/search-all)
     (global-set-key (kbd "C-c o j") 'kdb/find-contact)
     (global-set-key (kbd "C-c o s") 'kdb/search-contacts)
     (global-set-key (kbd "C-c o C") 'kdb/open-contacts)
-    (global-set-key (kbd "C-c o N") 'kdb/open-notes)))
+    (global-set-key (kbd "C-c o N") 'kdb/open-notes)
+    (global-set-key (kbd "C-c o p") 'kdb/open-people)))
 
 (defun kdb/markdown-to-org ()
   "Convert markdown buffer or region to org-mode format."
@@ -281,22 +298,110 @@
 
 ;; Global keybindings
 (global-set-key (kbd "C-c o M") 'kdb/markdown-to-org)
+(global-set-key (kbd "C-c o x") 'kdb/export-deliverable)
+(global-set-key (kbd "C-c o P") 'kdb/pandoc-convert)
 
-;; Enable markdown export and other useful exporters for office work
+;; Export backends
 (with-eval-after-load 'ox
-  ;; Enable markdown export
   (require 'ox-md)
-  ;; Enable HTML export
   (require 'ox-html)
+  (require 'ox-odt)
 
-  ;; Add custom export options for office compatibility
   (setq org-export-with-broken-links 'mark
         org-export-with-smart-quotes t
         org-export-preserve-breaks nil
-        org-export-with-section-numbers nil  ; Disable numbered headings
+        org-export-with-section-numbers nil
         org-html-validation-link nil
         org-html-head-include-default-style nil
         org-html-head-include-scripts nil))
+
+;; CSV support
+(use-package csv-mode
+  :ensure t
+  :mode "\\.csv\\'"
+  :config
+  (setq csv-separators '("," ";" "\t")))
+
+;; Excel (.xlsx) support — view and export
+(defun kdb/xlsx-to-csv (file)
+  "Convert FILE (.xlsx) to CSV and open in csv-mode."
+  (interactive "fOpen Excel file: ")
+  (let* ((base (file-name-sans-extension (file-name-nondirectory file)))
+         (csv-file (make-temp-file base nil ".csv"))
+         (converted nil))
+    ;; Try available converters in order
+    (cond
+     ((executable-find "ssconvert")
+      (call-process "ssconvert" nil nil nil file csv-file)
+      (setq converted t))
+     ((executable-find "xlsx2csv")
+      (call-process "xlsx2csv" nil nil nil file csv-file)
+      (setq converted t))
+     ((executable-find "libreoffice")
+      (let ((tmp-dir (make-temp-file "lo-" t)))
+        (call-process "libreoffice" nil nil nil
+                      "--headless" "--convert-to" "csv"
+                      "--outdir" tmp-dir file)
+        (let ((lo-csv (expand-file-name (concat base ".csv") tmp-dir)))
+          (when (file-exists-p lo-csv)
+            (rename-file lo-csv csv-file t)
+            (setq converted t)))))
+     ((executable-find "python3")
+      (call-process "python3" nil nil nil "-c"
+                    (format "import csv,openpyxl;wb=openpyxl.load_workbook('%s');ws=wb.active;w=csv.writer(open('%s','w'));[w.writerow([c.value for c in r]) for r in ws.iter_rows()]"
+                            (expand-file-name file) csv-file))
+      (setq converted t)))
+    (if converted
+        (progn
+          (find-file csv-file)
+          (csv-mode)
+          (csv-align-fields nil (point-min) (point-max))
+          (setq-local buffer-read-only t)
+          (message "Opened %s (converted to CSV)" (file-name-nondirectory file)))
+      (message "No xlsx converter found. Install ssconvert, xlsx2csv, libreoffice, or python3+openpyxl"))))
+
+(defun kdb/org-table-to-xlsx ()
+  "Export current org table to Excel (.xlsx) via CSV."
+  (interactive)
+  (unless (org-at-table-p) (user-error "Not in an org table"))
+  (let* ((base (file-name-base (or buffer-file-name "table")))
+         (csv-file (make-temp-file base nil ".csv"))
+         (xlsx-file (read-file-name "Export xlsx to: " nil nil nil (concat base ".xlsx"))))
+    (org-table-export csv-file "orgtbl-to-csv")
+    (cond
+     ((executable-find "ssconvert")
+      (call-process "ssconvert" nil nil nil csv-file xlsx-file))
+     ((executable-find "libreoffice")
+      (let ((tmp-dir (file-name-directory xlsx-file)))
+        (call-process "libreoffice" nil nil nil
+                      "--headless" "--convert-to" "xlsx"
+                      "--outdir" tmp-dir csv-file)
+        (let ((lo-file (expand-file-name (concat (file-name-base csv-file) ".xlsx") tmp-dir)))
+          (unless (string= lo-file xlsx-file)
+            (rename-file lo-file xlsx-file t)))))
+     ((executable-find "python3")
+      (call-process "python3" nil nil nil "-c"
+                    (format "import csv,openpyxl;wb=openpyxl.Workbook();ws=wb.active;[ws.append(r) for r in csv.reader(open('%s'))];wb.save('%s')"
+                            csv-file (expand-file-name xlsx-file))))
+     (t (message "No xlsx converter. CSV saved to %s" csv-file) (setq xlsx-file csv-file)))
+    (delete-file csv-file)
+    (message "Exported to %s" xlsx-file)))
+
+;; Auto-convert xlsx files when opened
+(add-to-list 'auto-mode-alist '("\\.xlsx\\'" . kdb/xlsx-auto-open))
+(defun kdb/xlsx-auto-open ()
+  "Auto-convert xlsx to CSV on open."
+  (kdb/xlsx-to-csv buffer-file-name))
+
+;; Export org table to CSV
+(defun kdb/org-table-to-csv ()
+  "Export current org table to CSV file."
+  (interactive)
+  (when (org-at-table-p)
+    (let ((file (read-file-name "Export CSV to: " nil nil nil
+                                (concat (file-name-base (or buffer-file-name "table")) ".csv"))))
+      (org-table-export file "orgtbl-to-csv")
+      (message "Table exported to %s" file))))
 
 ;; Markdown preview — render markdown buffers as HTML in EWW
 (defun kdb/markdown-preview ()
@@ -346,6 +451,74 @@
       (insert "</body></html>"))
     (eww-open-file html-file)))
 
+(defun kdb/org-to-markdown ()
+  "Export current org buffer or region to markdown and open in a buffer."
+  (interactive)
+  (let ((buf (generate-new-buffer
+              (format "*%s.md*" (file-name-base (or buffer-file-name "export"))))))
+    (if (use-region-p)
+        (let ((text (buffer-substring (region-beginning) (region-end))))
+          (with-current-buffer buf
+            (insert (org-export-string-as text 'md t))))
+      (org-export-to-buffer 'md (buffer-name buf)))
+    (with-current-buffer buf
+      (markdown-mode)
+      (goto-char (point-min)))
+    (switch-to-buffer buf)))
+
+(defun kdb/export-deliverable ()
+  "Export current buffer to a deliverable format.
+Uses built-in org export where possible, pandoc for DOCX/PDF."
+  (interactive)
+  (let* ((has-pandoc (executable-find "pandoc"))
+         (formats (append '("Markdown (.md)" "HTML (.html)"
+                            "ODT (.odt)" "Plain text (.txt)"
+                            "CSV (table only)" "Excel (table only)")
+                          (when has-pandoc
+                            '("DOCX (.docx)" "PDF (.pdf)"))))
+         (format (completing-read "Export as: " formats nil t)))
+    (pcase format
+      ("Markdown (.md)" (org-md-export-to-markdown))
+      ("HTML (.html)" (org-html-export-to-html))
+      ("ODT (.odt)" (org-odt-export-to-odt))
+      ("Plain text (.txt)" (org-ascii-export-to-ascii))
+      ("CSV (table only)" (kdb/org-table-to-csv))
+      ("Excel (table only)" (kdb/org-table-to-xlsx))
+      ((guard has-pandoc)
+       (let* ((ext (pcase format
+                     ("DOCX (.docx)" "docx")
+                     ("PDF (.pdf)" "pdf")))
+              (md-file (org-md-export-to-markdown))
+              (out-file (concat (file-name-sans-extension md-file) "." ext)))
+         (if (zerop (call-process "pandoc" nil nil nil md-file "-o" out-file))
+             (progn (delete-file md-file)
+                    (message "Exported to %s" out-file))
+           (message "Pandoc export failed")))))))
+
+(defun kdb/pandoc-convert ()
+  "Convert current file to another format using pandoc."
+  (interactive)
+  (unless (executable-find "pandoc")
+    (user-error "Pandoc not installed"))
+  (let* ((in-file (or buffer-file-name
+                      (let ((tmp (make-temp-file "pandoc-" nil
+                                                 (pcase major-mode
+                                                   ('markdown-mode ".md")
+                                                   ('org-mode ".org")
+                                                   (_ ".txt")))))
+                        (write-region (point-min) (point-max) tmp)
+                        tmp)))
+         (out-fmt (completing-read "Convert to: "
+                                   '("docx" "pdf" "html" "md" "org" "odt" "rst" "txt")
+                                   nil t))
+         (out-file (read-file-name "Save as: " nil nil nil
+                                   (concat (file-name-base in-file) "." out-fmt))))
+    (if (zerop (call-process "pandoc" nil nil nil in-file "-o" out-file))
+        (message "Converted to %s" out-file)
+      (message "Pandoc conversion failed"))))
+
+(with-eval-after-load 'org
+  (define-key org-mode-map (kbd "C-c o x") #'kdb/export-deliverable))
 (with-eval-after-load 'markdown-mode
   (define-key markdown-mode-map (kbd "C-c C-p") #'kdb/markdown-preview))
 

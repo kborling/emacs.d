@@ -305,6 +305,87 @@
 ;;;                  CUSTOM FUNCTIONS
 ;;; ============================================================
 
+;; Doctor ================================================= ;;
+
+(defun kdb-doctor ()
+  "Check for external programs used by this Emacs config."
+  (interactive)
+  (let* ((tools
+          '(;; Core (required)
+            ("ripgrep (rg)" "rg" t "Grep, xref, deadgrep")
+            ("Git" "git" t "Version control")
+            ("GCC" "gcc" nil "Compile treesit grammars")
+            ;; Development
+            ("Node.js (npm)" "npm" nil "Angular LSP, JS tooling")
+            ("eglot-booster" "emacs-lsp-booster" nil "Faster LSP")
+            ("sqlcmd" "sqlcmd" nil "Azure SQL (or go-sqlcmd)")
+            ("go-sqlcmd" "go-sqlcmd" nil "Azure SQL (alternative)")
+            ;; Document conversion
+            ("Pandoc" "pandoc" nil "DOCX/PDF export")
+            ("ssconvert" "ssconvert" nil "Excel conversion (gnumeric)")
+            ("LibreOffice" "libreoffice" nil "Excel/ODT fallback")
+            ("Python 3" "python3" nil "Excel via openpyxl")
+            ("multimarkdown" "multimarkdown" nil "Markdown export")
+            ("unzip" "unzip" nil "Claude export import")
+            ;; Terminal
+            ("fd" "fd" nil "Fast file finder")
+            ("fzf" "fzf" nil "Fuzzy finder")
+            ("bat" "bat" nil "Cat with syntax highlighting")
+            ;; EXWM / Desktop
+            ("pactl" "pactl" nil "Volume control (EXWM)")
+            ("brightnessctl" "brightnessctl" nil "Brightness (EXWM)")
+            ("picom" "picom" nil "Compositor (EXWM)")
+            ("feh" "feh" nil "Wallpaper (EXWM)")
+            ("dunst" "dunst" nil "Notifications (EXWM)")
+            ("scrot" "scrot" nil "Screenshots (EXWM)")
+            ("i3lock" "i3lock" nil "Screen lock (EXWM)")
+            ("redshift" "redshift" nil "Night light (EXWM)")))
+         (found 0) (missing 0) (optional-missing 0))
+    (with-current-buffer (get-buffer-create "*Emacs Doctor*")
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert "Emacs Config Doctor\n")
+        (insert (make-string 40 ?═) "\n\n")
+        (insert (format "Emacs %s on %s\n\n" emacs-version system-type))
+        (dolist (tool tools)
+          (let* ((name (nth 0 tool))
+                 (cmd (nth 1 tool))
+                 (required (nth 2 tool))
+                 (purpose (nth 3 tool))
+                 (available (executable-find cmd)))
+            (insert (format "  %s  %-22s %s\n"
+                            (if available "OK" (if required "XX" "--"))
+                            name
+                            (if available
+                                (progn (cl-incf found) "")
+                              (if required
+                                  (progn (cl-incf missing) (format "(REQUIRED) %s" purpose))
+                                (progn (cl-incf optional-missing) purpose)))))
+            ))
+        (insert (format "\n%s\n" (make-string 40 ?─)))
+        (insert (format "  Found: %d  Missing (required): %d  Missing (optional): %d\n"
+                        found missing optional-missing))
+        ;; Check personal.el
+        (insert (format "\n  personal.el: %s\n"
+                        (if (file-exists-p (locate-user-emacs-file "personal.el"))
+                            "OK" "-- (create for API keys, SQL connections)")))
+        ;; Check treesit grammars
+        (when (fboundp 'treesit-language-available-p)
+          (let ((grammar-missing
+                 (cl-remove-if
+                  (lambda (l) (treesit-language-available-p l))
+                  '(typescript tsx javascript python json css html yaml
+                    toml bash c cpp rust go zig markdown markdown-inline
+                    dockerfile java))))
+            (insert (format "  Treesit grammars: %s\n"
+                            (if grammar-missing
+                                (format "MISSING %s" grammar-missing)
+                              "OK (all installed)")))))
+        (insert "\nLegend: OK = found, XX = required missing, -- = optional missing\n")
+        (goto-char (point-min))
+        (special-mode))
+      (switch-to-buffer (current-buffer)))))
+
 ;; Custom Functions ======================================= ;;
 
 (defun config-visit ()
@@ -482,7 +563,8 @@ If point is at the end of the line, kill the whole line including the newline."
 
     ;; Configuration shortcuts
     (dolist (binding '(("C-c e v" . config-visit)
-                       ("C-c e r" . config-reload)))
+                       ("C-c e r" . config-reload)
+                       ("C-c e d" . kdb-doctor)))
       (define-key map (kbd (car binding)) (cdr binding)))
 
     ;; Toggling features
@@ -577,6 +659,75 @@ If point is at the end of the line, kill the whole line including the newline."
    xref-show-xrefs-function #'xref-show-definitions-buffer
    xref-search-program 'ripgrep))
 
+
+
+;; SQL Mode ================================================ ;;
+
+(use-package sql
+  :ensure nil
+  :defer t
+  :config
+  (setq sql-ms-program (or (executable-find "sqlcmd")
+                           (executable-find "go-sqlcmd")
+                           "sqlcmd"))
+
+  ;; Azure SQL connection helper
+  (defun kdb-sql-azure (server database)
+    "Connect to Azure SQL SERVER/DATABASE using managed identity."
+    (interactive
+     (list (read-string "Server (e.g. myserver.database.windows.net): ")
+           (read-string "Database: ")))
+    (let ((sql-ms-options
+           (cond
+            ;; go-sqlcmd supports --authentication-method
+            ((executable-find "go-sqlcmd")
+             (list "-S" server "-d" database "--authentication-method" "ActiveDirectoryDefault"))
+            ;; sqlcmd with -G for Azure AD
+            (t (list "-S" server "-d" database "-G")))))
+      (sql-ms)))
+
+  (defvar kdb-sql-connections nil
+    "Alist of named Azure SQL connections. Set in personal.el:
+  (setq kdb-sql-connections
+        \\='((\"prod\" :server \"prod.database.windows.net\" :database \"mydb\")
+          (\"dev\"  :server \"dev.database.windows.net\"  :database \"mydb-dev\")))")
+
+  (defun kdb-sql-connect ()
+    "Connect to a saved Azure SQL database."
+    (interactive)
+    (if (null kdb-sql-connections)
+        (call-interactively #'kdb-sql-azure)
+      (let* ((name (completing-read "Connection: "
+                                    (mapcar #'car kdb-sql-connections) nil t))
+             (conn (cdr (assoc name kdb-sql-connections)))
+             (server (plist-get conn :server))
+             (database (plist-get conn :database)))
+        (kdb-sql-connect-internal server database name))))
+
+  (defun kdb-sql-connect-internal (server database &optional name)
+    "Connect to Azure SQL SERVER/DATABASE with optional buffer NAME."
+    (let* ((buf-name (format "*SQL: %s*" (or name database)))
+           (sql-ms-options
+            (cond
+             ((executable-find "go-sqlcmd")
+              (list "-S" server "-d" database "--authentication-method" "ActiveDirectoryDefault"))
+             (t (list "-S" server "-d" database "-G")))))
+      (sql-ms)
+      (when (get-buffer "*SQL*")
+        (with-current-buffer "*SQL*"
+          (rename-buffer buf-name t)))))
+
+  ;; Send region/paragraph to SQL and show results
+  (defun kdb-sql-send-dwim ()
+    "Send region, paragraph, or buffer to SQL process."
+    (interactive)
+    (cond
+     ((use-region-p) (sql-send-region (region-beginning) (region-end)))
+     (t (sql-send-paragraph))))
+
+  :bind (:map sql-mode-map
+              ("C-c C-c" . kdb-sql-send-dwim)
+              ("C-c C-a" . kdb-sql-connect)))
 
 
 ;; Which Key =============================================== ;;
@@ -1469,6 +1620,63 @@ If point is at the end of the line, kill the whole line including the newline."
          ("C-c TAB f" . tab-bar-switch-to-next-tab)
          ("C-c TAB b" . tab-bar-switch-to-prev-tab)))
 
+
+;; Evil Mode (Vim Emulation) =============================== ;;
+
+(use-package evil
+  :ensure t
+  :defer t
+  :init
+  (setq evil-want-integration t
+        evil-want-keybinding nil
+        evil-want-C-u-scroll t
+        evil-undo-system 'undo-redo
+        evil-respect-visual-line-mode t)
+  :config
+  (evil-set-leader 'normal (kbd "SPC")))
+
+(use-package evil-collection
+  :ensure t
+  :after evil
+  :config
+  (evil-collection-init))
+
+(defvar kdb-evil-buffer-list nil
+  "List of buffer patterns where evil-mode is enabled.")
+
+(defvar kdb-evil-project-list nil
+  "List of project roots where evil-mode is enabled.
+Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))")
+
+(defun kdb-evil-toggle ()
+  "Toggle evil-mode globally."
+  (interactive)
+  (if (bound-and-true-p evil-mode)
+      (progn (evil-mode -1) (message "Evil mode disabled"))
+    (evil-mode 1) (message "Evil mode enabled")))
+
+(defun kdb-evil-toggle-buffer ()
+  "Toggle evil-local-mode in current buffer."
+  (interactive)
+  (if (bound-and-true-p evil-local-mode)
+      (progn (evil-local-mode -1) (message "Evil disabled in buffer"))
+    (unless (bound-and-true-p evil-mode) (require 'evil))
+    (evil-local-mode 1) (message "Evil enabled in buffer")))
+
+(defun kdb-evil-auto-enable ()
+  "Auto-enable evil-local-mode based on project or buffer patterns."
+  (when (and (not (minibufferp))
+             (not (bound-and-true-p evil-local-mode)))
+    (let ((file (or buffer-file-name default-directory "")))
+      (when (or (cl-some (lambda (pat) (string-match-p pat (buffer-name))) kdb-evil-buffer-list)
+                (cl-some (lambda (root) (string-prefix-p (expand-file-name root) file)) kdb-evil-project-list))
+        (unless (bound-and-true-p evil-mode) (require 'evil))
+        (evil-local-mode 1)))))
+
+(add-hook 'find-file-hook #'kdb-evil-auto-enable)
+
+(global-set-key (kbd "C-c t v") #'kdb-evil-toggle)
+(global-set-key (kbd "C-c t V") #'kdb-evil-toggle-buffer)
 
 ;; gptel (Claude Chat + Org Integration) ================== ;;
 
