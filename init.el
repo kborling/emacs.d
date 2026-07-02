@@ -137,6 +137,39 @@
         split-window-preferred-direction 'longest
         mode-line-collapse-minor-modes t))
 
+;; Clean mode line
+(setq mode-line-compact 'long
+      mode-line-position-column-format nil)    ; hide column, line is enough
+
+(setq-default mode-line-format
+              '("%e"
+                mode-line-front-space
+                ;; Modified / read-only indicator
+                (:eval (cond (buffer-read-only
+                              (propertize " RO " 'face 'mode-line-emphasis))
+                             ((buffer-modified-p)
+                              (propertize " ** " 'face 'warning))
+                             (t "    ")))
+                ;; Buffer name
+                mode-line-buffer-identification
+                "  "
+                ;; Major mode
+                mode-line-modes
+                "  "
+                ;; VC branch
+                (vc-mode vc-mode)
+                "  "
+                ;; Flymake errors/warnings
+                (:eval (when (bound-and-true-p flymake-mode)
+                         flymake-mode-line-counters))
+                mode-line-format-right-align
+                ;; Position (line number)
+                mode-line-position
+                "  "
+                ;; Misc (time, battery, etc.)
+                mode-line-misc-info
+                mode-line-end-spaces))
+
 ;;; ============================================================
 ;;;                 UI AND APPEARANCE
 ;;; ============================================================
