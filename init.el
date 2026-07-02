@@ -1697,22 +1697,42 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
   (setq gptel-log-file (expand-file-name "gptel-log.org" "~/.org/"))
 
   (defun kdb-gptel-send-capture ()
-    "Send the org entry at point to a gptel session.
-Extracts the entry content as context and the ** Prompt section
-as the initial message.  Tagged :claude: entries from capture
-work best, but any org entry works."
+    "Send a :claude: tagged org entry to a gptel session.
+If point is on a heading in an org buffer, use that entry.
+Otherwise, search org files for :claude: tagged entries and prompt."
     (interactive)
-    (unless (derived-mode-p 'org-mode)
-      (user-error "Not in an org buffer"))
-    (save-excursion
-      (org-back-to-heading t)
-      (let* ((heading (org-get-heading t t t t))
-             (entry-start (point))
-             (entry-end (org-end-of-subtree t t))
-             (entry-text (buffer-substring-no-properties entry-start entry-end))
-             ;; Extract prompt section if it exists
-             (prompt (when (string-match
-                           "^\\*+ Prompt\n\\(\\(?:.*\n?\\)*\\)" entry-text)
+    (let (heading entry-text)
+      (if (and (derived-mode-p 'org-mode)
+               (ignore-errors (org-back-to-heading t) t))
+          ;; Use entry at point
+          (save-excursion
+            (org-back-to-heading t)
+            (setq heading (org-get-heading t t t t)
+                  entry-text (buffer-substring-no-properties
+                              (point) (org-end-of-subtree t t))))
+        ;; Search org files for :claude: entries
+        (let* ((files (directory-files "~/.org" t "\\.org$"))
+               (entries '()))
+          (dolist (file files)
+            (with-temp-buffer
+              (insert-file-contents file)
+              (org-mode)
+              (goto-char (point-min))
+              (while (re-search-forward "^\\*+ .+:claude:" nil t)
+                (org-back-to-heading t)
+                (let ((h (org-get-heading t t t t))
+                      (text (buffer-substring-no-properties
+                             (point) (org-end-of-subtree t t))))
+                  (push (cons h text) entries)))))
+          (unless entries
+            (user-error "No :claude: tagged entries found in ~/.org/"))
+          (let ((choice (completing-read "Send to Claude: "
+                                         (mapcar #'car entries) nil t)))
+            (setq heading choice
+                  entry-text (cdr (assoc choice entries))))))
+      ;; Extract prompt section if it exists
+      (let* ((prompt (when (string-match
+                            "^\\*+ Prompt\n\\(\\(?:.*\n?\\)*\\)" entry-text)
                        (string-trim (match-string 1 entry-text))))
              (buf-name (format "*Claude: %s*" heading))
              (buf (get-buffer-create buf-name)))
@@ -1722,13 +1742,11 @@ work best, but any org entry works."
           (org-mode)
           (erase-buffer)
           (gptel-mode 1)
-          ;; Insert the captured content as context, then the prompt
           (insert "* Context\n\n")
           (insert entry-text)
           (insert "\n\n* Prompt\n\n")
           (insert prompt "\n"))
         (switch-to-buffer buf)
-        ;; Send to Claude
         (gptel-send))))
 
   :bind (("C-c l l" . gptel)            ; Open/switch to chat buffer
