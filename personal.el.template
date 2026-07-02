@@ -7,31 +7,32 @@
 
 ;;; Code:
 
-;; User information for various Emacs packages
+;; User information
 (setq user-full-name "Your Name"
       user-mail-address "your.email@example.com")
 
-;; Additional private settings can go here
-;; For example:
-;; - API keys for packages
-;; - Personal org-mode paths
-;; - Machine-specific configurations
+;; gptel (Claude API)
+;; (setq gptel-api-key "sk-ant-...")
 
-;; Example: Personal org directories
-;; (setq org-directory "~/Documents/org/"
-;;       org-agenda-files '("~/Documents/org/todo.org"
-;;                          "~/Documents/org/projects.org"))
+;; Claude session archive — Desktop export directory
+;; (setq kdb-claude-export-directory "~/Downloads/")
 
-;; Example: API tokens (never commit these!)
-;; (setq some-package-api-key "your-secret-key-here")
+;; SQL connections (Azure)
+;; (setq kdb-sql-connections
+;;       '(("prod" :server "prod.database.windows.net" :database "mydb")
+;;         ("dev"  :server "dev.database.windows.net"  :database "mydb-dev")))
 
-;; Example: Machine-specific settings
-;; (when (string= (system-name) "work-laptop")
-;;   (setq some-work-specific-variable t))
+;; Evil mode — enable per-project or per-buffer
+;; (setq kdb-evil-project-list '("/path/to/vim-project"))
+;; (setq kdb-evil-buffer-list '("COMMIT_EDITMSG"))
 
 ;; Location for redshift night light (EXWM)
 ;; Format: "latitude:longitude"
 ;; (setq kdb-location-coordinates "39.9:-82.9")
+
+;; Machine-specific settings
+;; (when (string= (system-name) "work-laptop")
+;;   (setq some-work-specific-variable t))
 
 (provide 'personal)
 ;;; personal.el ends here
