@@ -29,5 +29,9 @@
 ;; (when (string= (system-name) "work-laptop")
 ;;   (setq some-work-specific-variable t))
 
+;; Location for redshift night light (EXWM)
+;; Format: "latitude:longitude"
+;; (setq kdb-location-coordinates "39.9:-82.9")
+
 (provide 'personal)
 ;;; personal.el ends here
