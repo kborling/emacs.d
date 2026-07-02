@@ -112,7 +112,9 @@
           ("d" "Decision" entry (file "~/.org/decisions.org")
            "* %?\n%U\n** Context\n\n** Options Considered\n1. \n2. \n\n** Decision\n\n** Rationale\n" :empty-lines 1)
           ("s" "Spec/Doc" entry (file "~/.org/inbox.org")
-           "* %?\n%U\n** Purpose\n\n** Requirements\n\n** Design\n\n** Implementation\n\n** Open Questions\n- \n" :empty-lines 1)))
+           "* %?\n%U\n** Purpose\n\n** Requirements\n\n** Design\n\n** Implementation\n\n** Open Questions\n- \n" :empty-lines 1)
+          ("q" "Queue for Claude" entry (file "~/.org/inbox.org")
+           "* %? :claude:\n%U\n** Source\n\n** Thoughts\n\n** Next Actions\n- [ ] \n** Prompt\n" :empty-lines 1)))
 
   (setq org-refile-targets '(("~/.org/notes.org" :maxlevel . 3)
                               ("~/.org/todo.org" :maxlevel . 2)

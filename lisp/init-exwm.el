@@ -84,22 +84,13 @@
 ;; Note: Commented out workspace assignments so windows open on current workspace
 ;; Uncomment specific rules if you want apps to open on specific workspaces
 (setq exwm-manage-configurations
-      '(;; ((string= exwm-class-name "firefox")
-        ;;  workspace 1
-        ;;  char-mode t)
-        ;; ((string= exwm-class-name "Google-chrome")
-        ;;  workspace 1
-        ;;  char-mode t)
-        ;; ((string= exwm-class-name "Slack")
-        ;;  workspace 3
-        ;;  char-mode t)
-        ;; ((string= exwm-class-name "Discord")
-        ;;  workspace 3
-        ;;  char-mode t)
-        ;; ((string= exwm-class-name "Spotify")
-        ;;  workspace 4
-        ;;  char-mode t)
-        ))
+      '(;; Terminal emulators: char-mode so keys go directly to the terminal
+        ((string= exwm-class-name "kitty")
+         char-mode t)
+        ((string= exwm-class-name "Alacritty")
+         char-mode t)
+        ((string= exwm-class-name "XTerm")
+         char-mode t)))
 
 ;;; Multi-Monitor Support ================================================
 

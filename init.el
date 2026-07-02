@@ -281,7 +281,8 @@
   (setq
    uwu-distinct-line-numbers 'nil
    uwu-scale-org-headlines t
-   uwu-use-variable-pitch t)
+   uwu-use-variable-pitch t
+   uwu-cursor-color 'red)
   ;; (load-theme 'uwu t)
   )
 
@@ -1695,6 +1696,41 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 
   (setq gptel-log-file (expand-file-name "gptel-log.org" "~/.org/"))
 
+  (defun kdb-gptel-send-capture ()
+    "Send the org entry at point to a gptel session.
+Extracts the entry content as context and the ** Prompt section
+as the initial message.  Tagged :claude: entries from capture
+work best, but any org entry works."
+    (interactive)
+    (unless (derived-mode-p 'org-mode)
+      (user-error "Not in an org buffer"))
+    (save-excursion
+      (org-back-to-heading t)
+      (let* ((heading (org-get-heading t t t t))
+             (entry-start (point))
+             (entry-end (org-end-of-subtree t t))
+             (entry-text (buffer-substring-no-properties entry-start entry-end))
+             ;; Extract prompt section if it exists
+             (prompt (when (string-match
+                           "^\\*+ Prompt\n\\(\\(?:.*\n?\\)*\\)" entry-text)
+                       (string-trim (match-string 1 entry-text))))
+             (buf-name (format "*Claude: %s*" heading))
+             (buf (get-buffer-create buf-name)))
+        (unless (and prompt (not (string-empty-p prompt)))
+          (setq prompt (read-string "Prompt for Claude: ")))
+        (with-current-buffer buf
+          (org-mode)
+          (erase-buffer)
+          (gptel-mode 1)
+          ;; Insert the captured content as context, then the prompt
+          (insert "* Context\n\n")
+          (insert entry-text)
+          (insert "\n\n* Prompt\n\n")
+          (insert prompt "\n"))
+        (switch-to-buffer buf)
+        ;; Send to Claude
+        (gptel-send))))
+
   :bind (("C-c l l" . gptel)            ; Open/switch to chat buffer
          ("C-c l s" . gptel-send)        ; Send prompt at point
          ("C-c l r" . gptel-rewrite)     ; Rewrite selected region in-place
@@ -1703,7 +1739,8 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
          ("C-c l f" . gptel-add-file)    ; Add file to context
          ("C-c l c" . gptel-context-remove-all)    ; Clear context
          ("C-c l k" . kdb-gptel-code)              ; Code session (current buffer)
-         ("C-c l p" . kdb-gptel-add-project)))     ; Add project to context
+         ("C-c l p" . kdb-gptel-add-project)       ; Add project to context
+         ("C-c l q" . kdb-gptel-send-capture)))    ; Send capture entry to Claude
 
 ;; Claude Session Archive ================================= ;;
 
