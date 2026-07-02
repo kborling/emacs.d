@@ -253,7 +253,8 @@
         pixel-scroll-precision-large-scroll-height 40.0
         pixel-scroll-precision-interpolation-factor 30.0
         mouse-wheel-scroll-amount '(1 ((shift) . 5))
-        mouse-wheel-progressive-speed nil)
+        mouse-wheel-progressive-speed nil
+        scroll-preserve-screen-position t)
   (add-hook 'after-init-hook #'pixel-scroll-precision-mode))
 
 ;; Repeat mode — after C-x o, press o to keep switching windows, etc.
