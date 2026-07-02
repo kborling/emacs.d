@@ -163,7 +163,6 @@
 ;; UI chrome — keep macOS menu bar (integrates with system), disable elsewhere
 (when (display-graphic-p)
   (tool-bar-mode -1)
-  (scroll-bar-mode -1)
   (unless (eq system-type 'darwin)
     (menu-bar-mode -1)))
 
@@ -248,6 +247,13 @@
 
 ;; Smooth scrolling (GUI only)
 (when (display-graphic-p)
+  (setq pixel-scroll-precision-use-momentum t
+        pixel-scroll-precision-momentum-tick 0.016  ; ~60fps
+        pixel-scroll-precision-momentum-seconds 0.75
+        pixel-scroll-precision-large-scroll-height 40.0
+        pixel-scroll-precision-interpolation-factor 30.0
+        mouse-wheel-scroll-amount '(1 ((shift) . 5))
+        mouse-wheel-progressive-speed nil)
   (add-hook 'after-init-hook #'pixel-scroll-precision-mode))
 
 ;; Repeat mode — after C-x o, press o to keep switching windows, etc.
