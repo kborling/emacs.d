@@ -20,20 +20,31 @@
   (setq select-enable-clipboard t
         select-enable-primary t)
   
-  ;; Use clipboard for kill/yank when in terminal
-  (when (executable-find "pbcopy")  ; macOS
-    (defun kdb-copy-to-osx-clipboard ()
-      "Copy region to macOS clipboard."
-      (interactive)
-      (let ((process-connection-type nil))
-        (let ((proc (start-process "pbcopy" "*Messages*" "pbcopy")))
-          (process-send-string proc (buffer-substring (region-beginning) (region-end)))
-          (process-send-eof proc))))
-    
-    (defun kdb-paste-from-osx-clipboard ()
-      "Paste from macOS clipboard."
-      (interactive)
-      (insert (shell-command-to-string "pbpaste"))))
+  ;; Clipboard integration for terminal mode
+  (let ((copy-cmd (cond
+                   ((executable-find "pbcopy") "pbcopy")       ; macOS
+                   ((executable-find "xclip") "xclip -selection clipboard") ; Linux X11
+                   ((executable-find "xsel") "xsel --clipboard --input")    ; Linux X11 alt
+                   ((executable-find "wl-copy") "wl-copy")     ; Linux Wayland
+                   ((executable-find "clip.exe") "clip.exe"))) ; Windows/WSL
+        (paste-cmd (cond
+                    ((executable-find "pbpaste") "pbpaste")
+                    ((executable-find "xclip") "xclip -selection clipboard -o")
+                    ((executable-find "xsel") "xsel --clipboard --output")
+                    ((executable-find "wl-paste") "wl-paste --no-newline")
+                    ((executable-find "powershell.exe") "powershell.exe -command Get-Clipboard"))))
+    (when copy-cmd
+      (setq interprogram-cut-function
+            (lambda (text)
+              (let ((process-connection-type nil))
+                (let ((proc (start-process "clipboard-copy" nil shell-file-name "-c" copy-cmd)))
+                  (process-send-string proc text)
+                  (process-send-eof proc))))))
+    (when paste-cmd
+      (setq interprogram-paste-function
+            (lambda ()
+              (let ((output (shell-command-to-string paste-cmd)))
+                (unless (string-empty-p output) output))))))
   
   ;; Disable features that don't work well in terminal
   (menu-bar-mode -1)

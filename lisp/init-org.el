@@ -8,6 +8,9 @@
 (use-package org
   ;; :ensure nil
   :config
+  (unless (file-directory-p "~/.org/")
+    (make-directory "~/.org/" t))
+
   (setq org-ellipsis "…"
         org-use-sub-superscripts "{}"
         org-pretty-entities (not (eq system-type 'windows-nt)) ; Disable on Windows

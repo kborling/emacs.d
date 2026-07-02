@@ -127,13 +127,15 @@
  load-prefer-newer t
  set-mark-command-repeat-pop t
  global-mark-ring-max 50000
- ;; Emacs 31
- kill-region-dwim 'kill-word
- split-window-preferred-direction 'longest
- mode-line-collapse-minor-modes t
  ;; Built-in defaults
  view-read-only t
  completion-cycle-threshold 5)
+
+;; Emacs 31+ features
+(when (boundp 'kill-region-dwim)
+  (setq kill-region-dwim 'kill-word
+        split-window-preferred-direction 'longest
+        mode-line-collapse-minor-modes t))
 
 ;;; ============================================================
 ;;;                 UI AND APPEARANCE
@@ -157,6 +159,13 @@
       (set-window-point window (point-max)))))
 
 (advice-add 'display-buffer :after #'kdb-messages-buffer-advice)
+
+;; UI chrome — keep macOS menu bar (integrates with system), disable elsewhere
+(when (display-graphic-p)
+  (tool-bar-mode -1)
+  (scroll-bar-mode -1)
+  (unless (eq system-type 'darwin)
+    (menu-bar-mode -1)))
 
 ;; Frame sizing — large but not fullscreen (EXWM handles its own)
 (unless (memq window-system '(x))  ; Skip on EXWM
@@ -232,8 +241,14 @@
   :ensure nil
   :hook (after-init . delete-selection-mode))
 
-;; Smooth scrolling
-(add-hook 'after-init-hook #'pixel-scroll-precision-mode)
+;; Time and battery in mode line
+(setq display-time-default-load-average nil)
+(display-time-mode t)
+(display-battery-mode t)
+
+;; Smooth scrolling (GUI only)
+(when (display-graphic-p)
+  (add-hook 'after-init-hook #'pixel-scroll-precision-mode))
 
 ;; Repeat mode — after C-x o, press o to keep switching windows, etc.
 (add-hook 'after-init-hook #'repeat-mode)
@@ -267,8 +282,11 @@
     (set-face-attribute 'fixed-pitch nil
                         :family default-font-family :height 1.0))
 
-  (set-face-attribute 'variable-pitch nil
-                      :family "FreeSans" :height 1.0 :weight 'regular))
+  (let ((vp-family (cl-find-if (lambda (f) (find-font (font-spec :family f)))
+                                 '("FreeSans" "Helvetica Neue" "Segoe UI" "sans-serif"))))
+    (when vp-family
+      (set-face-attribute 'variable-pitch nil
+                          :family vp-family :height 1.0 :weight 'regular))))
 
 (set-display-table-slot standard-display-table 'truncation (make-glyph-code ?…))
 (set-display-table-slot standard-display-table 'wrap (make-glyph-code ?–))
@@ -1337,8 +1355,7 @@ If point is at the end of the line, kill the whole line including the newline."
 ;; Tree-sitter (Built-in Emacs 31) ======================== ;;
 
 ;; Automatically use tree-sitter modes when grammars are available
-(setq treesit-enabled-modes t              ; Remap all supported modes
-      treesit-auto-install-grammar 'ask)   ; Prompt to install missing grammars
+(setq treesit-enabled-modes t)              ; Remap all supported modes
 
 ;; Grammar sources for treesit-install-language-grammar
 (with-eval-after-load 'treesit
@@ -1528,20 +1545,8 @@ If point is at the end of the line, kill the whole line including the newline."
   :if (memq window-system '(x))
   :defer t
   :config
-  ;; Disable menu-bar, tool-bar and scroll-bar in EXWM
-  (menu-bar-mode -1)
-  (tool-bar-mode -1)
-  (scroll-bar-mode -1)
-
   ;; Shrink fringes to 1 pixel
-  (fringe-mode 1)
-
-  ;; Turn on `display-time-mode' if you don't use an external bar
-  (setq display-time-default-load-average nil)
-  (display-time-mode t)
-
-  ;; Turn on `display-battery-mode' if you want battery info
-  (display-battery-mode t))
+  (fringe-mode 1))
 
 (when (memq window-system '(x))
   (require 'init-exwm))
