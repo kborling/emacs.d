@@ -1869,6 +1869,59 @@ Otherwise, search org files for :claude: tagged entries and prompt."
     (unless (use-region-p) (user-error "Select a region to document"))
     (gptel-rewrite "Add documentation/docstrings to this code. Keep the code unchanged, only add documentation. Return the complete code with docs."))
 
+  ;; Session navigation — jump between active Claude sessions
+  (defun kdb-claude-sessions ()
+    "Switch between active Claude sessions (chats + agents).
+Shows status so you know which need attention."
+    (interactive)
+    (let ((sessions '()))
+      ;; gptel chat buffers
+      (dolist (buf (buffer-list))
+        (with-current-buffer buf
+          (when (bound-and-true-p gptel-mode)
+            (push (cons (format "chat: %s" (buffer-name buf)) buf) sessions))))
+      ;; claude-code agent buffers
+      (when (fboundp 'claude-code--find-all-claude-buffers)
+        (dolist (buf (claude-code--find-all-claude-buffers))
+          (let* ((proc (get-buffer-process buf))
+                 (status (cond
+                          ((null proc) "dead")
+                          ((not (process-live-p proc)) "done")
+                          ((with-current-buffer buf
+                             (save-excursion
+                               (goto-char (point-max))
+                               (forward-line -3)
+                               (looking-at-p ".*[>❯$%]\\s-*$")))
+                           "waiting")
+                          (t "running"))))
+            (push (cons (format "agent [%s]: %s" status (buffer-name buf)) buf)
+                  sessions))))
+      (if (null sessions)
+          (message "No active Claude sessions")
+        (let* ((choice (completing-read "Session: " (mapcar #'car sessions) nil t))
+               (buf (cdr (assoc choice sessions))))
+          (switch-to-buffer buf)))))
+
+  (defun kdb-claude-next-session ()
+    "Cycle to the next active Claude session."
+    (interactive)
+    (let ((sessions (append
+                     ;; gptel buffers
+                     (cl-remove-if-not
+                      (lambda (b) (with-current-buffer b (bound-and-true-p gptel-mode)))
+                      (buffer-list))
+                     ;; claude-code buffers
+                     (when (fboundp 'claude-code--find-all-claude-buffers)
+                       (claude-code--find-all-claude-buffers)))))
+      (if (null sessions)
+          (message "No active Claude sessions")
+        (let* ((current (current-buffer))
+               (pos (cl-position current sessions))
+               (next (if pos
+                         (nth (mod (1+ pos) (length sessions)) sessions)
+                       (car sessions))))
+          (switch-to-buffer next)))))
+
   ;; Bridge: collect all Claude-related buffers (gptel chats, archive org files)
   (defun kdb-claude--list-sessions ()
     "Return alist of (display-name . buffer-or-file) for all Claude sessions."
@@ -2010,8 +2063,9 @@ Pick from saved sessions, archive, or current region."
         ("p" "Add Project" kdb-gptel-add-project)
         ("k" "Buffer → Chat" kdb-gptel-code)
         ("c" "Clear" gptel-context-remove-all)]
-       ["Recall"
-        ("o" "Open Session" kdb-claude-recall)
+       ["Sessions"
+        ("TAB" "Switch Session" kdb-claude-sessions)
+        ("o" "Open Past" kdb-claude-recall)
         ("/" "Search" kdb-claude-search)
         ("b" "Browse" kdb-claude-browse)]
        ["Move"
@@ -2023,7 +2077,9 @@ Pick from saved sessions, archive, or current region."
         ("m" "Settings" gptel-menu)]])
     (kdb-claude-menu))
 
-  :bind (("C-c l" . kdb-claude)))
+  :bind (("C-c l" . kdb-claude)
+         ("C-c TAB TAB" . kdb-claude-sessions)     ; quick session switch
+         ("C-c TAB RET" . kdb-claude-next-session))) ; cycle sessions
 
 ;; Claude Code (CLI in Emacs) ============================= ;;
 
