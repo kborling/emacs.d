@@ -1461,7 +1461,7 @@ Falls back to DIRS or project roots."
 
 (use-package angular-mode
   :vc (:url "https://github.com/kborling/angular-mode" :rev :newest)
-  :defer t)
+  :hook (find-file . angular-mode-maybe))
 
 ;; HTML Mode =============================================== ;;
 
