@@ -1811,16 +1811,97 @@ Otherwise, search org files for :claude: tagged entries and prompt."
         (switch-to-buffer buf)
         (gptel-send))))
 
-  :bind (("C-c l l" . gptel)            ; Open/switch to chat buffer
-         ("C-c l s" . gptel-send)        ; Send prompt at point
-         ("C-c l r" . gptel-rewrite)     ; Rewrite selected region in-place
-         ("C-c l m" . gptel-menu)        ; Transient menu (model, params, etc.)
-         ("C-c l a" . gptel-add)         ; Add region/buffer to context
-         ("C-c l f" . gptel-add-file)    ; Add file to context
-         ("C-c l c" . gptel-context-remove-all)    ; Clear context
-         ("C-c l k" . kdb-gptel-code)              ; Code session (current buffer)
-         ("C-c l p" . kdb-gptel-add-project)       ; Add project to context
-         ("C-c l q" . kdb-gptel-send-capture)))    ; Send capture entry to Claude
+  ;; Quick code actions — VS Code-style, no chat buffer needed
+  (defun kdb-gptel-explain ()
+    "Explain the selected region or function at point."
+    (interactive)
+    (gptel-request
+     (or (when (use-region-p)
+           (buffer-substring-no-properties (region-beginning) (region-end)))
+         (thing-at-point 'defun t)
+         (user-error "Select a region or place point in a function"))
+     :system "Explain this code clearly and concisely. Focus on what it does and why."
+     :callback (lambda (response _info)
+                 (with-current-buffer (get-buffer-create "*Claude: Explain*")
+                   (let ((inhibit-read-only t))
+                     (erase-buffer)
+                     (org-mode)
+                     (insert "* Explanation\n\n" response "\n")
+                     (goto-char (point-min))
+                     (setq buffer-read-only t))
+                   (display-buffer (current-buffer))))))
+
+  (defun kdb-gptel-refactor ()
+    "Refactor the selected region with Claude."
+    (interactive)
+    (unless (use-region-p) (user-error "Select a region to refactor"))
+    (let ((instruction (read-string "Refactor instruction (or empty for general): ")))
+      (gptel-rewrite (if (string-empty-p instruction)
+                         "Refactor this code: improve clarity, reduce complexity, follow best practices. Return only the code."
+                       instruction))))
+
+  (defun kdb-gptel-fix ()
+    "Fix bugs in the selected region."
+    (interactive)
+    (unless (use-region-p) (user-error "Select a region to fix"))
+    (gptel-rewrite "Fix any bugs in this code. Return only the corrected code."))
+
+  (defun kdb-gptel-tests ()
+    "Generate tests for the selected region or function."
+    (interactive)
+    (gptel-request
+     (or (when (use-region-p)
+           (buffer-substring-no-properties (region-beginning) (region-end)))
+         (thing-at-point 'defun t)
+         (user-error "Select a region or place point in a function"))
+     :system "Generate unit tests for this code. Use the testing framework appropriate for the language. Return only the test code."
+     :callback (lambda (response _info)
+                 (with-current-buffer (get-buffer-create "*Claude: Tests*")
+                   (let ((inhibit-read-only t))
+                     (erase-buffer)
+                     (insert response "\n")
+                     (goto-char (point-min)))
+                   (display-buffer (current-buffer))))))
+
+  (defun kdb-gptel-doc ()
+    "Generate documentation for the selected region or function."
+    (interactive)
+    (unless (use-region-p) (user-error "Select a region to document"))
+    (gptel-rewrite "Add documentation/docstrings to this code. Keep the code unchanged, only add documentation. Return the complete code with docs."))
+
+  ;; Transient menu for discoverability
+  (defun kdb-gptel-transient ()
+    "Claude AI transient menu."
+    (interactive)
+    (require 'transient)
+    (transient-define-prefix kdb-gptel-menu ()
+      "Claude AI"
+      [["Chat"
+        ("l" "Open Chat" gptel)
+        ("s" "Send at Point" gptel-send)
+        ("m" "Model/Params" gptel-menu)
+        ("q" "Send Capture" kdb-gptel-send-capture)]
+       ["Code Actions"
+        ("e" "Explain" kdb-gptel-explain)
+        ("r" "Rewrite/Refactor" kdb-gptel-refactor)
+        ("x" "Fix Bugs" kdb-gptel-fix)
+        ("T" "Generate Tests" kdb-gptel-tests)
+        ("d" "Add Docs" kdb-gptel-doc)
+        ("R" "Rewrite (custom)" gptel-rewrite)]
+       ["Context"
+        ("a" "Add Region/Buffer" gptel-add)
+        ("f" "Add File" gptel-add-file)
+        ("p" "Add Project" kdb-gptel-add-project)
+        ("k" "Code Session" kdb-gptel-code)
+        ("c" "Clear Context" gptel-context-remove-all)]
+       ["Archive"
+        ("b" "Browse Sessions" kdb-claude-browse)
+        ("/" "Search Sessions" kdb-claude-search)
+        ("i" "Import Export" kdb-claude-import-export)
+        ("S" "Sync Archive" kdb-claude-sync)]])
+    (kdb-gptel-menu))
+
+  :bind (("C-c l" . kdb-gptel-transient)))    ; One key to rule them all
 
 ;; Claude Session Archive ================================= ;;
 
@@ -1830,10 +1911,6 @@ Otherwise, search org files for :claude: tagged entries and prompt."
 (autoload 'kdb-claude-browse "init-claude" "Browse Claude sessions" t)
 (autoload 'kdb-claude-search "init-claude" "Search Claude sessions" t)
 (autoload 'kdb-claude-import-export "init-claude" "Import Desktop export" t)
-(global-set-key (kbd "C-c l b") #'kdb-claude-browse)
-(global-set-key (kbd "C-c l /") #'kdb-claude-search)
-(global-set-key (kbd "C-c l i") #'kdb-claude-import-export)
-(global-set-key (kbd "C-c l S") #'kdb-claude-sync)
 
 
 ;; Local Variables:
