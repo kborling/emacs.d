@@ -535,14 +535,12 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
 
 
 (defun kdb-exwm-set-kitty-theme (theme)
-  "Set kitty terminal theme to THEME (light or dark)."
-  ;; Directly execute the sed command and reload kitty
-  (let ((config-file (expand-file-name "~/.config/kitty/kitty.conf"))
-        (old-theme (if (string= theme "light") "dark" "light")))
+  "Set kitty terminal theme to THEME (light, dark, or fleury)."
+  (let ((config-file (expand-file-name "~/.config/kitty/kitty.conf")))
     (start-process-shell-command
      "kitty-theme" nil
-     (format "sed -i 's|include themes/%s.conf|include themes/%s.conf|g' %s && kill -SIGUSR1 $(pgrep kitty)"
-             old-theme theme config-file))
+     (format "sed -i 's|include themes/[a-z]*.conf|include themes/%s.conf|g' %s && kill -SIGUSR1 $(pgrep kitty)"
+             (shell-quote-argument theme) config-file))
     (message "Set kitty theme to %s" theme)))
 
 (defun kdb-exwm-set-dunst-theme (theme)
@@ -616,7 +614,7 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
   (kdb-exwm-set-gtk-theme "dark")
 
   ;; Set kitty to dark theme
-  (kdb-exwm-set-kitty-theme "dark")
+  (kdb-exwm-set-kitty-theme "fleury")
 
   ;; Set dunst to dark theme
   (kdb-exwm-set-dunst-theme "dark")
