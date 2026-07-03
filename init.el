@@ -1739,8 +1739,6 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
   )
 
 ;; Claude Workflow (transient, code actions, sessions, recall)
-(with-eval-after-load 'gptel
-  (require 'init-claude-workflow))
 (autoload 'kdb-claude "init-claude-workflow" "Claude menu" t)
 (autoload 'kdb-claude-sessions "init-claude-workflow" "Switch Claude sessions" t)
 (autoload 'kdb-claude-next-session "init-claude-workflow" "Cycle Claude sessions" t)
