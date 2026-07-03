@@ -4,6 +4,15 @@
 ;; People management for managers/directors.
 ;; Contacts in ~/.org/contacts.org (or .gpg), performance in ~/.org/people/
 ;; Performance files are per fiscal year: FY2026.org, FY2025.org, etc.
+;;
+;; Each person's FY file section looks like:
+;; * Person Name
+;; ** Goals
+;; ** Wins
+;; ** Issues
+;; ** Feedback Given
+;; ** 1:1 Notes
+;; ** Follow-ups
 
 ;;; Code:
 
@@ -45,11 +54,12 @@
     (unless (file-exists-p file)
       (with-temp-file file
         (insert (format "#+TITLE: People - %s\n" (kdb/current-fiscal-year)))
-        (insert "#+COLUMNS: %25ITEM %TAGS\n")
         (insert "#+STARTUP: overview\n\n")))
     file))
 
-;; === CONTACT HELPERS === ;;
+;;; ============================================================
+;;; Contact Helpers
+;;; ============================================================
 
 (defun kdb/get-all-contacts ()
   "Get all contact names from the contacts file."
@@ -68,7 +78,9 @@
   (let ((contacts (kdb/get-all-contacts)))
     (completing-read "Person: " contacts nil nil)))
 
-;; === CONTACT MANAGEMENT === ;;
+;;; ============================================================
+;;; Contact Management
+;;; ============================================================
 
 (defun kdb/add-contact ()
   "Add a new contact."
@@ -76,27 +88,27 @@
   (let ((name (read-string "Name: "))
         (role (read-string "Role/Title: "))
         (email (read-string "Email: "))
-        (phone (read-string "Phone: ")))
-    (condition-case err
-        (with-current-buffer (find-file-noselect kdb/contacts-file)
-          (goto-char (point-max))
-          (insert (format "\n* %s\n" name))
-          (insert (format ":PROPERTIES:\n:ADDED: %s\n" (format-time-string "%Y-%m-%d")))
-          (when (not (string-empty-p role))
-            (insert (format ":ROLE: %s\n" role)))
-          (when (not (string-empty-p email))
-            (insert (format ":EMAIL: %s\n" email)))
-          (when (not (string-empty-p phone))
-            (insert (format ":PHONE: %s\n" phone)))
-          (insert ":END:\n")
-          (save-buffer)
-          (message "Contact '%s' added" name))
-      (error (message "Error: %s" (error-message-string err))))))
+        (team (read-string "Team (optional): ")))
+    (with-current-buffer (find-file-noselect kdb/contacts-file)
+      (goto-char (point-max))
+      (insert (format "\n* %s\n" name))
+      (insert (format ":PROPERTIES:\n:ADDED: %s\n" (format-time-string "%Y-%m-%d")))
+      (when (not (string-empty-p role))
+        (insert (format ":ROLE: %s\n" role)))
+      (when (not (string-empty-p email))
+        (insert (format ":EMAIL: %s\n" email)))
+      (when (not (string-empty-p team))
+        (insert (format ":TEAM: %s\n" team)))
+      (insert ":END:\n")
+      (save-buffer)
+      (message "Contact '%s' added" name))))
 
-;; === PERFORMANCE TRACKING === ;;
+;;; ============================================================
+;;; Performance Tracking
+;;; ============================================================
 
 (defun kdb/log-win ()
-  "Log a win for someone. Stored in the current FY file."
+  "Log a win for someone."
   (interactive)
   (let* ((name (kdb/read-contact-name))
          (win (read-string "Win: "))
@@ -114,7 +126,7 @@
       (message "Win logged for %s" name))))
 
 (defun kdb/log-issue ()
-  "Log an issue/concern for someone. Stored in the current FY file."
+  "Log an issue/concern for someone."
   (interactive)
   (let* ((name (kdb/read-contact-name))
          (issue (read-string "Issue: "))
@@ -143,6 +155,70 @@
       (save-buffer)
       (message "Feedback logged for %s" name))))
 
+(defun kdb/log-1on1 ()
+  "Log 1:1 meeting notes for a direct report."
+  (interactive)
+  (let* ((name (kdb/read-contact-name))
+         (file (kdb/ensure-people-file))
+         (date (format-time-string "%Y-%m-%d")))
+    (with-current-buffer (find-file-noselect file)
+      (kdb/ensure-person-section name)
+      (kdb/goto-person-subsection name "1:1 Notes")
+      (insert (format "*** %s\n" date))
+      (insert "- Updates :: \n")
+      (insert "- Discussion :: \n")
+      (insert "- Action Items :: \n")
+      (save-buffer)
+      (switch-to-buffer (current-buffer))
+      ;; Position cursor at Updates
+      (re-search-backward "- Updates :: " nil t)
+      (end-of-line))))
+
+(defun kdb/log-followup ()
+  "Log a follow-up item for someone with a deadline."
+  (interactive)
+  (let* ((name (kdb/read-contact-name))
+         (item (read-string "Follow-up: "))
+         (days (read-number "Follow up in how many days? " 14))
+         (deadline (format-time-string "%Y-%m-%d"
+                     (time-add (current-time) (days-to-time days))))
+         (file (kdb/ensure-people-file))
+         (date (format-time-string "%Y-%m-%d")))
+    (with-current-buffer (find-file-noselect file)
+      (kdb/ensure-person-section name)
+      (kdb/goto-person-subsection name "Follow-ups")
+      (insert (format "*** TODO %s\n" item))
+      (insert (format "DEADLINE: <%s>\n" deadline))
+      (insert (format "[%s] — %s\n" date name))
+      (save-buffer)
+      (message "Follow-up for %s due %s" name deadline))))
+
+(defun kdb/set-goals ()
+  "Set or update goals for a direct report."
+  (interactive)
+  (let* ((name (kdb/read-contact-name))
+         (file (kdb/ensure-people-file)))
+    (with-current-buffer (find-file-noselect file)
+      (kdb/ensure-person-section name)
+      (goto-char (point-min))
+      (re-search-forward (format "^\\* %s" (regexp-quote name)) nil t)
+      (let ((person-end (save-excursion
+                          (if (re-search-forward "^\\* " nil t)
+                              (line-beginning-position)
+                            (point-max)))))
+        (if (re-search-forward "^\\*\\* Goals" person-end t)
+            (progn (end-of-line) (insert "\n"))
+          ;; Insert Goals as first subsection
+          (end-of-line)
+          (insert "\n** Goals\n")))
+      (insert (format "- [ ] %s\n" (read-string "Goal: ")))
+      (save-buffer)
+      (switch-to-buffer (current-buffer)))))
+
+;;; ============================================================
+;;; View & Review
+;;; ============================================================
+
 (defun kdb/view-person ()
   "View all performance data for a person in current FY."
   (interactive)
@@ -158,7 +234,8 @@
   "View performance data for a person across all fiscal years."
   (interactive)
   (let* ((name (kdb/read-contact-name))
-         (files (directory-files kdb/people-dir t "^FY.*\\.org$"))
+         (files (when (file-directory-p kdb/people-dir)
+                  (directory-files kdb/people-dir t "^FY.*\\.org$")))
          (buf (get-buffer-create (format "*%s - All Years*" name))))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
@@ -169,69 +246,143 @@
             (insert-file-contents file)
             (goto-char (point-min))
             (when (re-search-forward (format "^\\* %s" (regexp-quote name)) nil t)
-              (let ((start (line-beginning-position))
-                    (end (or (save-excursion
-                               (when (re-search-forward "^\\* " nil t)
-                                 (line-beginning-position)))
-                             (point-max))))
+              (let* ((start (line-beginning-position))
+                     (end (or (save-excursion
+                                (forward-line 1)
+                                (when (re-search-forward "^\\* " nil t)
+                                  (line-beginning-position)))
+                              (point-max)))
+                     (content (buffer-substring-no-properties start end)))
                 (with-current-buffer buf
                   (insert (format "* %s\n" (file-name-base file)))
-                  (insert (substring
-                           (with-temp-buffer
-                             (insert-file-contents file nil (1- start) (1- end))
-                             (buffer-string))
-                           0))
+                  ;; Demote headings by one level
+                  (let ((section-start (point)))
+                    (insert content)
+                    (save-excursion
+                      (goto-char section-start)
+                      (while (re-search-forward "^\\(\\*+\\) " nil t)
+                        (replace-match (concat "*" (match-string 1) " ")))))
                   (insert "\n"))))))
         (goto-char (point-min))
         (org-mode)
         (setq buffer-read-only t)))
     (switch-to-buffer buf)))
 
-;; === HELPER FUNCTIONS === ;;
+(defun kdb/review-prep ()
+  "Prepare a review summary for a direct report.
+Gathers wins, issues, feedback, goals, and follow-ups from the current FY."
+  (interactive)
+  (let* ((name (kdb/read-contact-name))
+         (file (kdb/ensure-people-file))
+         (buf (get-buffer-create (format "*Review Prep: %s*" name))))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (format "#+TITLE: Review Prep — %s (%s)\n" name (kdb/current-fiscal-year)))
+        (insert (format "#+DATE: %s\n\n" (format-time-string "%Y-%m-%d")))
+        ;; Extract each section
+        (with-temp-buffer
+          (insert-file-contents file)
+          (goto-char (point-min))
+          (when (re-search-forward (format "^\\* %s" (regexp-quote name)) nil t)
+            (let* ((start (line-beginning-position))
+                   (end (or (save-excursion
+                              (forward-line 1)
+                              (when (re-search-forward "^\\* " nil t)
+                                (line-beginning-position)))
+                            (point-max)))
+                   (content (buffer-substring-no-properties start end)))
+              (with-current-buffer buf
+                (insert content "\n")))))
+        ;; Add review template at the end
+        (insert "\n* Review Notes\n")
+        (insert "** Overall Assessment\n\n\n")
+        (insert "** Strengths\n- \n\n")
+        (insert "** Areas for Growth\n- \n\n")
+        (insert "** Next Steps\n- \n\n")
+        (goto-char (point-min))
+        (org-mode)))
+    (switch-to-buffer buf)))
 
-(defun kdb/ensure-person-section (name)
-  "Ensure NAME has a top-level heading in current buffer."
-  (goto-char (point-min))
-  (unless (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote name)) nil t)
-    (goto-char (point-max))
-    (insert (format "\n* %s\n" name))))
+(defun kdb/attention ()
+  "Show what needs your attention across all direct reports.
+Open follow-ups, recent issues, and upcoming deadlines."
+  (interactive)
+  (let* ((file (kdb/ensure-people-file))
+         (buf (get-buffer-create "*Attention Needed*")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (format "#+TITLE: Attention Needed — %s\n" (format-time-string "%Y-%m-%d")))
+        (insert (format "#+SOURCE: %s\n\n" file))
+        ;; Open follow-ups (TODOs)
+        (insert "* Open Follow-ups\n\n")
+        (with-temp-buffer
+          (insert-file-contents file)
+          (goto-char (point-min))
+          (let ((person nil))
+            (while (not (eobp))
+              (cond
+               ((looking-at "^\\* \\(.+\\)")
+                (setq person (match-string-no-properties 1)))
+               ((looking-at "^\\*\\*\\* TODO \\(.+\\)")
+                (let ((todo (match-string-no-properties 1))
+                      (deadline nil))
+                  (save-excursion
+                    (forward-line 1)
+                    (when (looking-at "DEADLINE: <\\([^>]+\\)>")
+                      (setq deadline (match-string-no-properties 1))))
+                  (with-current-buffer buf
+                    (insert (format "- *%s*: %s" person todo))
+                    (when deadline (insert (format " (due %s)" deadline)))
+                    (insert "\n")))))
+              (forward-line 1))))
+        ;; Recent high-severity issues (last 30 days)
+        (insert "\n* Recent Issues (high/medium)\n\n")
+        (let ((cutoff (format-time-string "%Y-%m-%d"
+                        (time-subtract (current-time) (days-to-time 30)))))
+          (with-temp-buffer
+            (insert-file-contents file)
+            (goto-char (point-min))
+            (let ((person nil))
+              (while (not (eobp))
+                (cond
+                 ((looking-at "^\\* \\(.+\\)")
+                  (setq person (match-string-no-properties 1)))
+                 ((looking-at "^- \\[\\([0-9-]+\\)\\] (\\(high\\|medium\\)) \\(.+\\)")
+                  (let ((date (match-string-no-properties 1))
+                        (sev (match-string-no-properties 2))
+                        (issue (match-string-no-properties 3)))
+                    (when (string> date cutoff)
+                      (with-current-buffer buf
+                        (insert (format "- *%s* [%s] (%s) %s\n"
+                                        person date sev issue)))))))
+                (forward-line 1)))))
+        (goto-char (point-min))
+        (org-mode)
+        (setq buffer-read-only t)))
+    (switch-to-buffer buf)))
 
-(defun kdb/goto-person-subsection (name section)
-  "Navigate to SECTION under person NAME, creating if needed."
-  (goto-char (point-min))
-  (re-search-forward (format "^\\* %s" (regexp-quote name)) nil t)
-  (let ((person-end (save-excursion
-                      (if (re-search-forward "^\\* " nil t)
-                          (line-beginning-position)
-                        (point-max)))))
-    (if (re-search-forward (format "^\\*\\* %s" (regexp-quote section)) person-end t)
-        (progn (end-of-line) (insert "\n"))
-      ;; Create subsection at end of person
-      (goto-char person-end)
-      (insert (format "** %s\n" section)))))
-
-;; === MEETING & DAILY NOTES === ;;
+;;; ============================================================
+;;; Meeting & Daily Notes
+;;; ============================================================
 
 (defun kdb/add-meeting-note ()
-  "Add a meeting note for a contact."
+  "Add a meeting note for a contact to the FY people file."
   (interactive)
-  (let* ((contact-name (kdb/read-contact-name))
-         (meeting-type (completing-read "Type: "
-                                        '("Meeting" "Call" "Email" "Coffee" "Interview" "Follow-up")))
-         (notes (read-string "Notes: "))
+  (let* ((name (kdb/read-contact-name))
+         (topic (read-string "Topic: "))
+         (file (kdb/ensure-people-file))
          (date (format-time-string "%Y-%m-%d")))
-    (with-current-buffer (find-file-noselect kdb/contacts-file)
-      (goto-char (point-min))
-      (if (re-search-forward (format "^\\* %s" (regexp-quote contact-name)) nil t)
-          (let ((end (save-excursion
-                       (if (re-search-forward "^\\* " nil t)
-                           (line-beginning-position) (point-max)))))
-            (goto-char end)
-            (insert (format "** %s - %s\n   %s\n" meeting-type date notes)))
-        (goto-char (point-max))
-        (insert (format "\n* %s\n** %s - %s\n   %s\n" contact-name meeting-type date notes)))
+    (with-current-buffer (find-file-noselect file)
+      (kdb/ensure-person-section name)
+      (kdb/goto-person-subsection name "1:1 Notes")
+      (insert (format "*** %s — %s\n" date topic))
+      (insert "- \n")
       (save-buffer)
-      (message "Meeting note added for %s" contact-name))))
+      (switch-to-buffer (current-buffer))
+      (re-search-backward "^- " nil t)
+      (end-of-line))))
 
 (defun kdb/daily-notes ()
   "Add quick daily notes to notes.org."
@@ -246,10 +397,12 @@
       (save-buffer)
       (message "Note added: %s" note-type))))
 
-;; === SEARCH === ;;
+;;; ============================================================
+;;; Search
+;;; ============================================================
 
 (defun kdb/search-contacts (search-term)
-  "Search for SEARCH-TERM across contacts and notes."
+  "Search for SEARCH-TERM across contacts, notes, and people files."
   (interactive "sSearch: ")
   (let ((files (list kdb/contacts-file kdb/notes-file)))
     (when (file-directory-p kdb/people-dir)
@@ -274,7 +427,9 @@
       (deadgrep (read-string "Search all: ") "~/.org")
     (call-interactively 'kdb/search-contacts)))
 
-;; === FILE ACCESS === ;;
+;;; ============================================================
+;;; File Access
+;;; ============================================================
 
 (defun kdb/open-contacts ()
   "Open contacts file."
@@ -291,27 +446,28 @@
   (interactive)
   (find-file (kdb/ensure-people-file)))
 
-;; === WEEKLY REVIEW === ;;
+;;; ============================================================
+;;; Weekly Review
+;;; ============================================================
 
 (defun kdb/weekly-review ()
-  "Create weekly review entry."
+  "Create weekly review entry with per-person prompts."
   (interactive)
-  (with-current-buffer (find-file-noselect kdb/notes-file)
-    (goto-char (point-max))
-    (insert (format "\n* Weekly Review - %s\n" (format-time-string "%Y-W%U")))
-    (insert "** Accomplishments\n- \n\n")
-    (insert "** Challenges\n- \n\n")
-    (insert "** Next Week Focus\n- \n\n")
-    (insert "** Team Updates\n- \n\n")
-    (save-buffer)
-    (switch-to-buffer (current-buffer))
-    (forward-line -7)
-    (end-of-line)))
-
-;; === QUICK WIN (kept for backward compat) === ;;
-(defalias 'kdb/quick-win 'kdb/log-win)
-(defalias 'kdb/add-accomplishment 'kdb/log-win)
-(defalias 'kdb/view-accomplishments 'kdb/view-person)
+  (let ((contacts (kdb/get-all-contacts)))
+    (with-current-buffer (find-file-noselect kdb/notes-file)
+      (goto-char (point-max))
+      (insert (format "\n* Weekly Review - %s\n" (format-time-string "%Y-W%U")))
+      (insert "** Accomplishments\n- \n\n")
+      (insert "** Challenges\n- \n\n")
+      (insert "** Team Updates\n")
+      (dolist (name contacts)
+        (insert (format "- %s :: \n" name)))
+      (insert "\n** Next Week Focus\n- \n\n")
+      (save-buffer)
+      (switch-to-buffer (current-buffer))
+      (re-search-backward "^\\*\\* Accomplishments" nil t)
+      (forward-line 1)
+      (end-of-line))))
 
 (provide 'org-contacts-simple)
 ;;; org-contacts-simple.el ends here
