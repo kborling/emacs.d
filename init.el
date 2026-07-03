@@ -614,7 +614,6 @@ If point is at the end of the line, kill the whole line including the newline."
 (define-key global-map (kbd "C-g") #'kdb-keyboard-quit-dwim)
 
 
-;; Auto-kill term buffer on exit
 (add-hook 'term-exec-hook
           (lambda ()
             (let ((buf (current-buffer)))
@@ -1269,29 +1268,23 @@ Falls back to DIRS or project roots."
   (exec-path-from-shell-initialize))
 
 
-;; Add lisp directory to load path
 (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
 
-;; Load VC configuration when needed
 (defun kdb-load-init-vc ()
   "Load init-vc configuration once."
   (unless (featurep 'init-vc)
     (require 'init-vc)))
 
-;; Autoload the main VC transient command and bind it
 (autoload 'kdb-vc-transient "init-vc" "VC transient menu" t)
 (global-set-key (kbd "C-c g") 'kdb-vc-transient)
 
-;; Hook into various VC entry points for other VC commands
 (add-hook 'vc-dir-mode-hook #'kdb-load-init-vc)
 (with-eval-after-load 'vc-dir (kdb-load-init-vc))
 (with-eval-after-load 'log-view (kdb-load-init-vc))
 
-;; Load Org configuration when org-mode is loaded
 (with-eval-after-load 'org
   (require 'init-org))
 
-;; Org entry points — available from any buffer without loading org first
 (global-set-key (kbd "C-c o a") #'org-agenda)
 (global-set-key (kbd "C-c o c") #'org-capture)
 (global-set-key (kbd "C-c o d") #'deft)
@@ -1344,7 +1337,6 @@ Falls back to DIRS or project roots."
 (global-set-key (kbd "C-c s d") #'kdb-decrypt-file)
 (global-set-key (kbd "C-c s c") #'epa-dired-do-encrypt)
 
-;; Load terminal optimizations (load immediately if in terminal mode, otherwise skip)
 (when (not (display-graphic-p))
   (require 'init-terminal))
 
@@ -1698,19 +1690,15 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (use-package gptel
   :ensure t
   :config
-  ;; Set API key in personal.el: (setq gptel-api-key "sk-ant-...")
   (setq gptel-model 'claude-sonnet-4-5
         gptel-default-mode 'org-mode     ; Chat buffers open in org-mode
         gptel-backend (gptel-make-anthropic "Claude" :stream t))
 
-  ;; Org-mode integration: send subtrees, heading context, branching
   (setq gptel-org-branching-context t    ; Each org heading is its own context branch
         gptel-use-header-line t)
 
-  ;; After a response, move point to end so next prompt is ready
   (add-hook 'gptel-post-response-functions #'gptel-end-of-response)
 
-  ;; Tools — for actions Claude can take (context is handled by gptel-add/gptel-add-file)
   (gptel-make-tool
    :function (lambda (path old-text new-text)
                (let ((file (expand-file-name path)))
@@ -1747,7 +1735,6 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 
   )
 
-;; Claude Workflow (transient, code actions, sessions, recall)
 (autoload 'kdb-claude "init-claude-workflow" "Claude menu" t)
 (autoload 'kdb-claude-sessions "init-claude-workflow" "Switch Claude sessions" t)
 (autoload 'kdb-claude-next-session "init-claude-workflow" "Cycle Claude sessions" t)
@@ -1765,8 +1752,6 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 
 ;; Claude Session Archive ================================= ;;
 
-;; Archive defaults to ~/.claude-archive
-;; Set kdb-claude-export-directory in personal.el for Desktop exports
 (autoload 'kdb-claude-sync "init-claude" "Sync all Claude sessions" t)
 (autoload 'kdb-claude-browse "init-claude" "Browse Claude sessions" t)
 (autoload 'kdb-claude-search "init-claude" "Search Claude sessions" t)
