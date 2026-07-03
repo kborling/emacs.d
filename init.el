@@ -1869,6 +1869,105 @@ Otherwise, search org files for :claude: tagged entries and prompt."
     (unless (use-region-p) (user-error "Select a region to document"))
     (gptel-rewrite "Add documentation/docstrings to this code. Keep the code unchanged, only add documentation. Return the complete code with docs."))
 
+  ;; Target system — command any session from anywhere
+  (defvar kdb-claude-target nil
+    "Current target Claude session buffer.")
+
+  (defun kdb-claude--active-sessions ()
+    "Return alist of (label . buffer) for all active Claude sessions."
+    (let ((sessions '()))
+      (dolist (buf (buffer-list))
+        (with-current-buffer buf
+          (when (bound-and-true-p gptel-mode)
+            (push (cons (format "chat: %s" (buffer-name buf)) buf) sessions))))
+      (when (fboundp 'claude-code--find-all-claude-buffers)
+        (dolist (buf (claude-code--find-all-claude-buffers))
+          (push (cons (format "agent: %s" (buffer-name buf)) buf) sessions)))
+      (nreverse sessions)))
+
+  (defun kdb-claude-set-target ()
+    "Set the target session for subsequent commands."
+    (interactive)
+    (let* ((sessions (kdb-claude--active-sessions)))
+      (if (null sessions)
+          (message "No active sessions. Start one with 'N', 'x', or 'l'.")
+        (let* ((choice (completing-read "Target: " (mapcar #'car sessions) nil t))
+               (buf (cdr (assoc choice sessions))))
+          (setq kdb-claude-target buf)
+          (message "Target: %s" (buffer-name buf))))))
+
+  (defun kdb-claude--get-target ()
+    "Return the current target buffer, prompting if unset or dead."
+    (when (and kdb-claude-target (not (buffer-live-p kdb-claude-target)))
+      (setq kdb-claude-target nil))
+    (unless kdb-claude-target
+      (kdb-claude-set-target))
+    kdb-claude-target)
+
+  (defun kdb-claude--target-is-agent-p ()
+    "Return t if the current target is a claude-code agent."
+    (when-let* ((buf (kdb-claude--get-target)))
+      (string-match-p "^\\*claude:" (buffer-name buf))))
+
+  (defun kdb-claude-send-region-to-target ()
+    "Send region or buffer to the target session."
+    (interactive)
+    (let* ((text (if (use-region-p)
+                     (buffer-substring-no-properties (region-beginning) (region-end))
+                   (buffer-substring-no-properties (point-min) (point-max))))
+           (target (kdb-claude--get-target)))
+      (if (kdb-claude--target-is-agent-p)
+          ;; Send to claude-code
+          (let ((instruction (read-string "Instruction (empty to just send): ")))
+            (claude-code--do-send-command
+             (if (string-empty-p instruction) text
+               (format "%s\n\n%s" instruction text))))
+        ;; Send to gptel — add as context
+        (with-current-buffer target
+          (goto-char (point-max))
+          (insert "\n* Context\n\n" text "\n"))
+        (message "Added to %s" (buffer-name target)))))
+
+  (defun kdb-claude-send-file-to-target ()
+    "Send a file to the target session."
+    (interactive)
+    (let ((file (read-file-name "File: "))
+          (target (kdb-claude--get-target)))
+      (if (kdb-claude--target-is-agent-p)
+          (claude-code--do-send-command
+           (format "Look at this file: %s" (expand-file-name file)))
+        (with-current-buffer target
+          (gptel-add-file file))
+        (message "Added %s to %s" (file-name-nondirectory file) (buffer-name target)))))
+
+  (defun kdb-claude-prompt-target ()
+    "Send a prompt to the target session."
+    (interactive)
+    (let ((prompt (read-string "Prompt: "))
+          (target (kdb-claude--get-target)))
+      (if (kdb-claude--target-is-agent-p)
+          (claude-code--do-send-command prompt)
+        (with-current-buffer target
+          (goto-char (point-max))
+          (insert "\n* " prompt "\n")
+          (gptel-send)))))
+
+  (defun kdb-claude-accept-target ()
+    "Accept/confirm in the target agent session."
+    (interactive)
+    (if (kdb-claude--target-is-agent-p)
+        (with-current-buffer kdb-claude-target
+          (claude-code--term-send-string claude-code-terminal-backend (kbd "RET")))
+      (message "Target is not an agent")))
+
+  (defun kdb-claude-reject-target ()
+    "Reject/cancel in the target agent session."
+    (interactive)
+    (if (kdb-claude--target-is-agent-p)
+        (with-current-buffer kdb-claude-target
+          (claude-code--term-send-string claude-code-terminal-backend (kbd "ESC")))
+      (message "Target is not an agent")))
+
   ;; Project launcher — start Claude in any project/branch without navigating there
   (defun kdb-claude--recent-projects ()
     "Return list of recent project directories, most recent first."
@@ -2108,44 +2207,41 @@ Pick from saved sessions, archive, or current region."
     (require 'claude-code nil t)
     (transient-define-prefix kdb-claude-menu ()
       "Claude"
-      [["Start"
-        ("N" "New (pick project)" kdb-claude-start)
+      [:description (lambda ()
+                      (format "Target: %s"
+                              (if (and kdb-claude-target (buffer-live-p kdb-claude-target))
+                                  (buffer-name kdb-claude-target)
+                                "none (select with TAB)")))
+       ["Start"
+        ("N" "New (project)" kdb-claude-start)
         ("x" "Agent here" claude-code)
         ("l" "Chat here" gptel)]
-       ["Think"
-        ("s" "Send at Point" gptel-send)
+       ["Send to Target"
+        ("s" "Prompt" kdb-claude-prompt-target)
+        ("r" "Region" kdb-claude-send-region-to-target)
+        ("F" "File" kdb-claude-send-file-to-target)
+        ("y" "Accept" kdb-claude-accept-target)
+        ("n" "Reject" kdb-claude-reject-target)]
+       ["Quick Fix (in-place)"
         ("e" "Explain" kdb-gptel-explain)
-        ("w" "Rewrite" gptel-rewrite)
-        ("q" "From Notes" kdb-gptel-send-capture)]
-       ["Quick Fix"
-        ("r" "Refactor" kdb-gptel-refactor)
+        ("R" "Refactor" kdb-gptel-refactor)
         ("f" "Fix Bugs" kdb-gptel-fix)
         ("t" "Gen Tests" kdb-gptel-tests)
-        ("d" "Add Docs" kdb-gptel-doc)]
-       ["Agent"
-        ("X" "Give Task" claude-code-send-command)
-        ("R" "Send Region" claude-code-send-region)
-        ("E" "Fix Error" claude-code-fix-error-at-point)
-        ("." "Show/Hide" claude-code-toggle)
-        ("y" "Accept" claude-code-send-return)
-        ("n" "Reject" claude-code-send-escape)
-        ("K" "Kill" claude-code-kill)]]
-      [["Context"
-        ("a" "Add Region" gptel-add)
-        ("F" "Add File" gptel-add-file)
-        ("p" "Add Project" kdb-gptel-add-project)
-        ("k" "Buffer → Chat" kdb-gptel-code)
-        ("c" "Clear" gptel-context-remove-all)]
-       ["Sessions"
-        ("TAB" "Switch Active" kdb-claude-sessions)
+        ("d" "Add Docs" kdb-gptel-doc)
+        ("w" "Rewrite" gptel-rewrite)]]
+      [["Sessions"
+        ("TAB" "Set Target" kdb-claude-set-target)
+        ("." "Show/Hide Agent" claude-code-toggle)
+        ("K" "Kill Agent" claude-code-kill)
         ("o" "Open Past" kdb-claude-recall)
         ("/" "Search" kdb-claude-search)
         ("b" "Browse" kdb-claude-browse)]
        ["Move"
         (">" "Recall → Agent" kdb-claude-send-to-code)
         ("<" "Recall → Chat" kdb-claude-send-to-chat)
+        ("q" "From Notes" kdb-gptel-send-capture)
         ("i" "Import Desktop" kdb-claude-import-export)
-        ("S" "Archive Sessions" kdb-claude-sync)
+        ("S" "Archive" kdb-claude-sync)
         ""
         ("m" "Settings" gptel-menu)]])
     (kdb-claude-menu))
