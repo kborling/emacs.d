@@ -990,7 +990,24 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq
    vc-directory-exclusion-list (nconc vc-directory-exclusion-list '("node_modules" "elpa" ".sl"))
    project-vc-extra-root-markers '(".envrc" "package.json" ".project" ".sl")
-   project-prune-zombie-projects '((prompt . project-prune-zombies-default))))
+   project-prune-zombie-projects '((prompt . project-prune-zombies-default)))
+
+  ;; Use fd instead of find for project file listing (much faster)
+  (when (executable-find "fd")
+    (defun kdb-project-files-fd (project &optional dirs)
+      "Find files in PROJECT using fd for speed.
+Falls back to DIRS or project roots."
+      (let* ((roots (or dirs (list (project-root project))))
+             (args (append '("--type" "f" "--hidden" "--follow"
+                            "--exclude" ".git")
+                           (mapcan (lambda (dir)
+                                    (list "--search-path" (expand-file-name dir)))
+                                   roots))))
+        (split-string
+         (apply #'process-lines "fd" args)
+         "\n" t)))
+    (cl-defmethod project-files ((project (head vc)) &optional dirs)
+      (kdb-project-files-fd project dirs))))
 
 
 ;; Eshell ================================================== ;;
