@@ -1984,44 +1984,42 @@ Pick from saved sessions, archive, or current region."
     (require 'claude-code nil t)
     (transient-define-prefix kdb-claude-menu ()
       "Claude"
-      ;; Row 1: the things you do
       [["Think"
         ("l" "Chat" gptel)
         ("s" "Send at Point" gptel-send)
         ("e" "Explain" kdb-gptel-explain)
-        ("w" "Rewrite" gptel-rewrite)
+        ("w" "Rewrite (prompt)" gptel-rewrite)
         ("q" "From Notes" kdb-gptel-send-capture)
         ("m" "Model" gptel-menu)]
-       ["Code"
+       ["Quick Fix"
         ("r" "Refactor" kdb-gptel-refactor)
-        ("f" "Fix" kdb-gptel-fix)
-        ("t" "Tests" kdb-gptel-tests)
-        ("d" "Document" kdb-gptel-doc)
-        ("E" "Fix Error at Point" claude-code-fix-error-at-point)]
-       ["Execute"
-        ("x" "Start Claude Code" claude-code)
-        ("X" "Send Task" claude-code-send-command)
+        ("f" "Fix Bugs" kdb-gptel-fix)
+        ("t" "Gen Tests" kdb-gptel-tests)
+        ("d" "Add Docs" kdb-gptel-doc)
+        ("E" "Fix Error" claude-code-fix-error-at-point)]
+       ["Agent"
+        ("x" "Start" claude-code)
+        ("X" "Prompt" claude-code-send-command)
         ("R" "Send Region" claude-code-send-region)
-        ("." "Toggle Window" claude-code-toggle)
-        ("y" "Accept" claude-code-send-return)
-        ("n" "Reject" claude-code-send-escape)
-        ("K" "Kill Session" claude-code-kill)]]
-      ;; Row 2: context and memory
-      [["Context"
+        ("." "Show/Hide" claude-code-toggle)
+        ("y" "Yes" claude-code-send-return)
+        ("n" "No" claude-code-send-escape)
+        ("K" "Kill" claude-code-kill)]]
+      [["Context (for Think)"
         ("a" "Add Region" gptel-add)
         ("F" "Add File" gptel-add-file)
         ("p" "Add Project" kdb-gptel-add-project)
-        ("k" "Code Session" kdb-gptel-code)
-        ("c" "Clear" gptel-context-remove-all)]
+        ("k" "Buffer as Chat" kdb-gptel-code)
+        ("c" "Clear Context" gptel-context-remove-all)]
        ["Recall"
-        ("o" "Open Session" kdb-claude-recall)
-        ("/" "Search" kdb-claude-search)
-        ("b" "Browse" kdb-claude-browse)]
-       ["Transfer"
-        (">" "Session → Code" kdb-claude-send-to-code)
-        ("<" "Session → Chat" kdb-claude-send-to-chat)
-        ("i" "Import Export" kdb-claude-import-export)
-        ("S" "Sync Archive" kdb-claude-sync)]])
+        ("o" "Open Past Session" kdb-claude-recall)
+        ("/" "Search All" kdb-claude-search)
+        ("b" "Browse Archive" kdb-claude-browse)]
+       ["Move"
+        (">" "Recall → Agent" kdb-claude-send-to-code)
+        ("<" "Recall → Chat" kdb-claude-send-to-chat)
+        ("i" "Import Desktop" kdb-claude-import-export)
+        ("S" "Archive Sessions" kdb-claude-sync)]])
     (kdb-claude-menu))
 
   :bind (("C-c l" . kdb-claude)))
