@@ -1988,38 +1988,39 @@ Pick from saved sessions, archive, or current region."
         ("l" "Chat" gptel)
         ("s" "Send at Point" gptel-send)
         ("e" "Explain" kdb-gptel-explain)
-        ("w" "Rewrite (prompt)" gptel-rewrite)
-        ("q" "From Notes" kdb-gptel-send-capture)
-        ("m" "Model" gptel-menu)]
+        ("w" "Rewrite" gptel-rewrite)
+        ("q" "From Notes" kdb-gptel-send-capture)]
        ["Quick Fix"
         ("r" "Refactor" kdb-gptel-refactor)
         ("f" "Fix Bugs" kdb-gptel-fix)
         ("t" "Gen Tests" kdb-gptel-tests)
-        ("d" "Add Docs" kdb-gptel-doc)
-        ("E" "Fix Error" claude-code-fix-error-at-point)]
-       ["Agent"
-        ("x" "Start" claude-code)
-        ("X" "Prompt" claude-code-send-command)
+        ("d" "Add Docs" kdb-gptel-doc)]
+       ["Agent (Claude Code)"
+        ("x" "Open / New" claude-code)
+        ("X" "Give Task" claude-code-send-command)
         ("R" "Send Region" claude-code-send-region)
+        ("E" "Fix Error" claude-code-fix-error-at-point)
         ("." "Show/Hide" claude-code-toggle)
-        ("y" "Yes" claude-code-send-return)
-        ("n" "No" claude-code-send-escape)
+        ("y" "Accept" claude-code-send-return)
+        ("n" "Reject" claude-code-send-escape)
         ("K" "Kill" claude-code-kill)]]
       [["Context (for Think)"
         ("a" "Add Region" gptel-add)
         ("F" "Add File" gptel-add-file)
         ("p" "Add Project" kdb-gptel-add-project)
-        ("k" "Buffer as Chat" kdb-gptel-code)
-        ("c" "Clear Context" gptel-context-remove-all)]
+        ("k" "Buffer → Chat" kdb-gptel-code)
+        ("c" "Clear" gptel-context-remove-all)]
        ["Recall"
-        ("o" "Open Past Session" kdb-claude-recall)
-        ("/" "Search All" kdb-claude-search)
-        ("b" "Browse Archive" kdb-claude-browse)]
+        ("o" "Open Session" kdb-claude-recall)
+        ("/" "Search" kdb-claude-search)
+        ("b" "Browse" kdb-claude-browse)]
        ["Move"
         (">" "Recall → Agent" kdb-claude-send-to-code)
         ("<" "Recall → Chat" kdb-claude-send-to-chat)
         ("i" "Import Desktop" kdb-claude-import-export)
-        ("S" "Archive Sessions" kdb-claude-sync)]])
+        ("S" "Archive Sessions" kdb-claude-sync)
+        ""
+        ("m" "Settings" gptel-menu)]])
     (kdb-claude-menu))
 
   :bind (("C-c l" . kdb-claude)))
