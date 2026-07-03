@@ -1,0 +1,23 @@
+{
+    "name": "UwU",
+    "background": "#131A1C",
+    "foreground": "#C5C8C9",
+    "cursorColor": "#C26F6F",
+    "selectionBackground": "#2F3638",
+    "black": "#1B2224",
+    "brightBlack": "#232A2C",
+    "red": "#F65B5B",
+    "brightRed": "#C26F6F",
+    "green": "#6BB05D",
+    "brightGreen": "#8DC776",
+    "yellow": "#E59E67",
+    "brightYellow": "#E7AC7E",
+    "blue": "#53A7BF",
+    "brightBlue": "#6CBAD1",
+    "purple": "#B185DB",
+    "brightPurple": "#BB8FE5",
+    "cyan": "#51A39F",
+    "brightCyan": "#6DB0AD",
+    "white": "#C4C4C4",
+    "brightWhite": "#C5C8C9"
+}

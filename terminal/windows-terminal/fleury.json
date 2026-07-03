@@ -1,0 +1,23 @@
+{
+    "name": "Fleury",
+    "background": "#020202",
+    "foreground": "#B99468",
+    "cursorColor": "#00EE00",
+    "selectionBackground": "#303040",
+    "black": "#020202",
+    "brightBlack": "#222425",
+    "red": "#BD2D2D",
+    "brightRed": "#FF0000",
+    "green": "#00EE00",
+    "brightGreen": "#6EB535",
+    "yellow": "#EDB211",
+    "brightYellow": "#F0C674",
+    "blue": "#2895C7",
+    "brightBlue": "#2895C7",
+    "purple": "#DC7575",
+    "brightPurple": "#C9598A",
+    "cyan": "#8FFFF2",
+    "brightCyan": "#9BA290",
+    "white": "#B99468",
+    "brightWhite": "#FCAA05"
+}

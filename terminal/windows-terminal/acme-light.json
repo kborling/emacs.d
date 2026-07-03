@@ -1,0 +1,23 @@
+{
+    "name": "Acme Light",
+    "background": "#FFFFE8",
+    "foreground": "#444444",
+    "cursorColor": "#444444",
+    "selectionBackground": "#E8EB98",
+    "black": "#444444",
+    "brightBlack": "#988D6D",
+    "red": "#880000",
+    "brightRed": "#CC0000",
+    "green": "#005500",
+    "brightGreen": "#006600",
+    "yellow": "#888838",
+    "brightYellow": "#997700",
+    "blue": "#1054AF",
+    "brightBlue": "#0066CC",
+    "purple": "#555599",
+    "brightPurple": "#880088",
+    "cyan": "#007777",
+    "brightCyan": "#009999",
+    "white": "#EFEFD8",
+    "brightWhite": "#FFFFE8"
+}

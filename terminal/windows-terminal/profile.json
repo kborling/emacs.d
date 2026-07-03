@@ -1,0 +1,115 @@
+{
+    "$help": "Copy the schemes into settings.json > schemes array, and profiles into settings.json > profiles > list",
+    "schemes": [
+        {
+            "name": "Fleury",
+            "background": "#020202",
+            "foreground": "#B99468",
+            "cursorColor": "#00EE00",
+            "selectionBackground": "#303040",
+            "black": "#020202",
+            "brightBlack": "#222425",
+            "red": "#BD2D2D",
+            "brightRed": "#FF0000",
+            "green": "#00EE00",
+            "brightGreen": "#6EB535",
+            "yellow": "#EDB211",
+            "brightYellow": "#F0C674",
+            "blue": "#2895C7",
+            "brightBlue": "#2895C7",
+            "purple": "#DC7575",
+            "brightPurple": "#C9598A",
+            "cyan": "#8FFFF2",
+            "brightCyan": "#9BA290",
+            "white": "#B99468",
+            "brightWhite": "#FCAA05"
+        },
+        {
+            "name": "UwU",
+            "background": "#131A1C",
+            "foreground": "#C5C8C9",
+            "cursorColor": "#C26F6F",
+            "selectionBackground": "#2F3638",
+            "black": "#1B2224",
+            "brightBlack": "#232A2C",
+            "red": "#F65B5B",
+            "brightRed": "#C26F6F",
+            "green": "#6BB05D",
+            "brightGreen": "#8DC776",
+            "yellow": "#E59E67",
+            "brightYellow": "#E7AC7E",
+            "blue": "#53A7BF",
+            "brightBlue": "#6CBAD1",
+            "purple": "#B185DB",
+            "brightPurple": "#BB8FE5",
+            "cyan": "#51A39F",
+            "brightCyan": "#6DB0AD",
+            "white": "#C4C4C4",
+            "brightWhite": "#C5C8C9"
+        },
+        {
+            "name": "Acme Light",
+            "background": "#FFFFE8",
+            "foreground": "#444444",
+            "cursorColor": "#444444",
+            "selectionBackground": "#E8EB98",
+            "black": "#444444",
+            "brightBlack": "#988D6D",
+            "red": "#880000",
+            "brightRed": "#CC0000",
+            "green": "#005500",
+            "brightGreen": "#006600",
+            "yellow": "#888838",
+            "brightYellow": "#997700",
+            "blue": "#1054AF",
+            "brightBlue": "#0066CC",
+            "purple": "#555599",
+            "brightPurple": "#880088",
+            "cyan": "#007777",
+            "brightCyan": "#009999",
+            "white": "#EFEFD8",
+            "brightWhite": "#FFFFE8"
+        }
+    ],
+    "profiles": [
+        {
+            "name": "PowerShell",
+            "commandline": "pwsh.exe",
+            "colorScheme": "Fleury",
+            "font": {
+                "face": "JetBrains Mono",
+                "size": 11
+            },
+            "cursorShape": "filledBox",
+            "padding": "8",
+            "scrollbarState": "hidden",
+            "startingDirectory": "%USERPROFILE%"
+        },
+        {
+            "name": "Git Bash",
+            "commandline": "C:\\Program Files\\Git\\bin\\bash.exe",
+            "colorScheme": "Fleury",
+            "icon": "C:\\Program Files\\Git\\mingw64\\share\\git\\git-for-windows.ico",
+            "font": {
+                "face": "JetBrains Mono",
+                "size": 11
+            },
+            "cursorShape": "filledBox",
+            "padding": "8",
+            "scrollbarState": "hidden",
+            "startingDirectory": "%USERPROFILE%"
+        },
+        {
+            "name": "WSL",
+            "commandline": "wsl.exe",
+            "colorScheme": "Fleury",
+            "font": {
+                "face": "JetBrains Mono",
+                "size": 11
+            },
+            "cursorShape": "filledBox",
+            "padding": "8",
+            "scrollbarState": "hidden"
+        }
+    ]
+}
