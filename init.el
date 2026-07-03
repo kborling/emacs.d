@@ -9,7 +9,7 @@
 
 ;;; Commentary:
 
-;; Copyright (C) 2025 Kevin Borling
+;; Copyright (C) 2026 Kevin Borling
 ;; My personal Emacs config.
 
 ;;; Code:
@@ -48,7 +48,6 @@
 
 (setq package-archives
       '(("gnu-elpa" . "https://elpa.gnu.org/packages/")
-        ("gnu-elpa-devel" . "https://elpa.gnu.org/devel/")
         ("nongnu" . "https://elpa.nongnu.org/nongnu/")
         ("melpa" . "https://melpa.org/packages/")))
 
@@ -64,11 +63,9 @@
 
 ;;; Package Management ========================================= ;;
 
-(use-package use-package
-  :custom
-  (use-package-always-ensure t)
-  (package-native-compile t)
-  (warning-minimum-level :emergency))
+(setq use-package-always-ensure t
+      package-native-compile t
+      warning-minimum-level :emergency)
 
 (setq package-install-upgrade-built-in t
       package-vc-register-as-project nil)
@@ -276,7 +273,7 @@
 ;; Time and battery in mode line
 (setq display-time-default-load-average nil)
 (display-time-mode t)
-(display-battery-mode t)
+(ignore-errors (display-battery-mode t))
 
 ;; Smooth scrolling (GUI only)
 (when (display-graphic-p)
@@ -337,7 +334,7 @@
   :vc (:url "https://github.com/kborling/uwu-theme" :rev :newest)
   :config
   (setq
-   uwu-distinct-line-numbers 'nil
+   uwu-distinct-line-numbers nil
    uwu-scale-org-headlines t
    uwu-use-variable-pitch t
    uwu-cursor-color 'red)
@@ -347,8 +344,9 @@
 (use-package fleury-theme
   :vc (:url "https://github.com/kborling/fleury-theme.el" :rev :newest)
   :config
-  (load-theme 'fleury t)
-  (add-hook 'prog-mode-hook 'hl-line-mode))
+  (load-theme 'fleury t))
+
+(add-hook 'prog-mode-hook #'hl-line-mode)
 
 (use-package acme-theme)
 
@@ -381,7 +379,7 @@
             ("multimarkdown" "multimarkdown" nil "Markdown export")
             ("unzip" "unzip" nil "Claude export import")
             ;; Terminal
-            ("fd" "fd" nil "Fast file finder")
+            ("fd" "fd" t "Project file finder")
             ("fzf" "fzf" nil "Fuzzy finder")
             ("bat" "bat" nil "Cat with syntax highlighting")
             ;; EXWM / Desktop
@@ -500,12 +498,11 @@
   "Create a new terminal using eat (GUI) or term (terminal).
 Names buffer after the directory for easier identification."
   (interactive)
-  (let ((shell (or (getenv "SHELL") (getenv "COMSPEC") "/bin/bash"))
-        (name (format "*eat: %s*" (abbreviate-file-name default-directory))))
+  (let ((name (format "*eat: %s*" (abbreviate-file-name default-directory))))
     (if (and (display-graphic-p) (fboundp 'eat))
         (let ((eat-buffer-name (generate-new-buffer-name name)))
           (eat))
-      (term shell))))
+      (term (or (getenv "SHELL") (getenv "COMSPEC") "/bin/bash")))))
 
 
 (defun toggle-theme ()
@@ -905,7 +902,6 @@ If point is at the end of the line, kill the whole line including the newline."
    delete-by-moving-to-trash t
    dired-dwim-target t
    dired-ls-F-marks-symlinks t
-   dired-clean-confirm-on-delete t
    dired-deletion-confirmer 'y-or-n-p
    dired-mouse-drag-files t)
 
@@ -970,8 +966,7 @@ If point is at the end of the line, kill the whole line including the newline."
       ("Help/Info" (or (name . "^\\*Help\\*")
                        (name . "^\\*Apropos\\*")
                        (name . "^\\*info\\*")
-                       (name . "^\\*Man ")
-))
+                       (name . "^\\*Man ")))
       ("Special" (name . "^\\*")))))
 
   (add-hook 'ibuffer-mode-hook
@@ -1003,9 +998,7 @@ Falls back to DIRS or project roots."
                            (mapcan (lambda (dir)
                                     (list "--search-path" (expand-file-name dir)))
                                    roots))))
-        (split-string
-         (apply #'process-lines "fd" args)
-         "\n" t)))
+        (apply #'process-lines "fd" args)))
     (cl-defmethod project-files ((project (head vc)) &optional dirs)
       (kdb-project-files-fd project dirs))))
 
@@ -1740,8 +1733,8 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
     (interactive)
     (gptel-add-file (or buffer-file-name
                                 (let ((tmp (make-temp-file "gptel-" nil
-                                             (when (derived-mode-p 'prog-mode)
-                                               (concat "." (file-name-extension (symbol-name major-mode)))))))
+                                             (when buffer-file-name
+                                               (concat "." (file-name-extension buffer-file-name))))))
                                   (write-region (point-min) (point-max) tmp)
                                   tmp)))
     (gptel))
