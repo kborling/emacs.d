@@ -1133,25 +1133,6 @@ Falls back to DIRS or project roots."
                                            "--header-insertion=never"
                                            "--header-insertion-decorators=0")))
 
-  ;; Angular Language Server — defer npm lookup until actually needed
-  (defvar kdb-angular-lsp-configured nil)
-  (defun kdb-angular-lsp-setup ()
-    "Configure Angular LSP on first use."
-    (unless kdb-angular-lsp-configured
-      (setq kdb-angular-lsp-configured t)
-      (when (executable-find "npm")
-        (let* ((global-prefix (string-trim (shell-command-to-string "npm config get --global prefix")))
-               (modules-path (if (eq system-type 'windows-nt) "node_modules" "lib/node_modules"))
-               (node-modules-path (expand-file-name modules-path global-prefix)))
-          (add-to-list 'eglot-server-programs
-                       `(angular-template-mode . ("ngserver"
-                                                  "--stdio"
-                                                  "--tsProbeLocations"
-                                                  ,(concat node-modules-path "/typescript/lib")
-                                                  "--ngProbeLocations"
-                                                  ,(concat node-modules-path "/@angular/language-server/bin"))))))))
-  (add-hook 'angular-template-mode-hook #'kdb-angular-lsp-setup)
-
   ;; Show all of the available eldoc information when we want it. This way Flymake errors
   ;; don't just get clobbered by docstrings.
   (add-hook 'eglot-managed-mode-hook
@@ -1164,7 +1145,6 @@ Falls back to DIRS or project roots."
   (add-hook 'eglot-managed-mode-hook (lambda () (eglot-inlay-hints-mode -1)))
 
   (dolist (mode '(html-ts-mode
-                  angular-template-mode
                   typescript-ts-mode
                   css-ts-mode
                   js-ts-mode
