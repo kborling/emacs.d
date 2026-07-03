@@ -27,6 +27,12 @@
 (when (boundp 'w32-pipe-buffer-size)
   (setq w32-pipe-buffer-size (* 64 1024)))
 
+;; UI chrome — disable before frame draws to avoid flicker
+;; Keep macOS menu bar (integrates with system top bar)
+(tool-bar-mode -1)
+(unless (eq system-type 'darwin)
+  (menu-bar-mode -1))
+
 ;; Frame and startup settings
 (setq frame-resize-pixelwise t
       frame-inhibit-implied-resize t

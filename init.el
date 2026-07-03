@@ -190,12 +190,6 @@
 
 (advice-add 'display-buffer :after #'kdb-messages-buffer-advice)
 
-;; UI chrome — keep macOS menu bar (integrates with system), disable elsewhere
-(when (display-graphic-p)
-  (tool-bar-mode -1)
-  (unless (eq system-type 'darwin)
-    (menu-bar-mode -1)))
-
 ;; Frame sizing — large but not fullscreen (EXWM handles its own)
 (unless (memq window-system '(x))  ; Skip on EXWM
   (when (display-graphic-p)
