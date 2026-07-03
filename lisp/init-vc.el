@@ -245,13 +245,13 @@
   
   ;; Navigation in commit diff buffer
   (defun kdb-commit-diff-show-next ()
-    "Show diff for next commit."
+    "Show diff for next (newer) commit."
     (interactive)
     (when (bound-and-true-p kdb-current-commit-hash)
-      (let ((next-hash (string-trim 
-                       (shell-command-to-string 
-                        (format "git rev-list --reverse HEAD..HEAD~100 | grep -A1 %s | tail -1"
-                               kdb-current-commit-hash)))))
+      (let ((next-hash (string-trim
+                        (shell-command-to-string
+                         (format "git log --reverse --ancestry-path %s..HEAD --format=%%h | head -1"
+                                 (shell-quote-argument kdb-current-commit-hash))))))
         (if (and next-hash (not (string-empty-p next-hash)))
             (kdb-vc-commit-show-diff-in-buffer next-hash)
           (message "No next commit")))))
@@ -260,9 +260,10 @@
     "Show diff for previous commit."
     (interactive)
     (when (bound-and-true-p kdb-current-commit-hash)
-      (let ((prev-hash (string-trim 
-                       (shell-command-to-string 
-                        (format "git rev-parse %s^" kdb-current-commit-hash)))))
+      (let ((prev-hash (string-trim
+                        (shell-command-to-string
+                         (format "git rev-parse %s^"
+                                 (shell-quote-argument kdb-current-commit-hash))))))
         (if (and prev-hash (not (string-empty-p prev-hash)))
             (kdb-vc-commit-show-diff-in-buffer prev-hash)
           (message "No previous commit")))))
@@ -304,6 +305,21 @@
         vc-msg-persist-popup t)
   
   (setq vc-msg-git-show-commit-function 'vc-msg-git-show-commit-internal))
+
+(defun kdb-vc-git-unstage ()
+  "Unstage staged changes (git reset HEAD)."
+  (interactive)
+  (let ((file (when buffer-file-name
+                (file-relative-name buffer-file-name (vc-root-dir)))))
+    (if file
+        (progn
+          (shell-command (format "git reset HEAD -- %s" (shell-quote-argument file)))
+          (message "Unstaged: %s" file))
+      (when (yes-or-no-p "Unstage all staged changes? ")
+        (shell-command "git reset HEAD")
+        (message "All changes unstaged")))
+    (when (derived-mode-p 'vc-dir-mode)
+      (vc-dir-refresh))))
 
 ;; VC Transient Menu - provides Magit-like interface for VC
 (defun kdb-vc-dir-root ()
@@ -364,10 +380,11 @@
     
     [["Changes"
       ("a" "Add/Stage" vc-register)
+      ("x" "Unstage" kdb-vc-git-unstage)
       ("c" "Commit" vc-next-action)
       ("C-c" "Amend" kdb-vc-git-amend-commit)
       ("u" "Revert" vc-revert)
-      ("U" "Checkout" vc-revert-file)
+      ("U" "Checkout" kdb-vc-revert-file)
       ("k" "Delete" vc-delete-file)
       ("R" "Rename" vc-rename-file)]
      
@@ -394,7 +411,9 @@
   (let* ((remote (read-string "Remote name (default: origin): " "origin"))
          (url (read-string "New URL: ")))
     (when (and remote url (not (string-empty-p url)))
-      (shell-command (format "git remote set-url %s %s" remote url))
+      (shell-command (format "git remote set-url %s %s"
+                             (shell-quote-argument remote)
+                             (shell-quote-argument url)))
       (message "Remote '%s' URL updated to: %s" remote url))))
 
 (defun kdb-vc-remote-add ()
@@ -403,18 +422,21 @@
   (let* ((remote (read-string "Remote name: "))
          (url (read-string "Remote URL: ")))
     (when (and remote url (not (string-empty-p url)) (not (string-empty-p remote)))
-      (shell-command (format "git remote add %s %s" remote url))
+      (shell-command (format "git remote add %s %s"
+                             (shell-quote-argument remote)
+                             (shell-quote-argument url)))
       (message "Remote '%s' added with URL: %s" remote url))))
 
 (defun kdb-vc-git-amend-commit ()
-  "Amend the last commit."
+  "Amend the last commit (staged changes only)."
   (interactive)
-  (if (vc-git-conflicted-files default-directory)
-      (error "Cannot amend while there are unresolved conflicts"))
-  (let ((last-msg (shell-command-to-string "git log -1 --pretty=%B")))
-    (vc-git-checkin nil nil t last-msg t)))
+  (when (yes-or-no-p "Amend last commit? ")
+    (shell-command "git commit --amend --no-edit")
+    (message "Last commit amended")
+    (when (derived-mode-p 'vc-dir-mode)
+      (vc-dir-refresh))))
 
-(defun vc-revert-file ()
+(defun kdb-vc-revert-file ()
   "Revert the current file to the last committed version."
   (interactive)
   (when (vc-backend buffer-file-name)
@@ -433,7 +455,7 @@
                     "\n" t))
          (branch (completing-read "Delete branch: " branches)))
     (when (yes-or-no-p (format "Delete branch '%s'? " branch))
-      (shell-command (format "git branch -d %s" branch))
+      (shell-command (format "git branch -d %s" (shell-quote-argument branch)))
       (message "Branch '%s' deleted" branch))))
 
 (defun kdb-vc-rename-branch ()
@@ -442,7 +464,7 @@
   (let* ((current-branch (string-trim (shell-command-to-string "git branch --show-current")))
          (new-name (read-string (format "Rename branch '%s' to: " current-branch))))
     (when (and new-name (not (string-empty-p new-name)))
-      (shell-command (format "git branch -m %s" new-name))
+      (shell-command (format "git branch -m %s" (shell-quote-argument new-name)))
       (message "Branch renamed from '%s' to '%s'" current-branch new-name))))
 
 (defun kdb-vc-git-stash ()
@@ -741,7 +763,7 @@
                     ((string= state "removed") (cl-incf removed))
                     ((string= state "unregistered") (cl-incf unregistered)))))
           (forward-line 1)))
-      (message "📊 Modified: %d | Added: %d | Removed: %d | Untracked: %d" 
+      (message "Modified: %d | Added: %d | Removed: %d | Untracked: %d"
                modified added removed unregistered)))
   
   ;; Show diff for file at point or all marked files
