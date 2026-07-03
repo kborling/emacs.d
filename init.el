@@ -342,7 +342,8 @@
 
 (add-hook 'prog-mode-hook #'hl-line-mode)
 
-(use-package acme-theme)
+(use-package acme-theme
+  :defer t)
 
 
 ;;; ============================================================
@@ -865,6 +866,7 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package ediff
   :ensure nil
+  :defer t
   :config
   (setq
    ediff-keep-variants nil
@@ -1001,6 +1003,7 @@ Falls back to DIRS or project roots."
 
 (use-package eshell
   :ensure nil
+  :commands eshell
   :config
   (setq eshell-history-size 10000
         eshell-buffer-maximum-lines 10000
@@ -1132,18 +1135,24 @@ Falls back to DIRS or project roots."
                                            "--header-insertion=never"
                                            "--header-insertion-decorators=0")))
 
-  ;; Angular Language Server (only when npm is available)
-  (when (executable-find "npm")
-    (let* ((global-prefix (string-trim (shell-command-to-string "npm config get --global prefix")))
-           (modules-path (if (eq system-type 'windows-nt) "node_modules" "lib/node_modules"))
-           (node-modules-path (expand-file-name modules-path global-prefix)))
-      (add-to-list 'eglot-server-programs
-                   `(angular-template-mode . ("ngserver"
-                                              "--stdio"
-                                              "--tsProbeLocations"
-                                              ,(concat node-modules-path "/typescript/lib")
-                                              "--ngProbeLocations"
-                                              ,(concat node-modules-path "/@angular/language-server/bin"))))))
+  ;; Angular Language Server — defer npm lookup until actually needed
+  (defvar kdb-angular-lsp-configured nil)
+  (defun kdb-angular-lsp-setup ()
+    "Configure Angular LSP on first use."
+    (unless kdb-angular-lsp-configured
+      (setq kdb-angular-lsp-configured t)
+      (when (executable-find "npm")
+        (let* ((global-prefix (string-trim (shell-command-to-string "npm config get --global prefix")))
+               (modules-path (if (eq system-type 'windows-nt) "node_modules" "lib/node_modules"))
+               (node-modules-path (expand-file-name modules-path global-prefix)))
+          (add-to-list 'eglot-server-programs
+                       `(angular-template-mode . ("ngserver"
+                                                  "--stdio"
+                                                  "--tsProbeLocations"
+                                                  ,(concat node-modules-path "/typescript/lib")
+                                                  "--ngProbeLocations"
+                                                  ,(concat node-modules-path "/@angular/language-server/bin"))))))))
+  (add-hook 'angular-template-mode-hook #'kdb-angular-lsp-setup)
 
   ;; Show all of the available eldoc information when we want it. This way Flymake errors
   ;; don't just get clobbered by docstrings.
@@ -1371,6 +1380,7 @@ Falls back to DIRS or project roots."
 ;; Cape ==================================================== ;;
 
 (use-package cape
+  :after corfu
   :config
   (dolist (func '(cape-dabbrev
                   cape-file
@@ -1468,7 +1478,8 @@ Falls back to DIRS or project roots."
 ;; Angular Mode ============================================ ;;
 
 (use-package angular-mode
-  :vc (:url "https://github.com/kborling/angular-mode" :rev :newest))
+  :vc (:url "https://github.com/kborling/angular-mode" :rev :newest)
+  :defer t)
 
 ;; HTML Mode =============================================== ;;
 
@@ -1493,16 +1504,16 @@ Falls back to DIRS or project roots."
 
 (use-package nxml-mode
   :ensure nil
-  :config
-  (add-to-list 'auto-mode-alist '("\\.csproj\\'" . nxml-mode)))
+  :defer t
+  :mode "\\.csproj\\'")
 
 
 ;; Conf Mode =============================================== ;;
 
 (use-package conf-mode
   :ensure nil
-  :config
-  (add-to-list 'auto-mode-alist '("\\.sln\\'" . conf-mode)))
+  :defer t
+  :mode "\\.sln\\'")
 
 
 ;; Dotnet ================================================== ;;
@@ -1554,6 +1565,7 @@ Falls back to DIRS or project roots."
 (use-package eat
   :vc (:url "https://codeberg.org/akib/emacs-eat" :rev :newest)
   :ensure t
+  :commands eat
   :config
   ;; Performance settings
   (setq eat-kill-buffer-on-exit t
