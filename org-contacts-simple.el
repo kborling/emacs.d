@@ -1,7 +1,7 @@
 ;;; org-contacts-simple.el --- Contact & people management -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;; People management for managers/directors.
+;; People and performance tracking.
 ;; Contacts in ~/.org/contacts.org (or .gpg), performance in ~/.org/people/
 ;; Performance files are per fiscal year: FY2026.org, FY2025.org, etc.
 ;;
@@ -156,7 +156,7 @@
       (message "Feedback logged for %s" name))))
 
 (defun kdb/log-1on1 ()
-  "Log 1:1 meeting notes for a direct report."
+  "Log 1:1 meeting notes."
   (interactive)
   (let* ((name (kdb/read-contact-name))
          (file (kdb/ensure-people-file))
@@ -194,7 +194,7 @@
       (message "Follow-up for %s due %s" name deadline))))
 
 (defun kdb/set-goals ()
-  "Set or update goals for a direct report."
+  "Set or update goals for a person."
   (interactive)
   (let* ((name (kdb/read-contact-name))
          (file (kdb/ensure-people-file)))
@@ -269,7 +269,7 @@
     (switch-to-buffer buf)))
 
 (defun kdb/review-prep ()
-  "Prepare a review summary for a direct report.
+  "Prepare a review summary for a person.
 Gathers wins, issues, feedback, goals, and follow-ups from the current FY."
   (interactive)
   (let* ((name (kdb/read-contact-name))
@@ -305,8 +305,7 @@ Gathers wins, issues, feedback, goals, and follow-ups from the current FY."
     (switch-to-buffer buf)))
 
 (defun kdb/attention ()
-  "Show what needs your attention across all direct reports.
-Open follow-ups, recent issues, and upcoming deadlines."
+  "Show what needs your attention — open follow-ups and recent issues."
   (interactive)
   (let* ((file (kdb/ensure-people-file))
          (buf (get-buffer-create "*Attention Needed*")))
