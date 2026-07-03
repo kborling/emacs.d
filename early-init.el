@@ -30,6 +30,8 @@
 ;; UI chrome — disable before frame draws to avoid flicker
 ;; Keep macOS menu bar (integrates with system top bar)
 (tool-bar-mode -1)
+(scroll-bar-mode -1)
+(horizontal-scroll-bar-mode -1)
 (unless (eq system-type 'darwin)
   (menu-bar-mode -1))
 
