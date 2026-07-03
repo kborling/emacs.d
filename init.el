@@ -1869,6 +1869,113 @@ Otherwise, search org files for :claude: tagged entries and prompt."
     (unless (use-region-p) (user-error "Select a region to document"))
     (gptel-rewrite "Add documentation/docstrings to this code. Keep the code unchanged, only add documentation. Return the complete code with docs."))
 
+  ;; Bridge: collect all Claude-related buffers (gptel chats, archive org files)
+  (defun kdb-claude--list-sessions ()
+    "Return alist of (display-name . buffer-or-file) for all Claude sessions."
+    (let ((sessions '()))
+      ;; Live gptel buffers
+      (dolist (buf (buffer-list))
+        (with-current-buffer buf
+          (when (bound-and-true-p gptel-mode)
+            (push (cons (format "[chat] %s" (buffer-name buf)) buf) sessions))))
+      ;; Archive org files
+      (let ((archive (expand-file-name "~/.claude-archive")))
+        (when (file-directory-p archive)
+          (dolist (f (directory-files-recursively archive "\\.org$"))
+            (push (cons (format "[saved] %s"
+                                (file-relative-name f archive))
+                        f)
+                  sessions))))
+      ;; gptel log
+      (let ((log (expand-file-name "gptel-log.org" "~/.org/")))
+        (when (file-exists-p log)
+          (push (cons "[log] gptel-log.org" log) sessions)))
+      (nreverse sessions)))
+
+  (defun kdb-claude-recall ()
+    "Browse and open a past Claude session (chats, archives, logs)."
+    (interactive)
+    (let* ((sessions (kdb-claude--list-sessions))
+           (choice (completing-read "Session: " (mapcar #'car sessions) nil t))
+           (target (cdr (assoc choice sessions))))
+      (cond
+       ((bufferp target) (switch-to-buffer target))
+       ((stringp target) (find-file target)))))
+
+  (defun kdb-claude-send-to-code ()
+    "Send a Claude session or region to Claude Code CLI.
+Pick from live chats, saved sessions, or use the current region."
+    (interactive)
+    (unless (fboundp 'claude-code--do-send-command)
+      (require 'claude-code))
+    (let* ((sources (append
+                     (when (use-region-p)
+                       '(("[region] Current selection" . :region)))
+                     (when (bound-and-true-p gptel-mode)
+                       `(("[current] This chat buffer" . :current)))
+                     (kdb-claude--list-sessions)))
+           (choice (completing-read "Send to Claude Code: "
+                                    (mapcar #'car sources) nil t))
+           (target (cdr (assoc choice sources)))
+           (text (cond
+                  ((eq target :region)
+                   (buffer-substring-no-properties (region-beginning) (region-end)))
+                  ((eq target :current)
+                   (buffer-substring-no-properties (point-min) (point-max)))
+                  ((bufferp target)
+                   (with-current-buffer target
+                     (buffer-substring-no-properties (point-min) (point-max))))
+                  ((stringp target)
+                   (with-temp-buffer
+                     (insert-file-contents target)
+                     (buffer-string)))))
+           (instruction (read-string "Instruction for Claude Code: ")))
+      (let ((prompt (if (string-empty-p instruction)
+                        (format "Here is context from a previous conversation:\n\n%s" text)
+                      (format "%s\n\nContext:\n\n%s" instruction text))))
+        ;; Truncate if very long — Claude Code CLI has input limits
+        (when (> (length prompt) 50000)
+          (setq prompt (concat (substring prompt 0 49000)
+                               "\n\n[... truncated ...]")))
+        (claude-code--do-send-command prompt))))
+
+  (defun kdb-claude-send-to-chat ()
+    "Send a Claude session or region to a gptel chat buffer.
+Pick from saved sessions, archive, or current region."
+    (interactive)
+    (let* ((sources (append
+                     (when (use-region-p)
+                       '(("[region] Current selection" . :region)))
+                     (kdb-claude--list-sessions)))
+           (choice (completing-read "Send to gptel chat: "
+                                    (mapcar #'car sources) nil t))
+           (target (cdr (assoc choice sources)))
+           (text (cond
+                  ((eq target :region)
+                   (buffer-substring-no-properties (region-beginning) (region-end)))
+                  ((bufferp target)
+                   (with-current-buffer target
+                     (buffer-substring-no-properties (point-min) (point-max))))
+                  ((stringp target)
+                   (with-temp-buffer
+                     (insert-file-contents target)
+                     (buffer-string)))))
+           (prompt (read-string "What to ask about this session: "))
+           (buf-name (format "*Claude: %s*"
+                             (truncate-string-to-width
+                              (replace-regexp-in-string "^\\[.*?\\] " "" choice) 40)))
+           (buf (get-buffer-create buf-name)))
+      (with-current-buffer buf
+        (org-mode)
+        (erase-buffer)
+        (gptel-mode 1)
+        (insert "* Context\n\n")
+        (insert text)
+        (insert "\n\n* Prompt\n\n")
+        (insert prompt "\n"))
+      (switch-to-buffer buf)
+      (gptel-send)))
+
   ;; Transient menu — C-c l opens this, then one key does the action
   (defun kdb-gptel-transient ()
     "Claude AI menu."
@@ -1876,28 +1983,31 @@ Otherwise, search org files for :claude: tagged entries and prompt."
     (require 'transient)
     (transient-define-prefix kdb-gptel-menu ()
       "Claude"
-      [["Ask Claude"
-        ("l" "Chat" gptel)
-        ("s" "Send" gptel-send)
-        ("q" "Send Capture" kdb-gptel-send-capture)
+      [["Chat"
+        ("l" "New/Open Chat" gptel)
+        ("s" "Send at Point" gptel-send)
+        ("q" "From Capture" kdb-gptel-send-capture)
         ("m" "Model/Settings" gptel-menu)]
-       ["Act on Code"
+       ["Code"
         ("e" "Explain" kdb-gptel-explain)
         ("r" "Refactor" kdb-gptel-refactor)
         ("f" "Fix" kdb-gptel-fix)
         ("t" "Tests" kdb-gptel-tests)
         ("d" "Document" kdb-gptel-doc)
-        ("w" "Rewrite (prompt)" gptel-rewrite)]
-       ["Add Context"
-        ("a" "Region/Buffer" gptel-add)
-        ("F" "File" gptel-add-file)
-        ("p" "Project" kdb-gptel-add-project)
+        ("w" "Rewrite" gptel-rewrite)]
+       ["Context"
+        ("a" "Add Region" gptel-add)
+        ("F" "Add File" gptel-add-file)
+        ("p" "Add Project" kdb-gptel-add-project)
         ("k" "Code Session" kdb-gptel-code)
-        ("c" "Clear" gptel-context-remove-all)]
-       ["Sessions"
-        ("b" "Browse" kdb-claude-browse)
-        ("/" "Search" kdb-claude-search)
-        ("i" "Import" kdb-claude-import-export)
+        ("c" "Clear All" gptel-context-remove-all)]
+       ["Recall & Send"
+        ("o" "Open Session" kdb-claude-recall)
+        ("X" "Send to Code" kdb-claude-send-to-code)
+        ("C" "Send to Chat" kdb-claude-send-to-chat)
+        ("b" "Browse Archive" kdb-claude-browse)
+        ("/" "Search Archive" kdb-claude-search)
+        ("i" "Import Export" kdb-claude-import-export)
         ("S" "Sync" kdb-claude-sync)]])
     (kdb-gptel-menu))
 
