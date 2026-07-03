@@ -1869,6 +1869,77 @@ Otherwise, search org files for :claude: tagged entries and prompt."
     (unless (use-region-p) (user-error "Select a region to document"))
     (gptel-rewrite "Add documentation/docstrings to this code. Keep the code unchanged, only add documentation. Return the complete code with docs."))
 
+  ;; Project launcher — start Claude in any project/branch without navigating there
+  (defun kdb-claude--recent-projects ()
+    "Return list of recent project directories, most recent first."
+    (let ((projects '()))
+      ;; From project.el known projects
+      (when (fboundp 'project-known-project-roots)
+        (setq projects (project-known-project-roots)))
+      ;; From recentf
+      (dolist (f recentf-list)
+        (when-let* ((dir (file-name-directory f))
+                    (root (locate-dominating-file dir ".git")))
+          (let ((root (file-name-as-directory (expand-file-name root))))
+            (unless (member root projects)
+              (push root projects)))))
+      (nreverse projects)))
+
+  (defun kdb-claude--branches (dir)
+    "Return list of git branches in DIR."
+    (let ((default-directory dir))
+      (split-string
+       (shell-command-to-string "git branch --format='%(refname:short)' 2>/dev/null")
+       "\n" t)))
+
+  (defun kdb-claude-start ()
+    "Start a Claude session in a project of your choice.
+Pick a recent project, optionally switch branch, choose chat or agent."
+    (interactive)
+    (let* ((projects (kdb-claude--recent-projects))
+           (project (completing-read "Project: " projects nil nil nil nil
+                                     (when (project-current)
+                                       (project-root (project-current)))))
+           (branches (kdb-claude--branches project))
+           (branch (when (and branches (y-or-n-p "Switch branch? "))
+                     (completing-read "Branch: " branches nil t nil nil
+                                      (string-trim
+                                       (let ((default-directory project))
+                                         (shell-command-to-string "git branch --show-current 2>/dev/null"))))))
+           (mode (completing-read "Mode: " '("Agent (Claude Code)" "Chat (gptel)") nil t)))
+      ;; Switch branch if requested
+      (when branch
+        (let ((default-directory project))
+          (shell-command (format "git checkout %s" (shell-quote-argument branch)))))
+      ;; Start the session
+      (cond
+       ((string-prefix-p "Agent" mode)
+        (let ((default-directory project))
+          (claude-code)))
+       ((string-prefix-p "Chat" mode)
+        (let ((default-directory project))
+          (kdb-gptel-code))))))
+
+  (defun kdb-claude-start-agent ()
+    "Quick-start Claude Code agent in a project."
+    (interactive)
+    (let* ((projects (kdb-claude--recent-projects))
+           (project (completing-read "Project: " projects nil nil nil nil
+                                     (when (project-current)
+                                       (project-root (project-current))))))
+      (let ((default-directory project))
+        (claude-code))))
+
+  (defun kdb-claude-start-chat ()
+    "Quick-start gptel chat with a project as context."
+    (interactive)
+    (let* ((projects (kdb-claude--recent-projects))
+           (project (completing-read "Project: " projects nil nil nil nil
+                                     (when (project-current)
+                                       (project-root (project-current))))))
+      (let ((default-directory project))
+        (kdb-gptel-code))))
+
   ;; Session navigation — jump between active Claude sessions
   (defun kdb-claude-sessions ()
     "Switch between active Claude sessions (chats + agents).
@@ -2037,8 +2108,11 @@ Pick from saved sessions, archive, or current region."
     (require 'claude-code nil t)
     (transient-define-prefix kdb-claude-menu ()
       "Claude"
-      [["Think"
-        ("l" "Chat" gptel)
+      [["Start"
+        ("N" "New (pick project)" kdb-claude-start)
+        ("x" "Agent here" claude-code)
+        ("l" "Chat here" gptel)]
+       ["Think"
         ("s" "Send at Point" gptel-send)
         ("e" "Explain" kdb-gptel-explain)
         ("w" "Rewrite" gptel-rewrite)
@@ -2048,8 +2122,7 @@ Pick from saved sessions, archive, or current region."
         ("f" "Fix Bugs" kdb-gptel-fix)
         ("t" "Gen Tests" kdb-gptel-tests)
         ("d" "Add Docs" kdb-gptel-doc)]
-       ["Agent (Claude Code)"
-        ("x" "Open / New" claude-code)
+       ["Agent"
         ("X" "Give Task" claude-code-send-command)
         ("R" "Send Region" claude-code-send-region)
         ("E" "Fix Error" claude-code-fix-error-at-point)
@@ -2057,14 +2130,14 @@ Pick from saved sessions, archive, or current region."
         ("y" "Accept" claude-code-send-return)
         ("n" "Reject" claude-code-send-escape)
         ("K" "Kill" claude-code-kill)]]
-      [["Context (for Think)"
+      [["Context"
         ("a" "Add Region" gptel-add)
         ("F" "Add File" gptel-add-file)
         ("p" "Add Project" kdb-gptel-add-project)
         ("k" "Buffer → Chat" kdb-gptel-code)
         ("c" "Clear" gptel-context-remove-all)]
        ["Sessions"
-        ("TAB" "Switch Session" kdb-claude-sessions)
+        ("TAB" "Switch Active" kdb-claude-sessions)
         ("o" "Open Past" kdb-claude-recall)
         ("/" "Search" kdb-claude-search)
         ("b" "Browse" kdb-claude-browse)]
