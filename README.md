@@ -121,24 +121,58 @@ lisp/
 | `C-c x d` | Dired jump other window |
 | `C-c x =` | Toggle fido vertical mode |
 
-### Claude / AI (`C-c l`)
+### Claude Chat — gptel (`C-c l`)
+
+`C-c l` opens a transient menu. Think, explore, discuss.
 
 | Key | Action |
 |-----|--------|
-| `C-c l l` | Open Claude chat |
-| `C-c l s` | Send prompt at point |
-| `C-c l r` | Rewrite region |
-| `C-c l q` | Send captured entry to Claude |
-| `C-c l a` | Add region to context |
-| `C-c l f` | Add file to context |
-| `C-c l k` | Code session (current buffer as context) |
-| `C-c l p` | Add project to context |
-| `C-c l m` | Model/params menu |
-| `C-c l c` | Clear context |
-| `C-c l b` | Browse Claude sessions |
-| `C-c l /` | Search Claude sessions |
-| `C-c l i` | Import Claude Desktop export |
-| `C-c l S` | Sync Claude sessions |
+| `l` | Open chat buffer |
+| `s` | Send prompt at point |
+| `e` | Explain code at point/region |
+| `r` | Refactor region |
+| `f` | Fix bugs in region |
+| `t` | Generate tests |
+| `d` | Add documentation |
+| `w` | Rewrite with custom prompt |
+| `a` | Add region/buffer as context |
+| `F` | Add file as context |
+| `p` | Add project as context |
+| `k` | Code session (buffer as context) |
+| `c` | Clear context |
+| `q` | Send captured notes to Claude |
+| `m` | Model/settings |
+| `b` | Browse past sessions |
+| `/` | Search past sessions |
+| `i` | Import Desktop export |
+| `S` | Sync session archive |
+
+### Claude Code — CLI (`C-c L`)
+
+`C-c L` opens a transient menu. Execute focused tasks.
+
+| Key | Action |
+|-----|--------|
+| **Start/Stop** | |
+| `c` | Start Claude Code in project |
+| `C` | Continue last conversation |
+| `R` | Resume a past session |
+| `i` | New parallel instance |
+| `k` | Kill session |
+| **Send to Claude** | |
+| `s` | Send a command/prompt |
+| `x` | Send command with current file as context |
+| `r` | Send selected region or buffer |
+| `o` | Send current buffer's file path |
+| `e` | Fix flymake error at point |
+| `/` | Slash commands (/clear, /compact, etc.) |
+| **Manage** | |
+| `t` | Toggle Claude window |
+| `b` | Switch to Claude buffer |
+| **Respond** | |
+| `y` | Accept (Enter) |
+| `n` | Reject (Escape) |
+| `1`/`2`/`3` | Pick numbered option |
 
 ### Eglot / LSP (`C-c c`)
 
