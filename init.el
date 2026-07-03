@@ -542,7 +542,6 @@ If point is at the end of the line, kill the whole line including the newline."
                        ("C-<return>" . electric-newline-and-maybe-indent)
                        ("M-<return>" . open-line)
                        ("C-j" . delete-indentation)
-                       ("C-o" . occur)
                        ("C-z" . undo)
                        ("C-c b" . copy-whole-buffer)
                        ("C-c C-d" . duplicate-dwim)
@@ -555,9 +554,9 @@ If point is at the end of the line, kill the whole line including the newline."
       (define-key map (kbd (car binding)) (cdr binding)))
 
     ;; TODO navigation (hl-todo)
-    (dolist (binding '(("M-[" . hl-todo-previous)
-                       ("M-]" . hl-todo-next)
-                       ("C-c o o" . hl-todo-occur)))
+    (dolist (binding '(("C-c h p" . hl-todo-previous)
+                       ("C-c h n" . hl-todo-next)
+                       ("C-c h o" . hl-todo-occur)))
       (define-key map (kbd (car binding)) (cdr binding)))
 
     ;; Buffer management
@@ -577,14 +576,14 @@ If point is at the end of the line, kill the whole line including the newline."
                        ("C-x 4 1" . same-window-prefix)))
       (define-key map (kbd (car binding)) (cdr binding)))
 
-    ;; Terminal management
+    ;; Terminal management (C-c x)
     (dolist (binding '(("C-`" . kdb-eshell-toggle)
                        ("C-~" . kdb-eat-new)
-                       ("C-c t e" . kdb-eshell-new)
-                       ("C-c t t" . kdb-eat-new)
-                       ("C-c t s" . shell)
-                       ("C-c t d" . dired-jump-other-window)
-                       ("C-c t =" . fido-vertical-mode)))
+                       ("C-c x e" . kdb-eshell-new)
+                       ("C-c x t" . kdb-eat-new)
+                       ("C-c x s" . shell)
+                       ("C-c x d" . dired-jump-other-window)
+                       ("C-c x =" . fido-vertical-mode)))
       (define-key map (kbd (car binding)) (cdr binding)))
 
     ;; Help extensions
@@ -597,8 +596,8 @@ If point is at the end of the line, kill the whole line including the newline."
                        ("C-c e d" . kdb-doctor)))
       (define-key map (kbd (car binding)) (cdr binding)))
 
-    ;; Toggling features
-    (dolist (binding '(("C-c t h" . toggle-theme)
+    ;; Toggles (C-c t)
+    (dolist (binding '(("C-c t t" . toggle-theme)
                        ("C-c t f" . toggle-frame-fullscreen)))
       (define-key map (kbd (car binding)) (cdr binding)))))
 
@@ -1397,9 +1396,11 @@ Falls back to DIRS or project roots."
 
 (use-package tempel
   :bind (("C-<tab>" . tempel-complete)
-         ("M-+" . tempel-insert)
-         ("C-1" . tempel-previous)
-         ("C-2" . tempel-next)))
+         ("M-+" . tempel-insert))
+  :config
+  (define-key tempel-map (kbd "M-n") #'tempel-next)
+  (define-key tempel-map (kbd "M-p") #'tempel-previous)
+  (define-key tempel-map (kbd "C-g") #'tempel-abort))
 
 ;; Tempel Collection ======================================= ;;
 

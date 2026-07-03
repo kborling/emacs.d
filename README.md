@@ -79,7 +79,7 @@ lisp/
 | `C-a` | Smart beginning of line |
 | `C-k` | Smart kill line |
 | `C-j` | Delete indentation (join lines) |
-| `C-o` | Occur |
+| `C-o` | Open line |
 | `C-z` | Undo |
 | `C-\` | Hippie expand |
 | `C-g` | Smart keyboard quit (deactivate region first) |
@@ -109,17 +109,17 @@ lisp/
 | `C-x w s` | Swap window states |
 | `Backtab` | Format current buffer |
 
-### Terminal (`C-c t` / `C-backtick`)
+### Terminal (`C-c x` / `C-backtick`)
 
 | Key | Action |
 |-----|--------|
 | `` C-` `` | Toggle eshell |
 | `C-~` | New eat terminal |
-| `C-c t e` | New eshell |
-| `C-c t t` | New eat terminal |
-| `C-c t s` | Shell |
-| `C-c t d` | Dired jump other window |
-| `C-c t =` | Toggle fido vertical mode |
+| `C-c x e` | New eshell |
+| `C-c x t` | New eat terminal |
+| `C-c x s` | Shell |
+| `C-c x d` | Dired jump other window |
+| `C-c x =` | Toggle fido vertical mode |
 
 ### Claude / AI (`C-c l`)
 
@@ -206,10 +206,12 @@ lisp/
 | `C-c e v` | Visit init.el |
 | `C-c e r` | Reload init.el |
 | `C-c e d` | Doctor (check dependencies) |
-| `C-c t h` | Toggle theme |
+| `C-c t t` | Toggle theme |
 | `C-c t f` | Toggle fullscreen |
 | `C-c t v` | Toggle evil mode |
 | `C-c t V` | Toggle evil in buffer |
+| `C-c h n` / `C-c h p` | Next/prev TODO |
+| `C-c h o` | TODO occur |
 | `C-c s e` | Encrypt file |
 | `C-c s d` | Decrypt file |
 | `C-h C-r` | Restart Emacs |
