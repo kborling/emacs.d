@@ -22,16 +22,18 @@ Packages install automatically on first launch.
 ## Structure
 
 ```
-init.el                  Main config — everything loads from here
-personal.el              Private settings (API keys, connections — not tracked)
-personal.el.template     Template for personal.el
-custom.el                Customize output
+init.el                       Main config — everything loads from here
+early-init.el                 Pre-frame performance and UI chrome
+personal.el                   Private settings (API keys — not tracked)
+personal.el.template          Template for personal.el
+custom.el                     Customize output
 lisp/
-  init-org.el            Org mode, capture templates, org-modern
-  init-vc.el             VC/Git transient menu (Magit-like, built-in VC)
-  init-exwm.el           EXWM window manager (X11 only)
-  init-terminal.el       Terminal/tmux optimizations
-  init-claude.el         Claude session archive and browsing
+  init-claude-workflow.el     Unified Claude transient, code actions, sessions
+  init-claude.el              Claude session archive and Desktop import
+  init-org.el                 Org mode, capture templates, org-modern
+  init-vc.el                  VC/Git transient menu (Magit-like, built-in VC)
+  init-exwm.el                EXWM window manager (X11 only)
+  init-terminal.el            Terminal/tmux optimizations
 ```
 
 ## Features
@@ -47,18 +49,29 @@ lisp/
 - **Diagnostics:** flymake with eldoc integration
 - **VC:** built-in VC with custom transient menu (`C-c g`)
 
-### AI / Claude
-- **gptel:** Claude chat in org-mode buffers (`C-c l l`)
-- **Capture-to-Claude:** capture notes (`C-c o c a`), send to Claude (`C-c l q`)
-- **Session archive:** browse/search Claude Code sessions (`C-c l b`, `C-c l /`)
+### Claude AI (`C-c l`)
+
+Two tools, one menu. `C-c l` opens a unified transient:
+
+- **Think** — gptel API chat in org buffers (explain, rewrite, discuss)
+- **Quick Fix** — select code, one key to refactor/fix/test/document in-place
+- **Agent** — Claude Code CLI running in Emacs (start, give tasks, accept/reject)
+- **Sessions** — target any session, star/bookmark, toggle visibility
+- **Recall** — browse live chats, archived sessions, Desktop exports in one view
+- **Move** — transfer context between chat and agent sessions
+
+Session shortcuts outside the transient:
+- `C-c ;` — switch between active sessions
+- `C-c '` — cycle to next session
 
 ### Org Mode
 - org-modern styling, org-appear
-- Capture templates: todo, notes, journal, meetings, 1:1s, projects, decisions, specs
+- Capture templates: todo, notes, journal, meetings, 1:1s, projects, decisions, specs, Ask Claude
 - Refile targets across org files
+- Deft for fast note search (`C-c o d`)
 
 ### Terminal
-- Eshell with custom prompt and toggle (`C-backtick`)
+- Eshell with custom prompt and toggle (`` C-` ``)
 - Eat terminal emulator with eshell integration
 - Clipboard support: macOS (pbcopy), Linux (xclip/xsel/wl-copy), Windows (clip.exe)
 
@@ -78,14 +91,14 @@ lisp/
 | `C-;` | Comment line |
 | `C-a` | Smart beginning of line |
 | `C-k` | Smart kill line |
-| `C-j` | Delete indentation (join lines) |
+| `C-j` | Join lines |
 | `C-o` | Open line |
 | `C-z` | Undo |
 | `C-\` | Hippie expand |
-| `C-g` | Smart keyboard quit (deactivate region first) |
+| `C-g` | Smart quit (deactivate region first) |
 | `C-M-s` | Isearch symbol at point |
 | `M-z` | Zap up to char |
-| `C-=` / `C--` | Treesit expand/contract region |
+| `C-=` / `C--` | Treesit expand/contract |
 | `C->` / `C-<` | Multiple cursors next/prev |
 | `C-'` | Multiple cursors mark all |
 | `C-c b` | Copy whole buffer |
@@ -109,7 +122,7 @@ lisp/
 | `C-x w s` | Swap window states |
 | `Backtab` | Format current buffer |
 
-### Terminal (`C-c x` / `C-backtick`)
+### Terminal (`C-c x`)
 
 | Key | Action |
 |-----|--------|
@@ -119,60 +132,37 @@ lisp/
 | `C-c x t` | New eat terminal |
 | `C-c x s` | Shell |
 | `C-c x d` | Dired jump other window |
-| `C-c x =` | Toggle fido vertical mode |
 
-### Claude Chat — gptel (`C-c l`)
+### Claude (`C-c l`)
 
-`C-c l` opens a transient menu. Think, explore, discuss.
+`C-c l` opens the unified Claude transient. All keys below follow `C-c l`.
 
-| Key | Action |
-|-----|--------|
-| `l` | Open chat buffer |
-| `s` | Send prompt at point |
-| `e` | Explain code at point/region |
-| `r` | Refactor region |
-| `f` | Fix bugs in region |
-| `t` | Generate tests |
-| `d` | Add documentation |
-| `w` | Rewrite with custom prompt |
-| `a` | Add region/buffer as context |
-| `F` | Add file as context |
-| `p` | Add project as context |
-| `k` | Code session (buffer as context) |
-| `c` | Clear context |
-| `q` | Send captured notes to Claude |
-| `m` | Model/settings |
-| `b` | Browse past sessions |
-| `/` | Search past sessions |
-| `i` | Import Desktop export |
-| `S` | Sync session archive |
+| | **Start** | | **Send to Target** | | **Quick Fix** |
+|---|---|---|---|---|---|
+| `N` | New (pick project) | `s` | Prompt | `e` | Explain |
+| `x` | Agent here | `r` | Region | `R` | Refactor |
+| `l` | Chat here | `F` | File | `f` | Fix Bugs |
+| | | `y` | Accept | `t` | Gen Tests |
+| | | `n` | Reject | `d` | Add Docs |
+| | | | | `w` | Rewrite |
+| | | | | `I` | Paste Image |
 
-### Claude Code — CLI (`C-c L`)
+| | **Sessions** | | **Move** |
+|---|---|---|---|
+| `;` | Set Target | `>` | Recall → Agent |
+| `.` | Toggle Session | `<` | Recall → Chat |
+| `K` | End Session | `q` | From Notes |
+| `*` | Star | `i` | Import Desktop |
+| `8` | Starred | `S` | Archive |
+| `o` | Recall | `m` | Settings |
+| `/` | Search | | |
 
-`C-c L` opens a transient menu. Execute focused tasks.
+Session shortcuts (no transient needed):
 
 | Key | Action |
 |-----|--------|
-| **Start/Stop** | |
-| `c` | Start Claude Code in project |
-| `C` | Continue last conversation |
-| `R` | Resume a past session |
-| `i` | New parallel instance |
-| `k` | Kill session |
-| **Send to Claude** | |
-| `s` | Send a command/prompt |
-| `x` | Send command with current file as context |
-| `r` | Send selected region or buffer |
-| `o` | Send current buffer's file path |
-| `e` | Fix flymake error at point |
-| `/` | Slash commands (/clear, /compact, etc.) |
-| **Manage** | |
-| `t` | Toggle Claude window |
-| `b` | Switch to Claude buffer |
-| **Respond** | |
-| `y` | Accept (Enter) |
-| `n` | Reject (Escape) |
-| `1`/`2`/`3` | Pick numbered option |
+| `C-c ;` | Switch between active sessions |
+| `C-c '` | Cycle to next session |
 
 ### Eglot / LSP (`C-c c`)
 
@@ -209,10 +199,11 @@ lisp/
 |-----|--------|
 | `C-c o a` | Org agenda |
 | `C-c o c` | Org capture |
-| `C-c o c a` | Capture → Ask Claude |
-| `C-c o c m` | Capture → Meeting |
-| `C-c o c t` | Capture → Todo |
-| `C-c o c n` | Capture → Note |
+| `C-c o d` | Deft (note search) |
+| `C-c o M` | Markdown → Org |
+| `C-c o P` | Pandoc convert |
+
+Capture templates: `t` todo, `n` note, `j` journal, `w` work, `l` link, `c` artifact, `m` meeting, `1` 1:1, `p` project, `d` decision, `s` spec, `a` Ask Claude.
 
 ### .NET (`C-c n`)
 
