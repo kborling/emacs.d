@@ -16,10 +16,6 @@
 
 ;; Terminal-specific settings
 (when kdb-terminal-mode
-  ;; Better clipboard integration
-  (setq select-enable-clipboard t
-        select-enable-primary t)
-  
   ;; Clipboard integration for terminal mode
   (let ((copy-cmd (cond
                    ((executable-find "pbcopy") "pbcopy")       ; macOS
@@ -46,11 +42,8 @@
               (let ((output (shell-command-to-string paste-cmd)))
                 (unless (string-empty-p output) output))))))
   
-  ;; Disable features that don't work well in terminal
-  (menu-bar-mode -1)
+  ;; Terminal defaults
   (setq-default cursor-type 'bar)
-  
-  ;; Fix colors for terminal
   (setq frame-background-mode 'dark))
 
 ;; Tmux-specific optimizations  
@@ -63,9 +56,7 @@
   (define-key input-decode-map "\e[1;2A" [S-up])
   (define-key input-decode-map "\e[1;2B" [S-down])
   (define-key input-decode-map "\e[1;2C" [S-right])
-  (define-key input-decode-map "\e[1;2D" [S-left])
-  
-)
+  (define-key input-decode-map "\e[1;2D" [S-left]))
 
 ;; Terminal-friendly keybindings
 (when kdb-terminal-mode
