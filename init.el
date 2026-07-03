@@ -1903,6 +1903,15 @@ Otherwise, search org files for :claude: tagged entries and prompt."
 
   :bind (("C-c l" . kdb-gptel-transient)))
 
+;; Claude Code (CLI in Emacs) ============================= ;;
+
+(use-package claude-code
+  :vc (:url "https://github.com/stevemolitor/claude-code.el" :rev :newest)
+  :defer t
+  :config
+  (setq claude-code-use-eat t)
+  :bind (("C-c L" . claude-code-transient)))
+
 ;; Claude Session Archive ================================= ;;
 
 ;; Archive defaults to ~/.claude-archive
