@@ -1869,39 +1869,39 @@ Otherwise, search org files for :claude: tagged entries and prompt."
     (unless (use-region-p) (user-error "Select a region to document"))
     (gptel-rewrite "Add documentation/docstrings to this code. Keep the code unchanged, only add documentation. Return the complete code with docs."))
 
-  ;; Transient menu for discoverability
+  ;; Transient menu — C-c l opens this, then one key does the action
   (defun kdb-gptel-transient ()
-    "Claude AI transient menu."
+    "Claude AI menu."
     (interactive)
     (require 'transient)
     (transient-define-prefix kdb-gptel-menu ()
-      "Claude AI"
-      [["Chat"
-        ("l" "Open Chat" gptel)
-        ("s" "Send at Point" gptel-send)
-        ("m" "Model/Params" gptel-menu)
-        ("q" "Send Capture" kdb-gptel-send-capture)]
-       ["Code Actions"
+      "Claude"
+      [["Ask Claude"
+        ("l" "Chat" gptel)
+        ("s" "Send" gptel-send)
+        ("q" "Send Capture" kdb-gptel-send-capture)
+        ("m" "Model/Settings" gptel-menu)]
+       ["Act on Code"
         ("e" "Explain" kdb-gptel-explain)
-        ("r" "Rewrite/Refactor" kdb-gptel-refactor)
-        ("x" "Fix Bugs" kdb-gptel-fix)
-        ("T" "Generate Tests" kdb-gptel-tests)
-        ("d" "Add Docs" kdb-gptel-doc)
-        ("R" "Rewrite (custom)" gptel-rewrite)]
-       ["Context"
-        ("a" "Add Region/Buffer" gptel-add)
-        ("f" "Add File" gptel-add-file)
-        ("p" "Add Project" kdb-gptel-add-project)
+        ("r" "Refactor" kdb-gptel-refactor)
+        ("f" "Fix" kdb-gptel-fix)
+        ("t" "Tests" kdb-gptel-tests)
+        ("d" "Document" kdb-gptel-doc)
+        ("w" "Rewrite (prompt)" gptel-rewrite)]
+       ["Add Context"
+        ("a" "Region/Buffer" gptel-add)
+        ("F" "File" gptel-add-file)
+        ("p" "Project" kdb-gptel-add-project)
         ("k" "Code Session" kdb-gptel-code)
-        ("c" "Clear Context" gptel-context-remove-all)]
-       ["Archive"
-        ("b" "Browse Sessions" kdb-claude-browse)
-        ("/" "Search Sessions" kdb-claude-search)
-        ("i" "Import Export" kdb-claude-import-export)
-        ("S" "Sync Archive" kdb-claude-sync)]])
+        ("c" "Clear" gptel-context-remove-all)]
+       ["Sessions"
+        ("b" "Browse" kdb-claude-browse)
+        ("/" "Search" kdb-claude-search)
+        ("i" "Import" kdb-claude-import-export)
+        ("S" "Sync" kdb-claude-sync)]])
     (kdb-gptel-menu))
 
-  :bind (("C-c l" . kdb-gptel-transient)))    ; One key to rule them all
+  :bind (("C-c l" . kdb-gptel-transient)))
 
 ;; Claude Session Archive ================================= ;;
 
