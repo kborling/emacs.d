@@ -2092,6 +2092,35 @@ Shows status so you know which need attention."
                        (car sessions))))
           (switch-to-buffer next)))))
 
+  ;; Paste image from clipboard into gptel chat
+  (defun kdb-claude-paste-image ()
+    "Paste an image from clipboard or pick a file, add to gptel context."
+    (interactive)
+    (let* ((dir (expand-file-name "~/.org/images/"))
+           (filename (format "claude_%s.png" (format-time-string "%Y%m%d_%H%M%S")))
+           (filepath (expand-file-name filename dir)))
+      (make-directory dir t)
+      (cond
+       ;; Try clipboard first
+       ((and (eq system-type 'darwin)
+             (zerop (call-process "pngpaste" nil nil nil filepath)))
+        (gptel-context-add-file filepath)
+        (message "Image pasted and added to context"))
+       ((and (executable-find "xclip")
+             (zerop (call-process-shell-command
+                     (format "xclip -selection clipboard -t image/png -o > %s"
+                             (shell-quote-argument filepath)))))
+        (if (> (file-attribute-size (file-attributes filepath)) 0)
+            (progn (gptel-context-add-file filepath)
+                   (message "Image pasted and added to context"))
+          (delete-file filepath)
+          ;; Fall back to file picker
+          (let ((file (read-file-name "Image file: ")))
+            (gptel-context-add-file file))))
+       ;; No clipboard tool — file picker
+       (t (let ((file (read-file-name "Image file: ")))
+            (gptel-context-add-file file))))))
+
   ;; Bridge: collect all Claude-related buffers (gptel chats, archive org files)
   (defun kdb-claude--list-sessions ()
     "Return alist of (display-name . buffer-or-file) for all Claude sessions."
@@ -2116,14 +2145,33 @@ Shows status so you know which need attention."
       (nreverse sessions)))
 
   (defun kdb-claude-recall ()
-    "Browse and open a past Claude session (chats, archives, logs)."
+    "Browse and open any Claude session — live, archived, or imported.
+Unified view across all sources."
     (interactive)
     (let* ((sessions (kdb-claude--list-sessions))
-           (choice (completing-read "Session: " (mapcar #'car sessions) nil t))
-           (target (cdr (assoc choice sessions))))
+           ;; Add Desktop export conversations if imported
+           (desktop-sessions
+            (when (and (boundp 'kdb-claude-export-directory)
+                       kdb-claude-export-directory
+                       (file-directory-p kdb-claude-export-directory))
+              (condition-case nil
+                  (let* ((convs (kdb-claude--parse-conversations
+                                 kdb-claude-export-directory)))
+                    (mapcar (lambda (conv)
+                              (cons (format "[desktop] %s — %s"
+                                            (kdb-claude--conversation-title conv)
+                                            (kdb-claude--format-date
+                                             (alist-get 'updated_at conv)))
+                                    conv))
+                            convs))
+                (error nil))))
+           (all (append sessions desktop-sessions))
+           (choice (completing-read "Session: " (mapcar #'car all) nil t))
+           (target (cdr (assoc choice all))))
       (cond
        ((bufferp target) (switch-to-buffer target))
-       ((stringp target) (find-file target)))))
+       ((stringp target) (find-file target))
+       ((listp target) (kdb-claude--display-conversation target)))))
 
   (defun kdb-claude-send-to-code ()
     "Send a Claude session or region to Claude Code CLI.
@@ -2228,7 +2276,8 @@ Pick from saved sessions, archive, or current region."
         ("f" "Fix Bugs" kdb-gptel-fix)
         ("t" "Gen Tests" kdb-gptel-tests)
         ("d" "Add Docs" kdb-gptel-doc)
-        ("w" "Rewrite" gptel-rewrite)]]
+        ("w" "Rewrite" gptel-rewrite)
+        ("I" "Paste Image" kdb-claude-paste-image)]]
       [["Sessions"
         (";" "Set Target" kdb-claude-set-target)
         ("." "Toggle Session" claude-code-toggle)
