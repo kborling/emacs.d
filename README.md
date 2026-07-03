@@ -1,6 +1,6 @@
 # Emacs Configuration
 
-Personal Emacs configuration by Kevin Borling. Cross-platform (Linux/macOS/Windows) with optional EXWM window manager support on Linux.
+Personal Emacs configuration. Cross-platform (Linux/macOS/Windows) with optional EXWM window manager support on Linux.
 
 ## Requirements
 
