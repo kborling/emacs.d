@@ -1956,16 +1956,14 @@ Otherwise, search org files for :claude: tagged entries and prompt."
     "Accept/confirm in the target agent session."
     (interactive)
     (if (kdb-claude--target-is-agent-p)
-        (with-current-buffer kdb-claude-target
-          (claude-code--term-send-string claude-code-terminal-backend (kbd "RET")))
+        (claude-code-send-return)
       (message "Target is not an agent")))
 
   (defun kdb-claude-reject-target ()
     "Reject/cancel in the target agent session."
     (interactive)
     (if (kdb-claude--target-is-agent-p)
-        (with-current-buffer kdb-claude-target
-          (claude-code--term-send-string claude-code-terminal-backend (kbd "ESC")))
+        (claude-code-send-escape)
       (message "Target is not an agent")))
 
   ;; Project launcher — start Claude in any project/branch without navigating there
@@ -1988,7 +1986,7 @@ Otherwise, search org files for :claude: tagged entries and prompt."
     "Return list of git branches in DIR."
     (let ((default-directory dir))
       (split-string
-       (shell-command-to-string "git branch --format='%(refname:short)' 2>/dev/null")
+       (shell-command-to-string "git branch --format=%(refname:short) 2>/dev/null")
        "\n" t)))
 
   (defun kdb-claude-start ()
@@ -2019,55 +2017,13 @@ Pick a recent project, optionally switch branch, choose chat or agent."
         (let ((default-directory project))
           (kdb-gptel-code))))))
 
-  (defun kdb-claude-start-agent ()
-    "Quick-start Claude Code agent in a project."
-    (interactive)
-    (let* ((projects (kdb-claude--recent-projects))
-           (project (completing-read "Project: " projects nil nil nil nil
-                                     (when (project-current)
-                                       (project-root (project-current))))))
-      (let ((default-directory project))
-        (claude-code))))
-
-  (defun kdb-claude-start-chat ()
-    "Quick-start gptel chat with a project as context."
-    (interactive)
-    (let* ((projects (kdb-claude--recent-projects))
-           (project (completing-read "Project: " projects nil nil nil nil
-                                     (when (project-current)
-                                       (project-root (project-current))))))
-      (let ((default-directory project))
-        (kdb-gptel-code))))
-
   ;; Session navigation — jump between active Claude sessions
   (defun kdb-claude-sessions ()
-    "Switch between active Claude sessions (chats + agents).
-Shows status so you know which need attention."
+    "Switch between active Claude sessions (chats + agents)."
     (interactive)
-    (let ((sessions '()))
-      ;; gptel chat buffers
-      (dolist (buf (buffer-list))
-        (with-current-buffer buf
-          (when (bound-and-true-p gptel-mode)
-            (push (cons (format "chat: %s" (buffer-name buf)) buf) sessions))))
-      ;; claude-code agent buffers
-      (when (fboundp 'claude-code--find-all-claude-buffers)
-        (dolist (buf (claude-code--find-all-claude-buffers))
-          (let* ((proc (get-buffer-process buf))
-                 (status (cond
-                          ((null proc) "dead")
-                          ((not (process-live-p proc)) "done")
-                          ((with-current-buffer buf
-                             (save-excursion
-                               (goto-char (point-max))
-                               (forward-line -3)
-                               (looking-at-p ".*[>❯$%]\\s-*$")))
-                           "waiting")
-                          (t "running"))))
-            (push (cons (format "agent [%s]: %s" status (buffer-name buf)) buf)
-                  sessions))))
+    (let ((sessions (kdb-claude--active-sessions)))
       (if (null sessions)
-          (message "No active Claude sessions")
+          (message "No active sessions. Start one with C-c l.")
         (let* ((choice (completing-read "Session: " (mapcar #'car sessions) nil t))
                (buf (cdr (assoc choice sessions))))
           (switch-to-buffer buf)))))
@@ -2091,6 +2047,31 @@ Shows status so you know which need attention."
                          (nth (mod (1+ pos) (length sessions)) sessions)
                        (car sessions))))
           (switch-to-buffer next)))))
+
+  ;; Star/bookmark sessions
+  (defun kdb-claude-star ()
+    "Bookmark the current Claude session for quick access."
+    (interactive)
+    (if (or (bound-and-true-p gptel-mode)
+            (and (fboundp 'claude-code--buffer-p)
+                 (claude-code--buffer-p (current-buffer))))
+        (let ((name (read-string "Star as: "
+                                 (format "claude: %s" (buffer-name)))))
+          (bookmark-set name)
+          (message "Starred: %s" name))
+      (user-error "Not in a Claude session")))
+
+  (defun kdb-claude-stars ()
+    "Jump to a starred Claude session."
+    (interactive)
+    (let* ((all-bookmarks (bookmark-all-names))
+           (claude-bookmarks (cl-remove-if-not
+                              (lambda (name) (string-prefix-p "claude:" name))
+                              all-bookmarks)))
+      (if (null claude-bookmarks)
+          (message "No starred sessions. Star one with C-c l *")
+        (let ((choice (completing-read "Starred: " claude-bookmarks nil t)))
+          (bookmark-jump choice)))))
 
   ;; Paste image from clipboard into gptel chat
   (defun kdb-claude-paste-image ()
@@ -2282,9 +2263,10 @@ Pick from saved sessions, archive, or current region."
         (";" "Set Target" kdb-claude-set-target)
         ("." "Toggle Session" claude-code-toggle)
         ("K" "End Session" claude-code-kill)
-        ("o" "Open Past" kdb-claude-recall)
-        ("/" "Search" kdb-claude-search)
-        ("b" "Browse" kdb-claude-browse)]
+        ("*" "Star" kdb-claude-star)
+        ("8" "Starred" kdb-claude-stars)
+        ("o" "Recall" kdb-claude-recall)
+        ("/" "Search" kdb-claude-search)]
        ["Move"
         (">" "Recall → Agent" kdb-claude-send-to-code)
         ("<" "Recall → Chat" kdb-claude-send-to-chat)
