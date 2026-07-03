@@ -338,7 +338,7 @@
 (use-package fleury-theme
   :vc (:url "https://github.com/kborling/fleury-theme.el" :rev :newest)
   :config
-  (setq fleury-distinct-line-numbers t)
+  (setq fleury-distinct-line-numbers nil)
   (load-theme 'fleury t))
 
 (add-hook 'prog-mode-hook #'hl-line-mode)
