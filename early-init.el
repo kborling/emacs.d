@@ -1,31 +1,16 @@
 ;;; early-init.el --- Early Init File -*- lexical-binding: t -*-
 
 ;; Author: Kevin Borling <kborling@protonmail.com>
-;; Version: 1.0.0
-;; Package-Requires: ((emacs "30"))
-
-;; This file is NOT part of GNU Emacs.
-
-;; This file is free software: you can redistribute it and/or modify it
-;; under the terms of the GNU General Public License as published by the
-;; Free Software Foundation, either version 3 of the License, or (at
-;; your option) any later version.
-;;
-;; This file is distributed in the hope that it will be useful, but
-;; WITHOUT ANY WARRANTY; without even the implied warranty of
-;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-;; General Public License for more details.
-;;
-;; You should have received a copy of the GNU General Public License
-;; along with this file.  If not, see <http://www.gnu.org/licenses/>.
+;; Package-Requires: ((emacs "31"))
 
 ;;; Commentary:
 
-;; My personal early-init.el setup.
+;; Performance and UI settings that must run before init.el.
 
 ;;; Code:
 
-(setq gc-cons-threshold most-positive-fixnum ; 2^61 bytes
+;; Maximize GC threshold during startup, restore after
+(setq gc-cons-threshold most-positive-fixnum
       gc-cons-percentage 0.6
       read-process-output-max (* 1024 1024))
 
@@ -36,25 +21,13 @@
 
 (setq large-file-warning-threshold 200000000)
 
+;; Windows pipe optimizations
 (when (boundp 'w32-pipe-read-delay)
   (setq w32-pipe-read-delay 0))
-;; Set the buffer size to 64K on Windows (from the original 4K)
 (when (boundp 'w32-pipe-buffer-size)
-  (setq irony-server-w32-pipe-buffer-size (* 64 1024)))
+  (setq w32-pipe-buffer-size (* 64 1024)))
 
-(customize-set-variable 'load-prefer-newer t)
-(setq gc-cons-threshold most-positive-fixnum
-      gc-cons-percentage 0.5)
-
-(when (fboundp 'tool-bar-mode)
-  (tool-bar-mode -1))
-(when (fboundp 'menu-bar-mode)
-  (menu-bar-mode -1))
-(when (fboundp 'scroll-bar-mode)
-  (scroll-bar-mode -1))
-(when (fboundp 'horizontal-scroll-bar-mode)
-  (horizontal-scroll-bar-mode -1))
-
+;; Frame and startup settings
 (setq frame-resize-pixelwise t
       frame-inhibit-implied-resize t
       frame-title-format '("%b")
