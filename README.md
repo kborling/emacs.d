@@ -5,7 +5,7 @@ Personal Emacs configuration. Cross-platform (Linux/macOS/Windows) with optional
 ## Requirements
 
 - Emacs 31+ (emacs-next on Guix)
-- Git, ripgrep (`rg`), GnuPG (`gpg`)
+- Git, ripgrep (`rg`), fd, GnuPG (`gpg`)
 
 Run `M-x kdb-doctor` to check for all optional dependencies.
 
