@@ -1291,6 +1291,15 @@ Falls back to DIRS or project roots."
 (with-eval-after-load 'org
   (require 'init-org))
 
+;; Org entry points — available from any buffer without loading org first
+(global-set-key (kbd "C-c o a") #'org-agenda)
+(global-set-key (kbd "C-c o c") #'org-capture)
+(global-set-key (kbd "C-c o d") #'deft)
+(autoload 'kdb/markdown-to-org "init-org" "Convert markdown to org" t)
+(autoload 'kdb/pandoc-convert "init-org" "Convert with pandoc" t)
+(global-set-key (kbd "C-c o M") #'kdb/markdown-to-org)
+(global-set-key (kbd "C-c o P") #'kdb/pandoc-convert)
+
 ;; EPA — built-in GPG encryption (symmetric, password-based)
 (setq epa-file-encrypt-to nil              ; Always prompt (symmetric by default)
       epa-file-select-keys nil             ; Skip public key selection → symmetric

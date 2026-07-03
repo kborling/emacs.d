@@ -126,8 +126,7 @@
         org-refile-use-outline-path 'file
         org-outline-path-complete-in-steps nil)
 
-  :bind (("C-c o a" . org-agenda)
-         ("C-c o c" . org-capture)))
+  )
 
 ;; Define function outside of use-package
 (defun kdb/org-wrap-source-block (lang)
@@ -195,7 +194,7 @@
                 "\\|^#\\+[[:alpha:]_]+:.*$" ;; org-mode metadata
                 "\\|^---$" ;; yaml frontmatter
                 "\\)"))
-  :bind ("C-c o d" . deft))
+  )
 
 ;; Smart word wrapping that preserves tables
 (defun kdb/org-setup-wrapping ()
@@ -338,10 +337,6 @@ macOS: interactive region select. Linux: scrot/maim. Windows: snippingtool."
 ;; Show images inline by default
 (setq org-startup-with-inline-images t)
 
-;; Global keybindings
-(global-set-key (kbd "C-c o M") 'kdb/markdown-to-org)
-(global-set-key (kbd "C-c o x") 'kdb/export-deliverable)
-(global-set-key (kbd "C-c o P") 'kdb/pandoc-convert)
 
 ;; Export backends
 (with-eval-after-load 'ox
