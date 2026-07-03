@@ -1976,42 +1976,55 @@ Pick from saved sessions, archive, or current region."
       (switch-to-buffer buf)
       (gptel-send)))
 
-  ;; Transient menu — C-c l opens this, then one key does the action
-  (defun kdb-gptel-transient ()
-    "Claude AI menu."
+  ;; Unified Claude transient — one menu for everything
+  (defun kdb-claude ()
+    "Claude menu — think, code, recall."
     (interactive)
     (require 'transient)
-    (transient-define-prefix kdb-gptel-menu ()
+    (require 'claude-code nil t)
+    (transient-define-prefix kdb-claude-menu ()
       "Claude"
-      [["Chat"
-        ("l" "New/Open Chat" gptel)
+      ;; Row 1: the things you do
+      [["Think"
+        ("l" "Chat" gptel)
         ("s" "Send at Point" gptel-send)
-        ("q" "From Capture" kdb-gptel-send-capture)
-        ("m" "Model/Settings" gptel-menu)]
-       ["Code"
         ("e" "Explain" kdb-gptel-explain)
+        ("w" "Rewrite" gptel-rewrite)
+        ("q" "From Notes" kdb-gptel-send-capture)
+        ("m" "Model" gptel-menu)]
+       ["Code"
         ("r" "Refactor" kdb-gptel-refactor)
         ("f" "Fix" kdb-gptel-fix)
         ("t" "Tests" kdb-gptel-tests)
         ("d" "Document" kdb-gptel-doc)
-        ("w" "Rewrite" gptel-rewrite)]
-       ["Context"
+        ("E" "Fix Error at Point" claude-code-fix-error-at-point)]
+       ["Execute"
+        ("x" "Start Claude Code" claude-code)
+        ("X" "Send Task" claude-code-send-command)
+        ("R" "Send Region" claude-code-send-region)
+        ("." "Toggle Window" claude-code-toggle)
+        ("y" "Accept" claude-code-send-return)
+        ("n" "Reject" claude-code-send-escape)
+        ("K" "Kill Session" claude-code-kill)]]
+      ;; Row 2: context and memory
+      [["Context"
         ("a" "Add Region" gptel-add)
         ("F" "Add File" gptel-add-file)
         ("p" "Add Project" kdb-gptel-add-project)
         ("k" "Code Session" kdb-gptel-code)
-        ("c" "Clear All" gptel-context-remove-all)]
-       ["Recall & Send"
+        ("c" "Clear" gptel-context-remove-all)]
+       ["Recall"
         ("o" "Open Session" kdb-claude-recall)
-        ("X" "Send to Code" kdb-claude-send-to-code)
-        ("C" "Send to Chat" kdb-claude-send-to-chat)
-        ("b" "Browse Archive" kdb-claude-browse)
-        ("/" "Search Archive" kdb-claude-search)
+        ("/" "Search" kdb-claude-search)
+        ("b" "Browse" kdb-claude-browse)]
+       ["Transfer"
+        (">" "Session → Code" kdb-claude-send-to-code)
+        ("<" "Session → Chat" kdb-claude-send-to-chat)
         ("i" "Import Export" kdb-claude-import-export)
-        ("S" "Sync" kdb-claude-sync)]])
-    (kdb-gptel-menu))
+        ("S" "Sync Archive" kdb-claude-sync)]])
+    (kdb-claude-menu))
 
-  :bind (("C-c l" . kdb-gptel-transient)))
+  :bind (("C-c l" . kdb-claude)))
 
 ;; Claude Code (CLI in Emacs) ============================= ;;
 
@@ -2019,8 +2032,7 @@ Pick from saved sessions, archive, or current region."
   :vc (:url "https://github.com/stevemolitor/claude-code.el" :rev :newest)
   :defer t
   :config
-  (setq claude-code-use-eat t)
-  :bind (("C-c L" . claude-code-transient)))
+  (setq claude-code-use-eat t))
 
 ;; Claude Session Archive ================================= ;;
 
