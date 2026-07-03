@@ -76,18 +76,50 @@ lisp/
 | Key | Action |
 |-----|--------|
 | `C-;` | Comment line |
+| `C-a` | Smart beginning of line |
+| `C-k` | Smart kill line |
+| `C-j` | Delete indentation (join lines) |
 | `C-o` | Occur |
 | `C-z` | Undo |
 | `C-\` | Hippie expand |
-| `C-=` / `C--` | Treesit expand/contract |
+| `C-g` | Smart keyboard quit (deactivate region first) |
+| `C-M-s` | Isearch symbol at point |
+| `M-z` | Zap up to char |
+| `C-=` / `C--` | Treesit expand/contract region |
 | `C->` / `C-<` | Multiple cursors next/prev |
-| `C-c g` | VC transient menu |
+| `C-'` | Multiple cursors mark all |
 | `C-c b` | Copy whole buffer |
 | `C-c C-d` | Duplicate dwim |
-| `C-x g` | Deadgrep |
-| `C-x f` | Project find file |
+| `C-c C-r` | Replace regexp |
+| `C-c g` | VC transient menu |
+
+### Files & Buffers
+
+| Key | Action |
+|-----|--------|
+| `C-x f` | Project find file (fd) |
+| `C-x g` | Deadgrep (project search) |
+| `C-x C-r` | Recent files |
 | `C-x b` | Ibuffer |
-| `C-backtick` | Toggle eshell |
+| `C-x C-b` | Switch to buffer |
+| `C-x k` | Kill current buffer |
+| `C-x M-k` | Kill buffer other window |
+| `C-c C-p` / `C-c C-n` | Previous/next buffer |
+| `C-c C-o` | Other window |
+| `C-x w s` | Swap window states |
+| `Backtab` | Format current buffer |
+
+### Terminal (`C-c t` / `C-backtick`)
+
+| Key | Action |
+|-----|--------|
+| `` C-` `` | Toggle eshell |
+| `C-~` | New eat terminal |
+| `C-c t e` | New eshell |
+| `C-c t t` | New eat terminal |
+| `C-c t s` | Shell |
+| `C-c t d` | Dired jump other window |
+| `C-c t =` | Toggle fido vertical mode |
 
 ### Claude / AI (`C-c l`)
 
@@ -99,11 +131,16 @@ lisp/
 | `C-c l q` | Send captured entry to Claude |
 | `C-c l a` | Add region to context |
 | `C-c l f` | Add file to context |
+| `C-c l k` | Code session (current buffer as context) |
+| `C-c l p` | Add project to context |
 | `C-c l m` | Model/params menu |
+| `C-c l c` | Clear context |
 | `C-c l b` | Browse Claude sessions |
 | `C-c l /` | Search Claude sessions |
+| `C-c l i` | Import Claude Desktop export |
+| `C-c l S` | Sync Claude sessions |
 
-### Eglot (`C-c c`)
+### Eglot / LSP (`C-c c`)
 
 | Key | Action |
 |-----|--------|
@@ -111,14 +148,71 @@ lisp/
 | `C-c c r` | Rename |
 | `C-c c f` | Format buffer |
 | `C-c c o` | Organize imports |
+| `C-c c a` | All code actions |
+| `C-c c q` | Quickfix |
+| `C-c c e` | Extract |
+| `C-c c j` | Inline |
+| `C-c c k` | Rewrite |
+| `C-c c i` | Find implementation |
+| `C-c c d` | Find declaration |
+| `C-c c t` | Find type definition |
+| `C-c c h` | Eldoc |
 
-### Flymake
+### Flymake (`C-c f`)
 
 | Key | Action |
 |-----|--------|
 | `M-n` / `M-p` | Next/prev diagnostic |
+| `C-c f n` / `C-c f p` | Next/prev error (skip warnings) |
 | `C-c f d` | Buffer diagnostics |
 | `C-c f D` | Project diagnostics |
+| `C-c f s` | Start flymake |
+| `C-c f q` | Quickfix |
+
+### Org Mode (`C-c o`)
+
+| Key | Action |
+|-----|--------|
+| `C-c o a` | Org agenda |
+| `C-c o c` | Org capture |
+| `C-c o c a` | Capture → Ask Claude |
+| `C-c o c m` | Capture → Meeting |
+| `C-c o c t` | Capture → Todo |
+| `C-c o c n` | Capture → Note |
+
+### .NET (`C-c n`)
+
+| Key | Action |
+|-----|--------|
+| `C-c n r` | Dotnet run |
+| `C-c n b` | Dotnet build |
+| `C-c n t` | Dotnet test |
+| `C-c n !` | Dotnet command |
+
+### Tab Bar (`C-c TAB`)
+
+| Key | Action |
+|-----|--------|
+| `C-c TAB n` | New tab |
+| `C-c TAB r` | Rename tab |
+| `C-c TAB k` | Close tab |
+| `C-c TAB l` | Switch to tab |
+| `C-c TAB f` / `C-c TAB b` | Next/prev tab |
+
+### Config & Toggles
+
+| Key | Action |
+|-----|--------|
+| `C-c e v` | Visit init.el |
+| `C-c e r` | Reload init.el |
+| `C-c e d` | Doctor (check dependencies) |
+| `C-c t h` | Toggle theme |
+| `C-c t f` | Toggle fullscreen |
+| `C-c t v` | Toggle evil mode |
+| `C-c t V` | Toggle evil in buffer |
+| `C-c s e` | Encrypt file |
+| `C-c s d` | Decrypt file |
+| `C-h C-r` | Restart Emacs |
 
 ## Themes
 
