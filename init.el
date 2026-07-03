@@ -2211,7 +2211,7 @@ Pick from saved sessions, archive, or current region."
                       (format "Target: %s"
                               (if (and kdb-claude-target (buffer-live-p kdb-claude-target))
                                   (buffer-name kdb-claude-target)
-                                "none (select with TAB)")))
+                                "none (set with ;)")))
        ["Start"
         ("N" "New (project)" kdb-claude-start)
         ("x" "Agent here" claude-code)
@@ -2230,9 +2230,9 @@ Pick from saved sessions, archive, or current region."
         ("d" "Add Docs" kdb-gptel-doc)
         ("w" "Rewrite" gptel-rewrite)]]
       [["Sessions"
-        ("TAB" "Set Target" kdb-claude-set-target)
-        ("." "Show/Hide Agent" claude-code-toggle)
-        ("K" "Kill Agent" claude-code-kill)
+        (";" "Set Target" kdb-claude-set-target)
+        ("." "Toggle Session" claude-code-toggle)
+        ("K" "End Session" claude-code-kill)
         ("o" "Open Past" kdb-claude-recall)
         ("/" "Search" kdb-claude-search)
         ("b" "Browse" kdb-claude-browse)]
@@ -2247,8 +2247,8 @@ Pick from saved sessions, archive, or current region."
     (kdb-claude-menu))
 
   :bind (("C-c l" . kdb-claude)
-         ("C-c TAB TAB" . kdb-claude-sessions)     ; quick session switch
-         ("C-c TAB RET" . kdb-claude-next-session))) ; cycle sessions
+         ("C-c ;" . kdb-claude-sessions)         ; quick session switch
+         ("C-c '" . kdb-claude-next-session)))   ; cycle sessions
 
 ;; Claude Code (CLI in Emacs) ============================= ;;
 
