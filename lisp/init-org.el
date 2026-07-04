@@ -96,6 +96,8 @@
   ;; Capture templates
   (setq org-capture-templates
         '(("t" "Todo" entry (file "~/.org/inbox.org")
+           "* TODO %?\nDEADLINE: %^{Due}t\n%U\n" :empty-lines 1)
+          ("T" "Todo (no deadline)" entry (file "~/.org/inbox.org")
            "* TODO %?\n%U\n" :empty-lines 1)
           ("n" "Note" entry (file "~/.org/inbox.org")
            "* %?\n%U\n" :empty-lines 1)
@@ -113,9 +115,9 @@
           ("1" "1:1" entry (file+olp+datetree "~/.org/work.org")
            "* 1:1 with %? :1on1:\n%U\n** Updates\n\n** Discussion\n\n** Action Items\n- [ ] \n" :empty-lines 1)
           ("p" "Project" entry (file+olp "~/.org/projects.org" "Active")
-           "* %?\n:PROPERTIES:\n:STATUS: planning\n:OWNER: \n:END:\n%U\n** Overview\n\n** Requirements\n\n** Tasks\n- [ ] \n" :empty-lines 1)
+           "* %?\nDEADLINE: %^{Target date}t\n:PROPERTIES:\n:STATUS: planning\n:OWNER: \n:END:\n%U\n** Overview\n\n** Requirements\n\n** Tasks\n- [ ] \n" :empty-lines 1)
           ("d" "Decision" entry (file "~/.org/decisions.org")
-           "* %?\n%U\n** Context\n\n** Options Considered\n1. \n2. \n\n** Decision\n\n** Rationale\n" :empty-lines 1)
+           "* %?\nDEADLINE: %^{Decide by}t\n%U\n** Context\n\n** Options Considered\n1. \n2. \n\n** Decision\n\n** Rationale\n" :empty-lines 1)
           ("s" "Spec/Doc" entry (file "~/.org/inbox.org")
            "* %?\n%U\n** Purpose\n\n** Requirements\n\n** Design\n\n** Implementation\n\n** Open Questions\n- \n" :empty-lines 1)
           ("a" "Ask Claude" entry (file "~/.org/inbox.org")
