@@ -70,10 +70,36 @@
 (setq package-install-upgrade-built-in t
       package-vc-register-as-project nil)
 
-(add-to-list 'display-buffer-alist
-             '("\\`\\*\\(Warnings\\|Compile-Log\\)\\*\\'"
-               (display-buffer-no-window)
-               (allow-no-window . t)))
+;; Popup/window management — consistent buffer placement
+(setq display-buffer-alist
+      '(;; Hide noise
+        ("\\`\\*\\(Warnings\\|Compile-Log\\)\\*\\'"
+         (display-buffer-no-window)
+         (allow-no-window . t))
+        ;; Bottom side window (ephemeral output)
+        ("\\*\\(vc-git\\|vc-diff\\|Shell Command\\|Async Shell\\|compilation\\|grep\\|Occur\\).*"
+         (display-buffer-in-side-window)
+         (side . bottom)
+         (window-height . 0.3)
+         (slot . 0))
+        ;; Help/docs on the right
+        ("\\*\\(Help\\|Apropos\\|info\\|Man \\|eldoc\\|Claude: Explain\\|Claude: Tests\\).*"
+         (display-buffer-in-side-window)
+         (side . right)
+         (window-width . 0.4)
+         (slot . 0))
+        ;; Completions small at bottom
+        ("\\*Completions\\*"
+         (display-buffer-in-side-window)
+         (side . bottom)
+         (window-height . 0.25)
+         (slot . 1))
+        ;; Flymake/diagnostics at bottom
+        ("\\*Flymake.*\\|\\*xref\\*"
+         (display-buffer-in-side-window)
+         (side . bottom)
+         (window-height . 0.25)
+         (slot . 1))))
 
 ;;; ============================================================
 ;;;                DIRECTORIES AND FILE MANAGEMENT

@@ -105,30 +105,127 @@ c-mode :when (re-search-backward "^\\S-*$" (line-beginning-position) 'noerror)
 (incc "#include \"" (p (concat (file-name-base (or (buffer-file-name) (buffer-name))) ".h")) "\"")
 
 js-mode js-ts-mode js2-mode typescript-mode typescript-ts-mode
-(forEach "forEach((" p ") => { " q " })")
-(for "for (let i = 0;" " i < " p "; i++) { " q " }")
-(while "while (" p ") { " q " }")
-(if "if (" p ") { " q " }")
-(elseif "else if (" p ") { " q " }")
-(else "else { " q " }")
-(switch "switch (" p ") { " q " }")
-(case "case " p ": " q "break")
-(func "" p " (" p ") { " q " }")
-(arrow "const " p " = (" p ") => { " q " }")
-(log "console.log(" p ")")
-(error "console.error(" p ")")
+
+;; Control flow
+(if "if (" p ") {" n> q n> "}")
+(ife "if (" p ") {" n> p n> "} else {" n> q n> "}")
+(elseif " else if (" p ") {" n> q n> "}")
+(else " else {" n> q n> "}")
+(for "for (let " (p "i") " = 0; " (s "i") " < " p "; " (s "i") "++) {" n> q n> "}")
+(forof "for (const " p " of " p ") {" n> q n> "}")
+(forin "for (const " p " in " p ") {" n> q n> "}")
+(while "while (" p ") {" n> q n> "}")
+(switch "switch (" p ") {" n> "case " p ":" n> q n> "break;" n> "default:" n> n> "}")
+(try "try {" n> p n> "} catch (" (p "error") ") {" n> q n> "}")
+
+;; Functions
+(fn "function " p "(" p "): " (p "void") " {" n> q n> "}")
+(afn "async function " p "(" p "): Promise<" (p "void") "> {" n> q n> "}")
+(arrow "const " p " = (" p ") => {" n> q n> "};")
+(aarrow "const " p " = async (" p ") => {" n> q n> "};")
+
+;; TypeScript specific
+(interface "interface " p " {" n> q n> "}")
+(type "type " p " = " q ";")
+(enum "enum " p " {" n> q n> "}")
+(class "class " p " {" n> "constructor(" p ") {" n> q n> "}" n> "}")
+
+;; Console
+(log "console.log(" p ");")
+(error "console.error(" p ");")
+(warn "console.warn(" p ");")
+
+;; Async
+(await "const " p " = await " q ";")
+(promise "new Promise<" (p "void") ">((resolve, reject) => {" n> q n> "});")
+
+;; Testing
+(describe "describe('" p "', () => {" n> q n> "});")
+(it "it('" p "', () => {" n> q n> "});")
+(ita "it('" p "', async () => {" n> q n> "});")
+(expect "expect(" p ")." q ";")
+(before "beforeEach(() => {" n> q n> "});")
+
+;; Angular
+(inject "private " p " = inject(" p ");")
+(input "@Input() " p ": " (p "string") " = " (p "''") ";")
+(output "@Output() " p " = new EventEmitter<" (p "void") ">();")
+(signal (p "name") " = signal<" (p "string") ">(" (p "''") ");")
+(computed (p "name") " = computed(() => " q ");")
+(effect "effect(() => {" n> q n> "});")
+(sub "this." (p "subscription") " = " p ".subscribe({" n> "next: (" (p "value") ") => {" n> q n> "}," n> "error: (err) => console.error(err)" n> "});")
+(unsub "ngOnDestroy() {" n> "this." p ".unsubscribe();" n> "}")
+(oninit "ngOnInit(): void {" n> q n> "}")
+(pipe "transform(" (p "value") ": " (p "string") "): " (p "string") " {" n> "return " q ";" n> "}")
+(guard "canActivate(): boolean {" n> q n> "}")
+(route "{ path: '" p "', " (p "component: ") q " },")
+(lazyroute "{ path: '" p "', loadComponent: () => import('./" p "').then(m => m." p ") },")
+
+typescript-ts-mode
+
+;; RxJS
+(obs "Observable<" p ">")
+(pipe ".pipe(" n> q n> ")")
+(map "map((" p ") => " q ")")
+(filter "filter((" p ") => " q ")")
+(tap "tap((" p ") => " q ")")
+(switchmap "switchMap((" p ") => " q ")")
+(catcherr "catchError((" p ") => " q ")")
+
+angular-template-mode
+
+;; Angular template syntax
+(ngif "@if (" p ") {" n> q n> "}")
+(ngfor "@for (" (p "item") " of " p "; track " (p "$index") ") {" n> q n> "}")
+(ngswitch "@switch (" p ") {" n> "@case (" p ") {" n> q n> "}" n> "}")
+(defer "@defer {" n> q n> "} @placeholder {" n> p n> "}")
+(event "(" (p "click") ")=\"" q "\"")
+(bind "[" (p "class") "]=\"" q "\"")
+(twoway "[(ngModel)]=\"" q "\"")
+(pipe "{{ " p " | " q " }}")
+(async "{{ " p " | async }}")
+
+csharp-mode csharp-ts-mode
+
+;; Classes & methods
+(class "public class " p " {" n> q n> "}")
+(interface "public interface I" p " {" n> q n> "}")
+(method "public " (p "void") " " p "(" p ") {" n> q n> "}")
+(async "public async Task<" (p "IActionResult") "> " p "(" p ") {" n> q n> "}")
+(prop "public " (p "string") " " p " { get; set; }")
+(ctor "public " (p (file-name-base (or (buffer-file-name) ""))) "(" p ") {" n> q n> "}")
+
+;; LINQ
+(where ".Where(" p " => " q ")")
+(select ".Select(" p " => " q ")")
+(first ".FirstOrDefault(" p " => " q ")")
+(any ".Any(" p " => " q ")")
+
+;; Common patterns
+(try "try {" n> p n> "} catch (Exception " (p "ex") ") {" n> q n> "}")
+(using "using var " p " = " q ";")
+(null p " ?? " q)
+(log "_logger.LogInformation(\"" p "\", " q ");")
 
 org-mode
 
-(title "#+title: " p n "#+author: " user-full-name n "#+email: " user-mail-address n "#+date: " (format-time-string "%Y-%m-%d") n n)
+(title "#+title: " p n "#+author: " user-full-name n "#+date: " (format-time-string "%Y-%m-%d") n n)
 (quote "#+begin_quote" n> r> n> "#+end_quote")
-(quote "#+name: " p)
 (example "#+begin_example" n> r> n> "#+end_example")
 (center "#+begin_center" n> r> n> "#+end_center")
 (comment "#+begin_comment" n> r> n> "#+end_comment")
-(verse "#+begin_verse" n> r> n> "#+end_verse")
-(src "#+begin_src " p n> r> n> "#+end_src" :post (org-edit-src-code))
-(elisp "#+begin_src emacs-lisp" n> r> n "#+end_src" :post (org-edit-src-code))
+(src "#+begin_src " p n> r> n> "#+end_src")
+(elisp "#+begin_src emacs-lisp" n> r> n "#+end_src")
+(ts "#+begin_src typescript" n> r> n "#+end_src")
+(sh "#+begin_src shell" n> r> n "#+end_src")
+(sql "#+begin_src sql" n> r> n "#+end_src")
+
+;; Work templates
+(spec "* " p n "** Purpose" n n "** Requirements" n "- " q n n "** Design" n n "** Open Questions" n "- ")
+(decision "* " p n "** Context" n n "** Options" n "1. " q n "2. " n n "** Decision" n n "** Rationale" n)
+(retro "* Retro — " (format-time-string "%Y-%m-%d") n "** What went well" n "- " q n n "** What didn't" n "- " n n "** Actions" n "- [ ] ")
+(standup "* " (format-time-string "%Y-%m-%d") n "** Yesterday" n "- " q n n "** Today" n "- " n n "** Blockers" n "- ")
+(prcomment "** " p n "File: " p n "#+begin_src" n q n "#+end_src" n "Suggestion: ")
 
 ;; Local Variables:
 ;; mode: lisp-data
