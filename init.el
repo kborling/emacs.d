@@ -741,14 +741,13 @@ If point is at the end of the line, kill the whole line including the newline."
                        ("C-x 4 1" . same-window-prefix)))
       (define-key map (kbd (car binding)) (cdr binding)))
 
-    ;; Terminal management (C-c x)
+    ;; Terminal management (C-c t)
     (dolist (binding '(("C-`" . kdb-eshell-toggle)
                        ("C-~" . kdb-eat-new)
-                       ("C-c x e" . kdb-eshell-new)
-                       ("C-c x t" . kdb-eat-new)
-                       ("C-c x s" . shell)
-                       ("C-c x d" . dired-jump-other-window)
-                       ("C-c x =" . fido-vertical-mode)))
+                       ("C-c t e" . kdb-eshell-new)
+                       ("C-c t t" . kdb-eat-new)
+                       ("C-c t s" . shell)
+                       ("C-c t d" . dired-jump-other-window)))
       (define-key map (kbd (car binding)) (cdr binding)))
 
     ;; Help extensions
@@ -762,7 +761,7 @@ If point is at the end of the line, kill the whole line including the newline."
       (define-key map (kbd (car binding)) (cdr binding)))
 
     ;; Toggles (C-c t)
-    (dolist (binding '(("C-c t t" . toggle-theme)
+    (dolist (binding '(("C-c t h" . toggle-theme)
                        ("C-c t f" . toggle-frame-fullscreen)))
       (define-key map (kbd (car binding)) (cdr binding)))))
 
