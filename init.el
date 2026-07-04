@@ -375,7 +375,18 @@
 (add-hook 'prog-mode-hook #'hl-line-mode)
 
 (use-package acme-theme
-  :defer t)
+  :defer t
+  :config
+  ;; Accessibility fixes — keep acme character, improve readability
+  (custom-theme-set-faces
+   'acme
+   '(font-lock-comment-face ((t (:foreground "#6E6E5E" :slant italic))))
+   '(font-lock-doc-face ((t (:foreground "#6E6E5E" :slant italic))))
+   '(font-lock-type-face ((t (:foreground "#5C5C00"))))
+   '(font-lock-constant-face ((t (:foreground "#5C5C00"))))
+   '(shadow ((t (:foreground "#7E7E6C"))))
+   '(region ((t (:background "#C8DFC8"))))
+   '(secondary-selection ((t (:background "#D8ECD8"))))))
 
 
 ;;; ============================================================
