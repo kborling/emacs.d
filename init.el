@@ -526,11 +526,10 @@
   "Create a new terminal using eat (GUI) or term (terminal).
 Names buffer after the directory for easier identification."
   (interactive)
-  (let ((name (format "*eat: %s*" (abbreviate-file-name default-directory))))
-    (if (and (display-graphic-p) (fboundp 'eat))
-        (let ((eat-buffer-name (generate-new-buffer-name name)))
-          (eat))
-      (term (or (getenv "SHELL") (getenv "COMSPEC") "/bin/bash")))))
+  (if (and (display-graphic-p) (fboundp 'eat))
+      (eat nil (generate-new-buffer-name
+                (format "*eat: %s*" (abbreviate-file-name default-directory))))
+    (term (or (getenv "SHELL") (getenv "COMSPEC") "/bin/bash"))))
 
 
 (defun toggle-theme ()
