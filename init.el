@@ -287,6 +287,11 @@
 ;; Inline completion preview (ghost text)
 (add-hook 'prog-mode-hook #'completion-preview-mode)
 
+;; Spell checking in text buffers (requires aspell or hunspell)
+(when (or (executable-find "aspell") (executable-find "hunspell"))
+  (add-hook 'text-mode-hook #'flyspell-mode)
+  (add-hook 'prog-mode-hook #'flyspell-prog-mode))
+
 (autoload 'zap-up-to-char "misc"
   "Kill up to, but not including ARGth occurrence of CHAR." t)
 
@@ -432,6 +437,87 @@
         (goto-char (point-min))
         (special-mode))
       (switch-to-buffer (current-buffer)))))
+
+;; Dashboard ============================================= ;;
+
+(defun kdb-dashboard ()
+  "Show a daily dashboard with agenda, follow-ups, and recent projects."
+  (interactive)
+  (let ((buf (get-buffer-create "*Dashboard*")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (format "  %s\n\n" (format-time-string "%A, %B %d %Y")))
+        ;; Today's agenda
+        (insert "  Agenda\n  " (make-string 40 ?─) "\n")
+        (let ((agenda-text
+               (with-temp-buffer
+                 (let ((org-agenda-span 1)
+                       (org-agenda-start-on-weekday nil)
+                       (org-agenda-overriding-header ""))
+                   (condition-case nil
+                       (progn
+                         (org-agenda-list nil nil 1)
+                         (with-current-buffer "*Org Agenda*"
+                           (let ((text (buffer-substring-no-properties
+                                        (point-min) (point-max))))
+                             (kill-buffer)
+                             text)))
+                     (error "  No agenda items\n"))))))
+          (dolist (line (split-string (or agenda-text "") "\n" t))
+            (unless (string-match-p "^\\(Day-agenda\\|---\\)" line)
+              (insert "  " (string-trim line) "\n"))))
+        (insert "\n")
+        ;; Attention items (follow-ups, issues)
+        (insert "  Attention\n  " (make-string 40 ?─) "\n")
+        (let ((people-dir "~/.org/people/"))
+          (if (and (file-directory-p people-dir)
+                   (fboundp 'kdb/current-fiscal-year))
+              (let ((file (expand-file-name
+                           (concat (kdb/current-fiscal-year) ".org") people-dir)))
+                (if (file-exists-p file)
+                    (with-temp-buffer
+                      (insert-file-contents file)
+                      (goto-char (point-min))
+                      (let ((found nil) (person nil))
+                        (while (not (eobp))
+                          (cond
+                           ((looking-at "^\\* \\(.+\\)")
+                            (setq person (match-string-no-properties 1)))
+                           ((looking-at "^\\*\\*\\* TODO \\(.+\\)")
+                            (let ((todo (match-string-no-properties 1)))
+                              (with-current-buffer buf
+                                (insert (format "  %s: %s\n" person todo))
+                                (setq found t)))))
+                          (forward-line 1))
+                        (unless found
+                          (with-current-buffer buf
+                            (insert "  No open follow-ups\n")))))
+                  (insert "  No people file yet\n")))
+            (insert "  No follow-ups configured\n")))
+        (insert "\n")
+        ;; Recent projects
+        (insert "  Recent Projects\n  " (make-string 40 ?─) "\n")
+        (let ((projects (when (fboundp 'project-known-project-roots)
+                          (seq-take (project-known-project-roots) 8))))
+          (if projects
+              (dolist (p projects)
+                (insert (format "  %s\n" (abbreviate-file-name p))))
+            (insert "  No recent projects\n")))
+        (insert "\n")
+        ;; Quick keys
+        (insert "  " (make-string 40 ?─) "\n")
+        (insert "  C-c o a  Agenda    C-c l  Claude    C-c g  Git\n")
+        (insert "  C-c o c  Capture   C-c ;  Sessions  C-x f  Find file\n")
+        (goto-char (point-min))
+        (special-mode)))
+    (switch-to-buffer buf)))
+
+(add-hook 'emacs-startup-hook
+          (lambda ()
+            (when (and (display-graphic-p)
+                       (< (length command-line-args) 2))
+              (kdb-dashboard))))
 
 ;; Custom Functions ======================================= ;;
 

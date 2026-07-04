@@ -40,11 +40,13 @@
 
   ;; Check for encrypted version first, fall back to regular org file
   (setq org-agenda-files
-        (list "~/.org/inbox.org"
-              "~/.org/todo.org"
-              "~/.org/notes.org"
-              "~/.org/projects.org"
-              "~/.org/work.org")
+        (append (list "~/.org/inbox.org"
+                      "~/.org/todo.org"
+                      "~/.org/notes.org"
+                      "~/.org/projects.org"
+                      "~/.org/work.org")
+                (when (file-directory-p "~/.org/people/")
+                  (directory-files "~/.org/people/" t "\\.org$")))
         org-log-done 'time
         org-agenda-include-diary nil
         org-agenda-start-on-weekday nil
