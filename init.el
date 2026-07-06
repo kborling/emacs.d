@@ -330,9 +330,9 @@
 (setopt line-spacing 0.20)
 
 (let* ((settings (cond
-                  ((eq system-type 'windows-nt)    '(:size 110 :families ("Rec Mono Semicasual" "Cascadia Code" "Consolas" "Courier New")))
+                  ((eq system-type 'windows-nt)    '(:size 110 :families ("Comic Code" "Rec Mono Semicasual" "Cascadia Code" "Consolas" "Courier New")))
                   ((eq system-type 'darwin)        '(:size 140 :families ("Overpass Mono" "Monaco" "Menlo" "monospace")))
-                  (t '(:size 110 :families ("JetBrains Mono" "DejaVu Sans Mono" "Liberation Mono" "monospace")))))  ; Linux, BSD, etc.
+                  (t '(:size 110 :families ("Comic Code" "JetBrains Mono" "DejaVu Sans Mono" "Liberation Mono" "monospace")))))  ; Linux, BSD, etc.
        (default-font-size (plist-get settings :size))
        (font-families (plist-get settings :families))
        (default-font-family (cl-find-if (lambda (font) (find-font (font-spec :family font))) font-families)))
@@ -340,7 +340,7 @@
   ;; Set the font if we found one available
   (when default-font-family
     (set-face-attribute 'default nil
-                        :family default-font-family :weight 'regular :height default-font-size)
+                        :family default-font-family :weight 'medium :height default-font-size)
     (set-face-attribute 'fixed-pitch nil
                         :family default-font-family :height 1.0))
 
@@ -1291,6 +1291,7 @@ Falls back to DIRS or project roots."
 
 
 (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
+(require 'init-theme)   ; cross-platform theme switching (s-t / s-T)
 
 (defun kdb-load-init-vc ()
   "Load init-vc configuration once."
