@@ -548,7 +548,7 @@ Unified view across all sources."
      ["Move"
       (">" "Recall → Agent" kdb-claude-send-to-code)
       ("<" "Recall → Chat" kdb-claude-send-to-chat)
-      ("q" "From Notes" kdb-claude-send-capture)
+      ("q" "From Notes" kdb-gptel-send-capture)
       ("i" "Import Desktop" kdb-claude-import-export)
       ("S" "Archive" kdb-claude-sync)
       ""
