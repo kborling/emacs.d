@@ -220,11 +220,13 @@ org-mode
 (sh "#+begin_src shell" n> r> n "#+end_src")
 (sql "#+begin_src sql" n> r> n "#+end_src")
 
-;; Work templates
-(spec "* " p n "** Purpose" n n "** Requirements" n "- " q n n "** Design" n n "** Open Questions" n "- ")
-(decision "* " p n "** Context" n n "** Options" n "1. " q n "2. " n n "** Decision" n n "** Rationale" n)
-(retro "* Retro — " (format-time-string "%Y-%m-%d") n "** What went well" n "- " q n n "** What didn't" n "- " n n "** Actions" n "- [ ] ")
-(standup "* " (format-time-string "%Y-%m-%d") n "** Yesterday" n "- " q n n "** Today" n "- " n n "** Blockers" n "- ")
+;; Work templates — all stamp the current datetime, matching org-capture's %U
+(meeting "* " p " :meeting:" n (format-time-string "[%Y-%m-%d %a %H:%M]") n "** Attendees" n "- " q n n "** Notes" n n "** Action Items" n "- [ ] ")
+(1on1 "* 1:1 with " p " :1on1:" n (format-time-string "[%Y-%m-%d %a %H:%M]") n "** Updates" n n "** Discussion" n n "** Action Items" n "- [ ] ")
+(spec "* " p n (format-time-string "[%Y-%m-%d %a %H:%M]") n "** Purpose" n n "** Requirements" n "- " q n n "** Design" n n "** Open Questions" n "- ")
+(decision "* " p n (format-time-string "[%Y-%m-%d %a %H:%M]") n "** Context" n n "** Options" n "1. " q n "2. " n n "** Decision" n n "** Rationale" n)
+(retro "* Retro — " (format-time-string "%Y-%m-%d") n (format-time-string "[%Y-%m-%d %a %H:%M]") n "** What went well" n "- " q n n "** What didn't" n "- " n n "** Actions" n "- [ ] ")
+(standup "* Standup — " (format-time-string "%Y-%m-%d") n (format-time-string "[%Y-%m-%d %a %H:%M]") n "** Yesterday" n "- " q n n "** Today" n "- " n n "** Blockers" n "- ")
 (prcomment "** " p n "File: " p n "#+begin_src" n q n "#+end_src" n "Suggestion: ")
 
 ;; Local Variables:

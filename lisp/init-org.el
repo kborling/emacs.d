@@ -250,6 +250,78 @@
     (global-set-key (kbd "C-c o N") 'kdb/open-notes)
     (global-set-key (kbd "C-c o p") 'kdb/open-people)))
 
+;; Scratch notes — draft in a throwaway buffer, file into org when done
+(defun kdb/note-new (&optional with-template)
+  "Create a scratch org buffer for drafting a note.
+The buffer visits no file — draft freely, expand tempel templates
+\(\\[tempel-insert]), then file it with `kdb/note-capture'.
+With prefix arg WITH-TEMPLATE, prompt for a tempel template to seed it."
+  (interactive "P")
+  (switch-to-buffer (generate-new-buffer "*note*"))
+  (org-mode)
+  (setq-local header-line-format
+              (substitute-command-keys
+               " Draft note — file it into org with \\[kdb/note-capture]"))
+  (when with-template
+    (call-interactively #'tempel-insert)))
+
+(defun kdb/note-capture (&optional keep)
+  "File the current buffer into the org system as a new entry.
+Prompts for a destination — the inbox, or any file/heading from
+`org-refile-targets'.  Plain text is wrapped in a new heading with
+a timestamp; a buffer that already starts with an org heading is
+filed as-is, with levels adjusted to fit the destination.
+Kills the buffer afterwards unless KEEP (prefix arg) is non-nil."
+  (interactive "P")
+  (require 'org-refile)
+  (let ((raw (string-trim (buffer-substring-no-properties (point-min) (point-max)))))
+    (when (string-empty-p raw)
+      (user-error "Buffer is empty — nothing to capture"))
+    (let* ((subtree
+            (if (string-prefix-p "* " raw)
+                (kdb/note--ensure-timestamp raw)
+              (format "* %s\n%s\n\n%s\n"
+                      (read-string "Heading: " (kdb/note--default-title raw))
+                      (format-time-string "[%Y-%m-%d %a %H:%M]")
+                      raw)))
+           (org-refile-targets (cons '("~/.org/inbox.org" :maxlevel . 1)
+                                     org-refile-targets))
+           (loc (org-refile-get-location "File note in"))
+           (file (nth 1 loc))
+           (pos (nth 3 loc))
+           (note-buf (current-buffer)))
+      (with-current-buffer (find-file-noselect file)
+        (org-with-wide-buffer
+         (let ((level 1))
+           (if pos
+               (progn (goto-char pos)
+                      (setq level (1+ (or (org-current-level) 0)))
+                      (org-end-of-subtree t t))
+             (goto-char (point-max)))
+           (unless (bolp) (insert "\n"))
+           (insert "\n")
+           (org-paste-subtree level subtree)))
+        (save-buffer))
+      (unless keep (kill-buffer note-buf))
+      (message "Filed in %s" (car loc)))))
+
+(defun kdb/note--ensure-timestamp (subtree)
+  "Return SUBTREE with a timestamp after its first heading if it has none."
+  (if (string-match-p "[[<][0-9]\\{4\\}-[0-9][0-9]-[0-9][0-9]" subtree)
+      (concat subtree "\n")
+    (replace-regexp-in-string
+     "\\`\\(\\*+ .*\\)\n?"
+     (format "\\1\n%s\n" (format-time-string "[%Y-%m-%d %a %H:%M]"))
+     (concat subtree "\n"))))
+
+(defun kdb/note--default-title (text)
+  "Default heading title for a note: first line of TEXT, truncated."
+  (let ((line (string-trim (car (split-string text "\n")))))
+    (truncate-string-to-width line 60)))
+
+(global-set-key (kbd "C-c o o") #'kdb/note-new)
+(global-set-key (kbd "C-c o RET") #'kdb/note-capture)
+
 (defun kdb/markdown-to-org ()
   "Convert markdown buffer or region to org-mode format."
   (interactive)
