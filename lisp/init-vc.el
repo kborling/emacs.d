@@ -306,6 +306,23 @@
   
   (setq vc-msg-git-show-commit-function 'vc-msg-git-show-commit-internal))
 
+;; Diff-hl - changed-line indicators in the fringe + hunk-level staging
+(use-package diff-hl
+  :ensure t
+  :demand t
+  :hook (dired-mode . diff-hl-dired-mode)
+  :config
+  (global-diff-hl-mode 1)
+  (diff-hl-flydiff-mode 1)      ; update indicators without waiting for save
+  ;; Hunk-level workflow on the vc prefix:
+  ;;   C-x v S  stage hunk at point   C-x v K  discard hunk at point
+  ;;   C-x v *  peek hunk popup       C-x v [ / ]  previous/next hunk
+  (define-key vc-prefix-map (kbd "S") #'diff-hl-stage-current-hunk)
+  (define-key vc-prefix-map (kbd "K") #'diff-hl-revert-hunk)
+  (define-key vc-prefix-map (kbd "*") #'diff-hl-show-hunk)
+  (define-key vc-prefix-map (kbd "[") #'diff-hl-previous-hunk)
+  (define-key vc-prefix-map (kbd "]") #'diff-hl-next-hunk))
+
 (defun kdb-vc-git-unstage ()
   "Unstage staged changes (git reset HEAD)."
   (interactive)
@@ -322,14 +339,6 @@
       (vc-dir-refresh))))
 
 ;; VC Transient Menu - provides Magit-like interface for VC
-(defun kdb-vc-dir-root ()
-  "Open vc-dir for the project root."
-  (interactive)
-  (let ((root (vc-root-dir)))
-    (if root
-        (vc-dir root)
-      (call-interactively 'vc-dir))))
-
 (defun kdb-vc-transient ()
   "Custom VC transient menu with Magit-like keybindings."
   (interactive)
@@ -337,7 +346,8 @@
   (transient-define-prefix kdb-vc-menu ()
     "VC operations menu"
     [["Status & Diff"
-      ("g" "Status (Root)" kdb-vc-dir-root)
+      ("g" "Status (Root)" project-vc-dir)
+      ("G" "Lazygit" kdb-lazygit)
       ("s" "Status" vc-dir)
       ("d" "Diff (unstaged)" kdb-vc-diff-enhanced)
       ("D" "Diff vs Branch" vc-root-diff)
@@ -382,18 +392,19 @@
       ("a" "Add/Stage" vc-register)
       ("x" "Unstage" kdb-vc-git-unstage)
       ("c" "Commit" vc-next-action)
-      ("C-c" "Amend" kdb-vc-git-amend-commit)
+      ("C-c" "Amend" kdb-vc-git-amend)
       ("u" "Revert" vc-revert)
       ("U" "Checkout" kdb-vc-revert-file)
       ("k" "Delete" vc-delete-file)
       ("R" "Rename" vc-rename-file)]
      
      ["Stash"
-      ("z z" "Stash" kdb-vc-git-stash)
-      ("z s" "Stash Message" kdb-vc-git-stash-push)
-      ("z a" "Apply" kdb-vc-git-stash-apply)
-      ("z p" "Pop" kdb-vc-git-stash-pop)
-      ("z l" "List" kdb-vc-git-stash-list)]
+      ("z z" "Snapshot" vc-git-stash-snapshot)
+      ("z s" "Stash..." vc-git-stash)
+      ("z a" "Apply..." vc-git-stash-apply)
+      ("z p" "Pop..." vc-git-stash-pop)
+      ("z v" "Show..." vc-git-stash-show)
+      ("z k" "Delete..." vc-git-stash-delete)]
      
      ["Tags & Info"
       ("t" "Create Tag" vc-create-tag)
@@ -427,14 +438,14 @@
                              (shell-quote-argument url)))
       (message "Remote '%s' added with URL: %s" remote url))))
 
-(defun kdb-vc-git-amend-commit ()
-  "Amend the last commit (staged changes only)."
+(defun kdb-vc-git-amend ()
+  "Amend the last commit via log-edit, pre-filled with its message.
+Needs at least one modified/registered file in the fileset (like any
+vc check-in).  \\`C-c C-e' in log-edit toggles amend on any commit."
   (interactive)
-  (when (yes-or-no-p "Amend last commit? ")
-    (shell-command "git commit --amend --no-edit")
-    (message "Last commit amended")
-    (when (derived-mode-p 'vc-dir-mode)
-      (vc-dir-refresh))))
+  (vc-next-action nil)
+  (when (derived-mode-p 'log-edit-mode)
+    (vc-git-log-edit-toggle-amend)))
 
 (defun kdb-vc-revert-file ()
   "Revert the current file to the last committed version."
@@ -467,67 +478,23 @@
       (shell-command (format "git branch -m %s" (shell-quote-argument new-name)))
       (message "Branch renamed from '%s' to '%s'" current-branch new-name))))
 
-(defun kdb-vc-git-stash ()
-  "Stash current changes."
-  (interactive)
-  (shell-command "git stash")
-  (message "Changes stashed")
-  (when (derived-mode-p 'vc-dir-mode)
-    (vc-dir-refresh)))
+;; Stash operations use the vc-git built-ins — see the transient.  vc-dir's
+;; header line also lists stashes with a clickable menu.  vc-git.el loads
+;; lazily, so make its stash commands callable from the transient anytime.
+(dolist (fn '(vc-git-stash vc-git-stash-snapshot vc-git-stash-pop
+              vc-git-stash-apply vc-git-stash-show vc-git-stash-delete
+              vc-git-log-edit-toggle-amend))
+  (autoload fn "vc-git" nil t))
 
-(defun kdb-vc-git-stash-push ()
-  "Create a new stash with a custom message."
+(defun kdb-lazygit ()
+  "Open lazygit in an eat terminal at the repository root.
+For history surgery vc doesn't cover: interactive rebase, cherry-pick."
   (interactive)
-  (let ((message (read-string "Stash message: ")))
-    (if (string-empty-p message)
-        (shell-command "git stash push")
-      (shell-command (format "git stash push -m %s" (shell-quote-argument message))))
-    (message "Changes stashed")
-    (when (derived-mode-p 'vc-dir-mode)
-      (vc-dir-refresh))))
-
-(defun kdb-vc-git-stash-apply ()
-  "Apply a stash from the list."
-  (interactive)
-  (let* ((stashes (shell-command-to-string "git stash list"))
-         (stash-list (split-string stashes "\n" t))
-         (stash (when stash-list
-                  (completing-read "Apply stash: " stash-list nil t))))
-    (if stash
-        (let ((stash-num (car (split-string stash ":"))))
-          (shell-command (format "git stash apply %s" stash-num))
-          (message "Stash applied: %s" stash-num)
-          (when (derived-mode-p 'vc-dir-mode)
-            (vc-dir-refresh)))
-      (message "No stashes available"))))
-
-(defun kdb-vc-git-stash-pop ()
-  "Pop a stash from the list."
-  (interactive)
-  (let* ((stashes (shell-command-to-string "git stash list"))
-         (stash-list (split-string stashes "\n" t))
-         (stash (when stash-list
-                  (completing-read "Pop stash: " stash-list nil t))))
-    (if stash
-        (let ((stash-num (car (split-string stash ":"))))
-          (shell-command (format "git stash pop %s" stash-num))
-          (message "Stash popped: %s" stash-num)
-          (when (derived-mode-p 'vc-dir-mode)
-            (vc-dir-refresh)))
-      (message "No stashes available"))))
-
-(defun kdb-vc-git-stash-list ()
-  "List all stashes."
-  (interactive)
-  (let ((stashes (shell-command-to-string "git stash list")))
-    (if (string-empty-p (string-trim stashes))
-        (message "No stashes found")
-      (with-current-buffer (get-buffer-create "*Git Stashes*")
-        (erase-buffer)
-        (insert "Git Stashes:\n\n")
-        (insert stashes)
-        (goto-char (point-min))
-        (pop-to-buffer (current-buffer))))))
+  (unless (executable-find "lazygit")
+    (user-error "lazygit is not installed (sudo xbps-install lazygit)"))
+  (require 'eat)
+  (let ((default-directory (or (vc-root-dir) default-directory)))
+    (eat "lazygit" t)))
 
 (defun kdb-vc-git-list-tags ()
   "List all tags in the repository."
@@ -633,7 +600,6 @@
   ;; Better defaults for cleaner UI
   (setq vc-dir-hide-up-to-date t           ; Hide unchanged files by default
         vc-dir-hide-unregistered nil       ; Show untracked files
-        vc-stay-local t                    ; Faster for remote repos
         vc-directory-exclusion-list '(".git" ".hg" ".svn" "node_modules" ".venv"))
 
   ;; === MERGE CONFLICT RESOLUTION === ;;
@@ -738,10 +704,23 @@
         (message "Showing all files"))))
   
   ;; Quick commit with message
+  (defun kdb-vc-dir-register-unregistered ()
+    "Register any unregistered files among the marked files (or file at point).
+Makes a mixed fileset (untracked + edited) committable in one step."
+    (let* ((files (or (vc-dir-marked-files)
+                      (when (vc-dir-current-file)
+                        (list (vc-dir-current-file)))))
+           (unreg (seq-filter (lambda (f) (eq (vc-state f) 'unregistered)) files)))
+      (when unreg
+        (vc-register (list (vc-responsible-backend default-directory) unreg))
+        (message "Registered %d untracked file(s)" (length unreg)))))
+
   (defun kdb-vc-dir-quick-commit ()
-    "Quick commit with a simple message prompt."
+    "Quick commit with a simple message prompt.
+Marked untracked files are registered automatically first."
     (interactive)
     (let ((msg (read-string "Commit message: ")))
+      (kdb-vc-dir-register-unregistered)
       (vc-next-action nil)
       (insert msg)
       (log-edit-done)))
@@ -859,7 +838,7 @@
   (defun kdb-vc-dir-help ()
     "Show vc-dir keybinding help."
     (interactive)
-    (message "VC-Dir: [d]iff [D]iff-all [SPC]mark [a]mark-same-type [c]ommit [C]onflicts [h/x]hide [r]evert [s]ummary"))
+    (message "VC-Dir: [d]iff [D]iff-all [SPC]mark [a]mark-same-type [c]ommit [C]onflicts [h/x]hide [r]evert [s]ummary | log-edit: C-c C-d diff, C-c C-e amend"))
 
   (defun kdb-vc-dir-revert-file ()
     "Revert the file at point to its last committed version."
