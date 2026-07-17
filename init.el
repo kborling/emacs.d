@@ -1296,6 +1296,28 @@ Falls back to DIRS or project roots."
 (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
 (require 'init-theme)   ; cross-platform theme switching (s-t / s-T)
 
+;; SSH/Git passphrase prompts via emacs-askpass (subprocesses have no TTY).
+(let ((askpass (seq-find #'file-exists-p
+                         (list (expand-file-name "~/.local/bin/emacs-askpass")
+                               (expand-file-name "~/dotfiles/bin/.local/bin/emacs-askpass")))))
+  (when askpass
+    (setenv "SSH_ASKPASS" askpass)
+    (setenv "GIT_ASKPASS" askpass)
+    (setenv "EMACSCLIENT"
+            (expand-file-name (if (eq system-type 'windows-nt)
+                                  "emacsclient.exe"
+                                "emacsclient")
+                              invocation-directory))
+    ;; macOS/Windows have no DISPLAY, so ssh won't use askpass unforced
+    (when (memq system-type '(darwin windows-nt))
+      (setenv "SSH_ASKPASS_REQUIRE" "force"))))
+
+(add-hook 'after-init-hook
+          (lambda ()
+            (require 'server)
+            (unless (or (daemonp) (server-running-p))
+              (server-start))))
+
 (defun kdb-load-init-vc ()
   "Load init-vc configuration once."
   (unless (featurep 'init-vc)
