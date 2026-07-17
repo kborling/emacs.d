@@ -508,6 +508,9 @@
   (message "Buffer copied"))
 
 ;; Terminal management functions (defined early for keybindings)
+;; Declared special before the let below — eshell.el isn't loaded yet at
+;; that point, and lexically binding it breaks eshell's own defvar.
+(defvar eshell-buffer-name)
 (defun kdb-eshell-new ()
   "Create a new eshell buffer named after the directory."
   (interactive)
