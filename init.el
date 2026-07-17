@@ -1764,6 +1764,15 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (autoload 'kdb-claude "init-claude-workflow" "Claude menu" t)
 (autoload 'kdb-claude-sessions "init-claude-workflow" "Switch Claude sessions" t)
 (autoload 'kdb-claude-next-session "init-claude-workflow" "Cycle Claude sessions" t)
+
+;; Print-mode backend (native Windows, or anywhere without a PTY).
+(autoload 'kdb-claude-print "init-claude-print" "Claude print mode (new)" t)
+(autoload 'kdb-claude-print-continue "init-claude-print" "Claude print mode (follow-up)" t)
+(autoload 'kdb-claude-print-new "init-claude-print" "Claude print mode (new session)" t)
+(autoload 'kdb-claude-print-region "init-claude-print" "Send region to Claude print mode" t)
+(autoload 'kdb-claude-print-buffer "init-claude-print" "Send buffer to Claude print mode" t)
+(autoload 'kdb-claude-print-stop "init-claude-print" "Stop Claude print request" t)
+
 (global-set-key (kbd "C-c l") #'kdb-claude)
 (global-set-key (kbd "C-c ;") #'kdb-claude-sessions)
 (global-set-key (kbd "C-c '") #'kdb-claude-next-session)

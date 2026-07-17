@@ -521,8 +521,13 @@ Unified view across all sources."
                               "none (set with ;)")))
      ["Start"
       ("N" "New (project)" kdb-claude-start)
-      ("x" "Agent here" claude-code)
-      ("l" "Chat here" gptel)]
+      ("x" "Agent here" claude-code
+       :if (lambda () (not (eq system-type 'windows-nt))))
+      ("l" "Chat here" gptel)
+      ("p" "Print (no PTY)" kdb-claude-print
+       :if (lambda () (eq system-type 'windows-nt)))
+      ("c" "Print follow-up" kdb-claude-print-continue
+       :if (lambda () (eq system-type 'windows-nt)))]
      ["Send to Target"
       ("s" "Prompt" kdb-claude-prompt-target)
       ("r" "Region" kdb-claude-send-region-to-target)
