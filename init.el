@@ -313,8 +313,18 @@
 ;; Inline completion preview (ghost text)
 (add-hook 'prog-mode-hook #'completion-preview-mode)
 
-;; Spell checking in text buffers (requires aspell or hunspell)
-(when (or (executable-find "aspell") (executable-find "hunspell"))
+;; Spell checking — only when the checker actually works (a binary without
+;; dictionaries, common on Windows, would warn in every buffer)
+(defun kdb-spell-checker ()
+  (when-let* ((prog (or (executable-find "aspell") (executable-find "hunspell"))))
+    (with-temp-buffer
+      (insert "hello\n")
+      (when (zerop (call-process-region (point-min) (point-max) prog nil t nil "-a"))
+        prog))))
+
+(when-let* ((speller (kdb-spell-checker)))
+  (setq ispell-program-name speller
+        flyspell-issue-message-flag nil)
   (add-hook 'text-mode-hook #'flyspell-mode)
   (add-hook 'prog-mode-hook #'flyspell-prog-mode))
 
