@@ -18,6 +18,7 @@ saveplace
 bookmarks
 savehist
 projects
+projects.eld
 recentf
 *.elc
 *.el~
