@@ -999,7 +999,9 @@ If point is at the end of the line, kill the whole line including the newline."
                     (mode . log-view-mode)))
       ("AI/Claude" (or (name . "^\\*Claude")
                       (name . "^\\*gptel")
-                      (mode . gptel-mode)))
+                      (mode . gptel-mode)
+                      (mode . agent-shell-mode)
+                      (mode . kdb-claude-print-mode)))
       ("Terminal" (or (mode . eshell-mode)
                       (mode . shell-mode)
                       (mode . term-mode)
@@ -1707,21 +1709,21 @@ Falls back to DIRS or project roots."
   (evil-collection-init))
 
 (defvar kdb-evil-buffer-list nil
-  "List of buffer patterns where evil-mode is enabled.")
+  "List of buffer patterns where 'evil-mode' is enabled.")
 
 (defvar kdb-evil-project-list nil
-  "List of project roots where evil-mode is enabled.
+  "List of project roots where 'evil-mode' is enabled.
 Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))")
 
 (defun kdb-evil-toggle ()
-  "Toggle evil-mode globally."
+  "Toggle 'evil-mode' globally."
   (interactive)
   (if (bound-and-true-p evil-mode)
       (progn (evil-mode -1) (message "Evil mode disabled"))
     (evil-mode 1) (message "Evil mode enabled")))
 
 (defun kdb-evil-toggle-buffer ()
-  "Toggle evil-local-mode in current buffer."
+  "Toggle 'evil-local-mode' in current buffer."
   (interactive)
   (if (bound-and-true-p evil-local-mode)
       (progn (evil-local-mode -1) (message "Evil disabled in buffer"))
@@ -1729,7 +1731,7 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
     (evil-local-mode 1) (message "Evil enabled in buffer")))
 
 (defun kdb-evil-auto-enable ()
-  "Auto-enable evil-local-mode based on project or buffer patterns."
+  "Auto-enable 'evil-local-mode' based on project or buffer patterns."
   (when (and (not (minibufferp))
              (not (bound-and-true-p evil-local-mode)))
     (let ((file (or buffer-file-name default-directory "")))
@@ -1743,12 +1745,22 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (global-set-key (kbd "C-c t v") #'kdb-evil-toggle)
 (global-set-key (kbd "C-c t V") #'kdb-evil-toggle-buffer)
 
-;; gptel (Claude Chat + Org Integration) ================== ;;
+;; Claude ================================================= ;;
+;; gptel calls the Anthropic API (needs a key).  agent-shell, claude-code
+;; and pipe sessions go through the `claude' CLI login, so Max covers them.
+;; Pipe sessions (init-claude-print) need neither a PTY nor node.
+;; Session commands live in lisp/init-claude*.el.
+
+(defvar kdb-gptel-enabled t
+  "Non-nil to load gptel.
+Set to nil in personal.el on machines without an Anthropic API key,
+e.g. a Max-only work machine.")
 
 (use-package gptel
+  :if kdb-gptel-enabled
   :ensure t
   :config
-  (setq gptel-model 'claude-sonnet-4-5
+  (setq gptel-model 'claude-sonnet-5-5
         gptel-default-mode 'org-mode     ; Chat buffers open in org-mode
         gptel-backend (gptel-make-anthropic "Claude" :stream t))
 
@@ -1789,40 +1801,52 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
    :confirm t
    :category "system")
 
-  (setq gptel-log-file (expand-file-name "gptel-log.org" "~/.org/"))
+  (setq gptel-log-file (expand-file-name "gptel-log.org" "~/.org/")))
 
-  )
+;; ACP client; needs node: npm install -g @agentclientprotocol/claude-agent-acp
+(defvar kdb-agent-shell-enabled (and (executable-find "claude-agent-acp") t)
+  "Non-nil when the ACP adapter is installed.")
+(use-package agent-shell
+  :if kdb-agent-shell-enabled
+  :ensure t
+  :defer t
+  :config
+  (add-hook 'agent-shell-mode-hook #'kdb-claude-watch-agent-shell)
+  (setq agent-shell-anthropic-authentication
+        (agent-shell-anthropic-make-authentication :login t)))
 
-(autoload 'kdb-claude "init-claude-workflow" "Claude menu" t)
-(autoload 'kdb-claude-sessions "init-claude-workflow" "Switch Claude sessions" t)
-(autoload 'kdb-claude-next-session "init-claude-workflow" "Cycle Claude sessions" t)
-
-;; Print-mode backend (native Windows, or anywhere without a PTY).
-(autoload 'kdb-claude-print "init-claude-print" "Claude print mode (new)" t)
-(autoload 'kdb-claude-print-continue "init-claude-print" "Claude print mode (follow-up)" t)
-(autoload 'kdb-claude-print-new "init-claude-print" "Claude print mode (new session)" t)
-(autoload 'kdb-claude-print-region "init-claude-print" "Send region to Claude print mode" t)
-(autoload 'kdb-claude-print-buffer "init-claude-print" "Send buffer to Claude print mode" t)
-(autoload 'kdb-claude-print-stop "init-claude-print" "Stop Claude print request" t)
-
-(global-set-key (kbd "C-c l") #'kdb-claude)
-(global-set-key (kbd "C-c ;") #'kdb-claude-sessions)
-(global-set-key (kbd "C-c '") #'kdb-claude-next-session)
-
-;; Claude Code (CLI in Emacs) ============================= ;;
-
+;; Claude Code TUI in eat; needs a PTY, so not on native Windows.
 (use-package claude-code
+  :if (not (eq system-type 'windows-nt))
   :vc (:url "https://github.com/stevemolitor/claude-code.el" :rev :newest)
   :defer t
   :config
   (setq claude-code-use-eat t))
 
-;; Claude Session Archive ================================= ;;
+(dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-sessions kdb-claude-next-waiting)
+                ("init-claude-print" kdb-claude-print kdb-claude-print-continue
+                 kdb-claude-print-new kdb-claude-print-region kdb-claude-print-buffer
+                 kdb-claude-print-stop kdb-claude-print-allow kdb-claude-print-deny)
+                ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
+                 kdb-claude-browse kdb-claude-search kdb-claude-import-export
+                 kdb-claude-ask-archive kdb-claude-resume-archived)))
+  (dolist (fn (cdr spec))
+    (autoload fn (car spec) nil t)))
+;; Non-interactive entry points: Claude Code hooks (emacsclient) and agent-shell.
+(autoload 'kdb-claude-flag "init-claude-workflow")
+(autoload 'kdb-claude-watch-agent-shell "init-claude-workflow")
 
-(autoload 'kdb-claude-sync "init-claude" "Sync all Claude sessions" t)
-(autoload 'kdb-claude-browse "init-claude" "Browse Claude sessions" t)
-(autoload 'kdb-claude-search "init-claude" "Search Claude sessions" t)
-(autoload 'kdb-claude-import-export "init-claude" "Import Desktop export" t)
+(global-set-key (kbd "C-c l") #'kdb-claude)
+(global-set-key (kbd "C-c ;") #'kdb-claude-sessions)
+(global-set-key (kbd "C-c '") #'kdb-claude-next-waiting)
+
+;; Keep the archive current so search/ask/resume see recent sessions.
+(run-with-idle-timer 300 t (lambda ()
+                             (require 'init-claude)
+                             (when (file-directory-p kdb-claude-archive-dir)
+                               (let ((inhibit-message t))
+                                 (with-demoted-errors "Claude archive sync: %S"
+                                   (kdb-claude-sync-code-sessions))))))
 
 
 ;; Local Variables:

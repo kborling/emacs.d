@@ -41,17 +41,26 @@
 ;;; Claude Code Session Sync
 ;;; ============================================================
 
-(defun kdb-claude-sync-code-sessions ()
+(defun kdb-claude--projects-dir ()
+  "Return Claude Code's session directory.
+Windows Emacs often sets HOME to AppData, but Claude uses USERPROFILE."
+  (expand-file-name "projects"
+                    (or (getenv "CLAUDE_CONFIG_DIR")
+                        (expand-file-name ".claude" (or (getenv "USERPROFILE") "~")))))
+
+(defun kdb-claude-sync-code-sessions (&optional force)
   "Sync Claude Code sessions to the archive.
-Converts JSONL sessions to readable org files."
-  (interactive)
+Converts JSONL sessions to readable org files.  With prefix arg FORCE,
+reconvert every session."
+  (interactive "P")
   (let* ((archive (kdb-claude--ensure-archive))
          (dest (expand-file-name "code-sessions/" archive))
-         (source "~/.claude/projects")
+         (source (kdb-claude--projects-dir))
          (count 0))
     (make-directory dest t)
-    (when (file-directory-p (expand-file-name source))
-      (dolist (jsonl (directory-files-recursively source "\\.jsonl$"))
+    (when (file-directory-p source)
+      (dolist (jsonl (seq-remove (lambda (f) (string-match-p "/subagents/" f))
+                                 (directory-files-recursively source "\\.jsonl$")))
         (let* ((session-id (file-name-base jsonl))
                (project-dir (file-name-directory jsonl))
                (project-name (file-name-nondirectory
@@ -60,7 +69,8 @@ Converts JSONL sessions to readable org files."
                           (format "%s/%s.org" project-name session-id) dest))
                (org-dir (file-name-directory org-file)))
           ;; Only convert if org file doesn't exist or jsonl is newer
-          (when (or (not (file-exists-p org-file))
+          (when (or force
+                    (not (file-exists-p org-file))
                     (time-less-p (file-attribute-modification-time
                                   (file-attributes org-file))
                                  (file-attribute-modification-time
@@ -70,49 +80,63 @@ Converts JSONL sessions to readable org files."
             (cl-incf count)))))
     (message "Synced %d Claude Code sessions" count)))
 
+(defun kdb-claude--session-title (messages)
+  "Return the first line of the first real user prompt in MESSAGES."
+  (let ((first (seq-find (lambda (m)
+                           (and (equal (car m) "user")
+                                (not (string-prefix-p "<" (cdr m)))))
+                         messages)))
+    (if first
+        (truncate-string-to-width (car (split-string (cdr first) "\n" t))
+                                  80 nil nil "…")
+      "Claude Code Session")))
+
 (defun kdb-claude--jsonl-to-org (jsonl-file org-file)
   "Convert JSONL-FILE to a readable ORG-FILE."
-  (let ((messages '()))
+  (let (messages cwd)
     (with-temp-buffer
       (insert-file-contents jsonl-file)
       (goto-char (point-min))
       (while (not (eobp))
         (condition-case nil
-            (let* ((line (buffer-substring (line-beginning-position) (line-end-position)))
-                   (obj (json-parse-string line :object-type 'alist)))
-              (when-let* ((role (alist-get 'role obj))
-                          (content (alist-get 'content obj)))
-                (push (cons role content) messages)))
+            (let* ((obj (json-parse-string
+                         (buffer-substring (line-beginning-position) (line-end-position))
+                         :object-type 'alist :array-type 'list :null-object nil))
+                   (msg (alist-get 'message obj))
+                   (role (alist-get 'role msg))
+                   (text (when (member role '("user" "assistant"))
+                           (string-trim (kdb-claude--extract-text
+                                         (alist-get 'content msg))))))
+              (setq cwd (or cwd (alist-get 'cwd obj)))
+              (unless (or (null text) (string-empty-p text))
+                (push (cons role text) messages)))
           (error nil))
         (forward-line 1)))
+    (setq messages (nreverse messages))
     (with-temp-file org-file
-      (insert (format "#+TITLE: Claude Code Session\n"))
+      (insert (format "#+TITLE: %s\n" (kdb-claude--session-title messages)))
       (insert (format "#+DATE: %s\n"
                       (format-time-string "%Y-%m-%d"
                                           (file-attribute-modification-time
                                            (file-attributes jsonl-file)))))
-      (insert (format "#+SOURCE: %s\n\n" jsonl-file))
-      (dolist (msg (nreverse messages))
-        (let ((role (car msg))
-              (content (cdr msg)))
-          (insert (format "* %s\n\n"
-                          (cond ((equal role "user") "You")
-                                ((equal role "assistant") "Claude")
-                                (t role))))
-          (cond
-           ((stringp content) (insert content "\n\n"))
-           ((vectorp content)
-            (seq-doseq (block content)
-              (when (listp block)
-                (let ((type (alist-get 'type block)))
-                  (cond
-                   ((equal type "text")
-                    (insert (or (alist-get 'text block) "") "\n\n"))
-                   ((equal type "tool_use")
-                    (insert (format "#+begin_src\n[Tool: %s]\n#+end_src\n\n"
-                                    (or (alist-get 'name block) "unknown"))))
-                   (t nil))))))
-           (t (insert (format "%s\n\n" content)))))))))
+      (insert (format "#+SOURCE: %s\n" jsonl-file))
+      (when cwd (insert (format "#+CWD: %s\n" cwd)))
+      (insert "\n")
+      (dolist (msg messages)
+        (insert (format "* %s\n\n%s\n\n"
+                        (if (equal (car msg) "user") "You" "Claude")
+                        (cdr msg)))))))
+
+(defun kdb-claude--org-keyword (file keyword)
+  "Return the value of #+KEYWORD in the header of org FILE."
+  (with-temp-buffer
+    (insert-file-contents file nil 0 1000)
+    (when (re-search-forward (format "^#\\+%s: \\(.*\\)" keyword) nil t)
+      (match-string 1))))
+
+(defun kdb-claude--org-title (file)
+  "Return the title of archived org FILE, or its base name."
+  (or (kdb-claude--org-keyword file "TITLE") (file-name-base file)))
 
 ;;; ============================================================
 ;;; gptel Log Sync
@@ -194,7 +218,7 @@ Converts JSONL sessions to readable org files."
           ((equal type "text") (or (alist-get 'text block) ""))
           ((equal type "tool_use")
            (format "[Tool: %s]" (or (alist-get 'name block) "unknown")))
-          (t (format "[%s]" (or type "unknown"))))))
+          (t ""))))
      content "\n"))
    (t (format "%s" content))))
 
@@ -261,11 +285,15 @@ Converts JSONL sessions to readable org files."
         (let* ((files (directory-files-recursively dir "\\.org$"))
                (candidates (mapcar
                             (lambda (f)
-                              (cons (format "%-12s  %s"
+                              (cons (format "%-12s  %-24s  %s"
                                             (format-time-string "%Y-%m-%d"
                                               (file-attribute-modification-time
                                                (file-attributes f)))
-                                            (file-name-base f))
+                                            (truncate-string-to-width
+                                             (file-name-nondirectory
+                                              (directory-file-name (file-name-directory f)))
+                                             24 nil nil "…")
+                                            (kdb-claude--org-title f))
                                     f))
                             (sort files (lambda (a b)
                                           (time-less-p
@@ -342,6 +370,51 @@ Converts JSONL sessions to readable org files."
     (message "Claude export set to: %s" kdb-claude-export-directory)
     (when (yes-or-no-p "Sync to archive now? ")
       (kdb-claude-sync-desktop))))
+
+;;; ============================================================
+;;; Ask & Resume
+;;; ============================================================
+
+(defvar kdb-claude-print-permission-mode)
+(defvar kdb-claude-print--session-id)
+(declare-function kdb-claude-print--run "init-claude-print")
+(declare-function kdb-claude-print--new-buffer "init-claude-print")
+
+;;;###autoload
+(defun kdb-claude-ask-archive (question)
+  "Ask Claude QUESTION about past sessions, searching the archive read-only."
+  (interactive "sAsk the archive: ")
+  (require 'init-claude-print)
+  (kdb-claude-sync-code-sessions)
+  (let* ((default-directory (kdb-claude--ensure-archive))
+         (buf (kdb-claude-print--new-buffer "archive")))
+    (with-current-buffer buf
+      (setq-local kdb-claude-print-permission-mode "dontAsk"))
+    (kdb-claude-print--run
+     (concat "This directory archives past Claude sessions as org files "
+             "(code-sessions/, desktop/, gptel/).  Search them to answer, "
+             "citing the files you used:\n\n" question)
+     nil nil buf)))
+
+;;;###autoload
+(defun kdb-claude-resume-archived (file)
+  "Continue the Claude Code session archived in org FILE.
+Opens a print-mode buffer that resumes the session on its next prompt."
+  (interactive
+   (list (if (and buffer-file-name (kdb-claude--org-keyword buffer-file-name "SOURCE"))
+             buffer-file-name
+           (read-file-name "Archived session: "
+                           (expand-file-name "code-sessions/" (kdb-claude--ensure-archive))))))
+  (require 'init-claude-print)
+  (let* ((source (or (kdb-claude--org-keyword file "SOURCE")
+                     (user-error "Not an archived Claude Code session")))
+         (default-directory (file-name-as-directory
+                             (or (kdb-claude--org-keyword file "CWD") default-directory)))
+         (buf (kdb-claude-print--new-buffer)))
+    (with-current-buffer buf
+      (setq kdb-claude-print--session-id (file-name-base source)))
+    (kdb-claude-print--run (read-string (format "Resume \"%s\": " (kdb-claude--org-title file)))
+                           t nil buf)))
 
 (provide 'init-claude)
 ;;; init-claude.el ends here
