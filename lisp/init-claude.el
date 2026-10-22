@@ -3,7 +3,7 @@
 ;;; Commentary:
 
 ;; Centralized Claude session log management.
-;; Syncs Claude Code sessions, gptel logs, and Desktop exports
+;; Syncs Claude Code sessions and Desktop exports
 ;; into a private git repository for backup and search.
 ;;
 ;; Set `kdb-claude-archive-dir' in personal.el to the repo path.
@@ -139,24 +139,6 @@ reconvert every session."
   (or (kdb-claude--org-keyword file "TITLE") (file-name-base file)))
 
 ;;; ============================================================
-;;; gptel Log Sync
-;;; ============================================================
-
-(defun kdb-claude-sync-gptel ()
-  "Copy gptel log to the archive."
-  (interactive)
-  (let* ((archive (kdb-claude--ensure-archive))
-         (dest (expand-file-name "gptel/" archive))
-         (source (expand-file-name "gptel-log.org" "~/.org/")))
-    (make-directory dest t)
-    (when (file-exists-p source)
-      (copy-file source
-                 (expand-file-name
-                  (format "gptel-%s.org" (system-name)) dest)
-                 t)
-      (message "gptel log synced"))))
-
-;;; ============================================================
 ;;; Claude Desktop Export
 ;;; ============================================================
 
@@ -261,7 +243,6 @@ reconvert every session."
   "Sync all Claude sessions to the archive and commit."
   (interactive)
   (kdb-claude-sync-code-sessions)
-  (kdb-claude-sync-gptel)
   (let ((default-directory (kdb-claude--ensure-archive)))
     (call-process "git" nil nil nil "add" "-A")
     (call-process "git" nil nil nil "commit" "-m"
@@ -392,7 +373,7 @@ reconvert every session."
       (setq-local kdb-claude-print-permission-mode "dontAsk"))
     (kdb-claude-print--run
      (concat "This directory archives past Claude sessions as org files "
-             "(code-sessions/, desktop/, gptel/).  Search them to answer, "
+             "(code-sessions/, desktop/).  Search them to answer, "
              "citing the files you used:\n\n" question)
      nil nil buf)))
 

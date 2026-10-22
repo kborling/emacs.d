@@ -51,18 +51,17 @@ lisp/
 
 ### Claude AI (`C-c l`)
 
-Two tools, one menu. `C-c l` opens a unified transient:
+Everything runs through the `claude` CLI login (works with a Max subscription). `C-c l` opens a unified transient:
 
-- **Think** — gptel API chat in org buffers (explain, rewrite, discuss)
-- **Quick Fix** — select code, one key to refactor/fix/test/document in-place
-- **Agent** — Claude Code CLI running in Emacs (start, give tasks, accept/reject)
-- **Sessions** — target any session, star/bookmark, toggle visibility
-- **Recall** — browse live chats, archived sessions, Desktop exports in one view
-- **Move** — transfer context between chat and agent sessions
+- **Start** — agent-shell (ACP, needs node), Claude Code TUI (needs a PTY), or a pipe session (works anywhere, incl. native Windows); new sessions on another branch open in a git worktree
+- **Send to Target** — prompt, region or file to any session; accept/reject permission prompts without switching
+- **Sessions** — jump to sessions waiting on you, target, star/bookmark
+- **Archive** — recall, browse, search, ask questions of past sessions, resume them
+- **Move** — send a past session or a `:claude:` org note to the target
 
 Session shortcuts outside the transient:
 - `C-c ;` — switch between active sessions
-- `C-c '` — cycle to next session
+- `C-c '` — jump to the next session waiting on you (mode line shows `Claude[N]`)
 
 ### Org Mode
 - org-modern styling, org-appear
@@ -302,7 +301,6 @@ In line-mode, Emacs keys are translated for X applications:
 
 Copy `personal.el.template` to `personal.el` and configure:
 
-- `gptel-api-key` — Claude API key
 - `kdb-sql-connections` — Azure SQL connection list
 - `kdb-evil-project-list` — projects using vim bindings
 - `kdb-location-coordinates` — lat:long for redshift

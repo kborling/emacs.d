@@ -83,7 +83,7 @@
          (window-height . 0.3)
          (slot . 0))
         ;; Help/docs on the right
-        ("\\*\\(Help\\|Apropos\\|info\\|Man \\|eldoc\\|Claude: Explain\\|Claude: Tests\\).*"
+        ("\\*\\(Help\\|Apropos\\|info\\|Man \\|eldoc\\).*"
          (display-buffer-in-side-window)
          (side . right)
          (window-width . 0.4)
@@ -998,8 +998,6 @@ If point is at the end of the line, kill the whole line including the newline."
                     (mode . diff-mode)
                     (mode . log-view-mode)))
       ("AI/Claude" (or (name . "^\\*Claude")
-                      (name . "^\\*gptel")
-                      (mode . gptel-mode)
                       (mode . agent-shell-mode)
                       (mode . kdb-claude-print-mode)))
       ("Terminal" (or (mode . eshell-mode)
@@ -1746,62 +1744,9 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (global-set-key (kbd "C-c t V") #'kdb-evil-toggle-buffer)
 
 ;; Claude ================================================= ;;
-;; gptel calls the Anthropic API (needs a key).  agent-shell, claude-code
-;; and pipe sessions go through the `claude' CLI login, so Max covers them.
-;; Pipe sessions (init-claude-print) need neither a PTY nor node.
-;; Session commands live in lisp/init-claude*.el.
-
-(defvar kdb-gptel-enabled t
-  "Non-nil to load gptel.
-Set to nil in personal.el on machines without an Anthropic API key,
-e.g. a Max-only work machine.")
-
-(use-package gptel
-  :if kdb-gptel-enabled
-  :ensure t
-  :config
-  (setq gptel-model 'claude-sonnet-5-5
-        gptel-default-mode 'org-mode     ; Chat buffers open in org-mode
-        gptel-backend (gptel-make-anthropic "Claude" :stream t))
-
-  (setq gptel-org-branching-context t    ; Each org heading is its own context branch
-        gptel-use-header-line t)
-
-  (add-hook 'gptel-post-response-functions #'gptel-end-of-response)
-
-  (gptel-make-tool
-   :function (lambda (path old-text new-text)
-               (let ((file (expand-file-name path)))
-                 (unless (file-exists-p file)
-                   (error "File not found: %s" path))
-                 (with-current-buffer (find-file-noselect file)
-                   (goto-char (point-min))
-                   (if (search-forward old-text nil t)
-                       (progn
-                         (replace-match new-text t t)
-                         (save-buffer)
-                         (format "Replaced in %s" path))
-                     (format "Text not found in %s" path)))))
-   :name "edit_file"
-   :description "Make a targeted edit in a file by replacing old_text with new_text."
-   :args (list '(:name "path" :type string :description "File path")
-               '(:name "old_text" :type string :description "Exact text to find and replace")
-               '(:name "new_text" :type string :description "Replacement text"))
-   :confirm t
-   :category "filesystem")
-
-  (gptel-make-tool
-   :function (lambda (command)
-               (with-temp-buffer
-                 (shell-command command (current-buffer))
-                 (buffer-string)))
-   :name "run_shell_command"
-   :description "Run a shell command and return its output"
-   :args (list '(:name "command" :type string :description "Shell command to execute"))
-   :confirm t
-   :category "system")
-
-  (setq gptel-log-file (expand-file-name "gptel-log.org" "~/.org/")))
+;; agent-shell, claude-code and pipe sessions all use the `claude' CLI
+;; login, so a Max subscription covers them.  Pipe sessions
+;; (init-claude-print) need neither a PTY nor node.
 
 ;; ACP client; needs node: npm install -g @agentclientprotocol/claude-agent-acp
 (defvar kdb-agent-shell-enabled (and (executable-find "claude-agent-acp") t)

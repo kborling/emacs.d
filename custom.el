@@ -9,7 +9,7 @@
                 csharp-mode csv-mode deadgrep deft dictionary diff-hl
                 eat editorconfig eglot-booster elixir-ts-mode
                 evil-collection exec-path-from-shell exwm faceup
-                fleury-theme flymake gptel hl-todo less-css-mode
+                fleury-theme flymake hl-todo less-css-mode
                 lua-mode marginalia markdown-mode markdown-ts-mode
                 memmet-mode multiple-cursors orderless org org-appear
                 org-modern peg project ssh-agency tempel-collection

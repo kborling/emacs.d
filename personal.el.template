@@ -11,11 +11,6 @@
 (setq user-full-name "Your Name"
       user-mail-address "your.email@example.com")
 
-;; gptel (Claude API) — needs an Anthropic API key; a Max subscription doesn't cover it.
-;; Without a key, disable it; Claude sessions (C-c l) use the `claude' CLI login instead.
-;; (setq gptel-api-key "sk-ant-...")
-;; (setq kdb-gptel-enabled nil)
-
 ;; Claude sessions over pipes (C-c l p) — no PTY or node needed
 ;; (setq kdb-claude-print-permission-mode "acceptEdits") ; or "default" to ask for edits too
 ;; (setq kdb-claude-print-model "opus")
