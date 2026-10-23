@@ -1626,6 +1626,8 @@ Falls back to DIRS or project roots."
   :vc (:url "https://codeberg.org/akib/emacs-eat" :rev :newest)
   :ensure t
   :commands eat
+  ;; Terminal rows are sized ignoring `line-spacing'; extra spacing overflows the window.
+  :hook (eat-mode . (lambda () (setq-local line-spacing nil)))
   :config
   ;; Performance settings
   (setq eat-kill-buffer-on-exit t
@@ -1754,7 +1756,7 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (use-package agent-shell
   :if kdb-agent-shell-enabled
   :ensure t
-  :defer t
+  :commands agent-shell-anthropic-start-claude-code
   :config
   (add-hook 'agent-shell-mode-hook #'kdb-claude-watch-agent-shell)
   (setq agent-shell-anthropic-authentication
@@ -1765,8 +1767,8 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
   :if (not (eq system-type 'windows-nt))
   :vc (:url "https://github.com/stevemolitor/claude-code.el" :rev :newest)
   :defer t
-  :config
-  (setq claude-code-use-eat t))
+  :custom
+  (claude-code-optimize-window-resize nil))
 
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-sessions kdb-claude-next-waiting)
                 ("init-claude-print" kdb-claude-print kdb-claude-print-continue
@@ -1780,6 +1782,7 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 ;; Non-interactive entry points: Claude Code hooks (emacsclient) and agent-shell.
 (autoload 'kdb-claude-flag "init-claude-workflow")
 (autoload 'kdb-claude-watch-agent-shell "init-claude-workflow")
+(autoload 'kdb-claude-print--bookmark-jump "init-claude-print")
 
 (global-set-key (kbd "C-c l") #'kdb-claude)
 (global-set-key (kbd "C-c ;") #'kdb-claude-sessions)

@@ -111,7 +111,32 @@ reads, and background prefetches.  Note: `--bare' forces API-key auth
 \\{kdb-claude-print-mode-map}"
   (setq-local truncate-lines nil)
   (visual-line-mode 1)
+  (setq-local bookmark-make-record-function #'kdb-claude-print--bookmark-record)
   (add-hook 'kill-buffer-hook #'kdb-claude-print--kill nil t))
+
+(defun kdb-claude-print--bookmark-record ()
+  "Bookmark record that resumes this buffer's session."
+  (unless kdb-claude-print--session-id
+    (user-error "No session yet; send a prompt first"))
+  `(,(buffer-name)
+    (session . ,kdb-claude-print--session-id)
+    (filename . ,default-directory)
+    (handler . kdb-claude-print--bookmark-jump)))
+
+;;;###autoload
+(defun kdb-claude-print--bookmark-jump (bm)
+  "Reopen the session in bookmark BM; it resumes on the next prompt (g)."
+  (let* ((sid (bookmark-prop-get bm 'session))
+         (buf (or (seq-find (lambda (b)
+                              (equal (buffer-local-value 'kdb-claude-print--session-id b) sid))
+                            (buffer-list))
+                  (let ((default-directory (bookmark-get-filename bm)))
+                    (with-current-buffer (kdb-claude-print--new-buffer)
+                      (setq kdb-claude-print--session-id sid)
+                      (kdb-claude-print--insert "── starred session %s · g to resume ──\n\n"
+                                                (substring sid 0 (min 8 (length sid))))
+                      (current-buffer))))))
+    (set-buffer buf)))
 
 (defun kdb-claude-print--new-buffer (&optional label)
   "Create a session buffer named after LABEL or `default-directory'."

@@ -370,10 +370,13 @@ reconvert every session."
   (let* ((default-directory (kdb-claude--ensure-archive))
          (buf (kdb-claude-print--new-buffer "archive")))
     (with-current-buffer buf
-      (setq-local kdb-claude-print-permission-mode "dontAsk"))
+      (setq-local kdb-claude-print-permission-mode "dontAsk")
+      (setq-local kdb-claude-print-extra-args
+                  '("--allowedTools" "Read" "Bash(rg *)" "Bash(grep *)" "Bash(ls *)"
+                    "Bash(echo *)" "Bash(head *)" "Bash(wc *)")))
     (kdb-claude-print--run
      (concat "This directory archives past Claude sessions as org files "
-             "(code-sessions/, desktop/).  Search them to answer, "
+             "(code-sessions/, desktop/).  Search them with rg to answer, "
              "citing the files you used:\n\n" question)
      nil nil buf)))
 

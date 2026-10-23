@@ -182,7 +182,7 @@ Called via emacsclient from Claude Code's Stop/Notification hooks."
   (let ((projects '()))
     (when (fboundp 'project-known-project-roots)
       (setq projects (project-known-project-roots)))
-    (dolist (f recentf-list)
+    (dolist (f (bound-and-true-p recentf-list))
       (when-let* ((dir (file-name-directory f))
                   (root (locate-dominating-file dir ".git")))
         (let ((root (file-name-as-directory (expand-file-name root))))
@@ -275,18 +275,19 @@ then the session type."
 ;;; ============================================================
 
 (defun kdb-claude-star ()
-  "Bookmark the current Claude session for quick access."
+  "Bookmark the current pipe session so it can be resumed later."
   (interactive)
-  (if (kdb-claude--session-kind (current-buffer))
-      (let ((name (read-string "Star as: "
-                               (format "claude: %s" (buffer-name)))))
-        (bookmark-set name)
-        (message "Starred: %s" name))
-    (user-error "Not in a Claude session")))
+  (unless (eq (kdb-claude--session-kind (current-buffer)) 'print)
+    (user-error "Only pipe sessions can be starred; resume others from the archive (u)"))
+  (let ((name (read-string "Star as: "
+                           (format "claude: %s" (buffer-name)))))
+    (bookmark-set name)
+    (message "Starred: %s" name)))
 
 (defun kdb-claude-stars ()
   "Jump to a starred Claude session."
   (interactive)
+  (require 'bookmark)
   (let* ((all-bookmarks (bookmark-all-names))
          (claude-bookmarks (cl-remove-if-not
                             (lambda (name) (string-prefix-p "claude:" name))
