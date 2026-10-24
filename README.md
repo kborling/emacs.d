@@ -144,7 +144,7 @@ Every session can read the archive (`~/.claude-archive`, via `permissions.additi
 | | | | | | | `S` | Sync & commit |
 | | | | | | | `i` | Import Desktop export |
 
-In the history list (`C-c l h`): `RET` open, `u` resume, `/` filter, `s` search, `A` ask, `g` refresh.
+In the history list (`C-c l h`): `RET` open, `u` resume (imported chats continue in a new session that reads the old one), `/` filter, `s` search, `A` ask, `g` refresh.
 
 Session shortcuts (no transient needed):
 

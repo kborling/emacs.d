@@ -578,19 +578,29 @@ and the emacs-skills plugin.  Installs run in a compilation buffer."
 
 ;;;###autoload
 (defun kdb-claude-resume-archived (file)
-  "Continue the Claude Code session archived in org FILE, in its directory."
+  "Continue the session archived in org FILE.
+A Claude Code session resumes in its own directory.  Anything else (an
+imported claude.ai chat, or a session whose directory is gone) starts a
+new session in a project you pick that reads FILE first and carries on."
   (interactive
-   (list (if (and buffer-file-name (kdb-claude--org-keyword buffer-file-name "SOURCE"))
+   (list (if (and buffer-file-name (kdb-claude--org-keyword buffer-file-name "TITLE"))
              buffer-file-name
-           (read-file-name "Archived session: "
-                           (expand-file-name "code-sessions/" (kdb-claude--ensure-archive))))))
+           (read-file-name "Archived session: " (kdb-claude--ensure-archive)))))
   (require 'init-claude-workflow)
-  (let ((source (or (kdb-claude--org-keyword file "SOURCE")
-                    (user-error "Not an archived Claude Code session")))
+  (let ((source (kdb-claude--org-keyword file "SOURCE"))
         (cwd (kdb-claude--org-keyword file "CWD")))
-    (unless (and cwd (file-directory-p cwd))
-      (user-error "Session directory %s no longer exists" cwd))
-    (kdb-claude--start-with (file-name-as-directory cwd) nil (file-name-base source))))
+    (if (and source cwd (file-directory-p cwd))
+        (kdb-claude--start-with (file-name-as-directory cwd) nil (file-name-base source))
+      (let* ((dir (kdb-claude-read-directory "Continue in project: "))
+             (ask (read-string (format "Continue \"%s\" with (RET = recap): "
+                                       (kdb-claude--org-title file)))))
+        (kdb-claude--start-with
+         dir
+         (format "Earlier conversation, archived at %s.  Read it first, then %s"
+                 (abbreviate-file-name file)
+                 (if (string-empty-p ask)
+                     "briefly recap where we left off and what's still open."
+                   (concat "continue from it: " ask))))))))
 
 (provide 'init-claude)
 ;;; init-claude.el ends here
