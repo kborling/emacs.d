@@ -24,12 +24,16 @@
   :type '(choice (const nil) directory)
   :group 'claude)
 
+(defun kdb-claude--archive-repo-p ()
+  "Return non-nil if the archive directory is already a git repo."
+  (file-directory-p (expand-file-name ".git" kdb-claude-archive-dir)))
+
 (defun kdb-claude--ensure-archive ()
   "Ensure the archive directory exists and is a git repo."
   (unless kdb-claude-archive-dir
     (user-error "Set kdb-claude-archive-dir in personal.el"))
   (let ((dir (expand-file-name kdb-claude-archive-dir)))
-    (unless (file-directory-p dir)
+    (unless (kdb-claude--archive-repo-p)
       (make-directory dir t)
       (let ((default-directory dir))
         (call-process "git" nil nil nil "init")
@@ -184,11 +188,14 @@ as a directory name."
          (claude (seq-remove (lambda (d) (or (not (file-directory-p (car d)))
                                              (string-prefix-p tmp (file-truename (car d)))))
                              (kdb-claude--session-dirs)))
-         (others (append (and (fboundp 'project-known-project-roots)
-                              (project-known-project-roots))
-                         (delq nil (mapcar (lambda (f)
-                                             (locate-dominating-file (file-name-directory f) ".git"))
-                                           (bound-and-true-p recentf-list)))))
+         (others (seq-remove
+                  #'file-remote-p
+                  (append (and (fboundp 'project-known-project-roots)
+                               (project-known-project-roots))
+                          (delq nil (mapcar (lambda (f)
+                                              (unless (file-remote-p f)
+                                                (locate-dominating-file (file-name-directory f) ".git")))
+                                            (bound-and-true-p recentf-list))))))
          (dirs (seq-uniq (append (mapcar #'car claude)
                                  (mapcar (lambda (d) (file-name-as-directory (expand-file-name d)))
                                          (seq-filter #'file-directory-p others)))))
@@ -313,7 +320,7 @@ Empty input shows everything."
   (with-temp-buffer
     (insert-file-contents file)
     (goto-char (point-min))
-    (json-parse-buffer :object-type 'alist :array-type 'list)))
+    (json-parse-buffer :object-type 'alist :array-type 'list :null-object nil)))
 
 (defun kdb-claude--find-conversations-file (dir)
   "Find the conversations JSON file in DIR."
@@ -391,20 +398,19 @@ Id-like keys are skipped."
              (title (kdb-claude--conversation-title conv))
              (org-file (expand-file-name (format "%s.org" uuid) dest))
              (chat-messages (alist-get 'chat_messages conv)))
-        (unless (file-exists-p org-file)
-          (with-temp-file org-file
-            (insert (format "#+TITLE: %s\n" title))
-            (insert (format "#+DATE: %s\n" (kdb-claude--format-date (alist-get 'created_at conv))))
-            (insert (format "#+UPDATED: %s\n\n" (kdb-claude--format-date (alist-get 'updated_at conv))))
-            (when chat-messages
-              (dolist (msg chat-messages)
-                (let ((sender (or (alist-get 'sender msg) "unknown"))
-                      (text (kdb-claude--extract-text
-                             (or (alist-get 'content msg) (alist-get 'text msg) ""))))
-                  (insert (format "* %s\n\n%s\n\n"
-                                  (if (equal sender "human") "You" "Claude")
-                                  text))))))
-          (cl-incf count))))
+        (with-temp-file org-file
+          (insert (format "#+TITLE: %s\n" title))
+          (insert (format "#+DATE: %s\n" (kdb-claude--format-date (alist-get 'created_at conv))))
+          (insert (format "#+UPDATED: %s\n\n" (kdb-claude--format-date (alist-get 'updated_at conv))))
+          (when chat-messages
+            (dolist (msg chat-messages)
+              (let ((sender (or (alist-get 'sender msg) "unknown"))
+                    (text (kdb-claude--extract-text
+                           (or (alist-get 'content msg) (alist-get 'text msg) ""))))
+                (insert (format "* %s\n\n%s\n\n"
+                                (if (equal sender "human") "You" "Claude")
+                                text))))))
+        (cl-incf count)))
     (message "Synced %d Claude Desktop conversations" count)))
 
 ;;; ============================================================
@@ -479,11 +485,15 @@ in your browser, and running again on the same manifest imports them."
     (kdb-claude-sync-desktop)))
 
 (defun kdb-claude--unzip (zip dest)
-  "Extract ZIP into DEST, with unzip or (on Windows) the bundled tar."
+  "Extract ZIP into DEST, with unzip or (on Windows) the bundled tar.
+Windows' own tar.exe is preferred: Git's GNU tar misreads C:/ paths."
   (make-directory dest t)
   (unless (zerop (if (executable-find "unzip")
                      (call-process "unzip" nil nil nil "-o" "-q" zip "-d" dest)
-                   (call-process "tar" nil nil nil "-xf" zip "-C" dest)))
+                   (call-process (let ((sys (expand-file-name "System32/tar.exe"
+                                                              (or (getenv "SystemRoot") ""))))
+                                   (if (file-exists-p sys) sys "tar"))
+                                 nil nil nil "-xf" zip "-C" dest)))
     (user-error "Couldn't extract %s" zip)))
 
 (defun kdb-claude-agent-shell-subdir (subdir)
@@ -509,6 +519,22 @@ work you have no context for, search there with Grep before asking.\n")
     (with-temp-buffer
       (when (zerop (call-process "git" nil t nil "remote" "get-url" "origin"))
         (string-trim (buffer-string))))))
+
+(defun kdb-claude--clone-archive (url)
+  "Clone URL into the archive directory, which may already hold files."
+  (let* ((dir (expand-file-name kdb-claude-archive-dir))
+         (tmp (make-temp-file (expand-file-name ".claude-archive-clone"
+                                                (file-name-directory (directory-file-name dir)))
+                              t)))
+    (unwind-protect
+        (progn
+          (unless (zerop (call-process "git" nil nil nil "clone" "--no-checkout" url tmp))
+            (user-error "git clone %s failed" url))
+          (make-directory dir t)
+          (rename-file (expand-file-name ".git" tmp) (expand-file-name ".git" dir)))
+      (delete-directory tmp t))
+    (let ((default-directory dir))
+      (call-process "git" nil nil nil "checkout" "HEAD" "--" "."))))
 
 (defun kdb-claude--merge-settings (file archive)
   "Make Claude settings FILE keep transcripts and allow reading ARCHIVE.
@@ -544,12 +570,10 @@ and the emacs-skills plugin.  Installs run in a compilation buffer."
   (interactive)
   (unless (executable-find "claude")
     (user-error "Install the Claude Code CLI and log in first: https://claude.com/claude-code"))
-  (let ((dir (expand-file-name kdb-claude-archive-dir)))
-    (unless (file-directory-p dir)
-      (let ((url (read-string "Clone an existing private archive repo (URL, RET = new): ")))
-        (unless (string-empty-p url)
-          (unless (zerop (call-process "git" nil nil nil "clone" url dir))
-            (user-error "git clone %s failed" url))))))
+  (unless (kdb-claude--archive-repo-p)
+    (let ((url (read-string "Clone an existing private archive repo (URL, RET = new): ")))
+      (unless (string-empty-p url)
+        (kdb-claude--clone-archive url))))
   (let* ((archive (kdb-claude--ensure-archive))
          (config (kdb-claude--config-dir))
          (settings (expand-file-name "settings.json" config))
@@ -571,7 +595,8 @@ and the emacs-skills plugin.  Installs run in a compilation buffer."
           done)
     (if (and (file-exists-p memory)
              (with-temp-buffer (insert-file-contents memory)
-                               (search-forward archive nil t)))
+                               (or (search-forward archive nil t)
+                                   (search-forward (abbreviate-file-name archive) nil t))))
         (push "CLAUDE.md: already mentions the archive" done)
       (make-directory config t)
       (write-region (concat "\n" note) nil memory t 'silent)
@@ -618,7 +643,8 @@ A Claude Code session resumes in its own directory.  Anything else (an
 imported claude.ai chat, or a session whose directory is gone) starts a
 new session in a project you pick that reads FILE first and carries on."
   (interactive
-   (list (if (and buffer-file-name (kdb-claude--org-keyword buffer-file-name "TITLE"))
+   (list (if (and buffer-file-name
+                  (file-in-directory-p buffer-file-name (kdb-claude--ensure-archive)))
              buffer-file-name
            (read-file-name "Archived session: " (kdb-claude--ensure-archive)))))
   (require 'init-claude-workflow)

@@ -1789,7 +1789,7 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 ;; Keep the archive current so search/ask/resume see recent sessions.
 (run-with-idle-timer 300 t (lambda ()
                              (require 'init-claude)
-                             (when (file-directory-p kdb-claude-archive-dir)
+                             (when (kdb-claude--archive-repo-p)
                                (let ((inhibit-message t))
                                  (with-demoted-errors "Claude archive sync: %S"
                                    (kdb-claude-sync-code-sessions))))))

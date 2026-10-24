@@ -293,7 +293,7 @@ In line-mode, Emacs keys are translated for X applications:
 
 Do this once per machine (e.g. the Windows work machine).
 
-1. Install [node](https://nodejs.org) and the [Claude Code CLI](https://claude.com/claude-code); run `claude` once and log in with the Max account.
+1. Install [node](https://nodejs.org), git, [ripgrep](https://github.com/BurntSushi/ripgrep) (`winget install BurntSushi.ripgrep.MSVC` on Windows; history search uses it) and the [Claude Code CLI](https://claude.com/claude-code); run `claude` once and log in with the Max account.
 2. Pull this config and restart Emacs (`agent-shell` and `agent-shell-attention` install themselves).
 3. Create an empty **private** repo for this machine's archive (keep work conversations in a separate repo from personal ones), then run `C-c l !` (`M-x kdb-claude-setup`). Answer yes to the ACP adapter and emacs-skills. It:
    - creates the archive (`~/.claude-archive`, its own git repo, never inside this config), or clones an existing one if you give its URL
