@@ -422,19 +422,46 @@ Empty input shows everything."
                     (shell-quote-argument dir))))))
 
 ;;;###autoload
-(defun kdb-claude-import-export (zip-or-dir)
-  "Import a Claude Desktop data export from ZIP-OR-DIR."
-  (interactive "fClaude export (zip or directory): ")
-  (let ((path (expand-file-name zip-or-dir)))
-    (if (file-directory-p path)
-        (setq kdb-claude-export-directory path)
-      (let ((dest (expand-file-name "claude-export" (file-name-directory path))))
-        (make-directory dest t)
-        (call-process "unzip" nil nil nil "-o" path "-d" dest)
-        (setq kdb-claude-export-directory dest)))
-    (message "Claude export set to: %s" kdb-claude-export-directory)
-    (when (yes-or-no-p "Sync to archive now? ")
-      (kdb-claude-sync-desktop))))
+(defun kdb-claude-import-export (path)
+  "Import a Claude data export from PATH and sync it to the archive.
+PATH is an export directory, a zip, a conversations.json, or the
+manifest-*.json that claude.ai now exports.  The manifest only links to
+the data zips, which need your browser login: the first run opens them
+in your browser, and running again on the same manifest imports them."
+  (interactive (list (read-file-name "Claude export (manifest, zip or directory): "
+                                     (expand-file-name "~/Downloads/"))))
+  (let* ((path (expand-file-name path))
+         (dest (expand-file-name "claude-export/" (file-name-directory
+                                                   (directory-file-name path)))))
+    (cond
+     ((file-directory-p path) (setq dest path))
+     ((string-match-p "\\.zip\\'" path) (kdb-claude--unzip path dest))
+     ((alist-get 'data_files (kdb-claude--read-json path))
+      (let* ((dir (file-name-directory path))
+             (files (mapcar (lambda (f) (cons (expand-file-name (alist-get 'filename f) dir)
+                                              (alist-get 'export_url f)))
+                            (alist-get 'data_files (kdb-claude--read-json path))))
+             (missing (seq-remove (lambda (f) (file-exists-p (car f))) files)))
+        (when missing
+          (dolist (f missing) (browse-url (cdr f)))
+          (user-error "Opened %d export download(s) in your browser; save them to %s, then run this again on %s"
+                      (length missing) (abbreviate-file-name dir) (file-name-nondirectory path)))
+        (dolist (f files) (kdb-claude--unzip (car f) dest))))
+     (t (setq dest (file-name-directory path))))
+    (unless (kdb-claude--find-conversations-file dest)
+      (user-error "No conversations.json in %s (found: %s)" dest
+                  (mapconcat #'file-name-nondirectory
+                             (seq-take (directory-files-recursively dest "") 10) ", ")))
+    (setq kdb-claude-export-directory dest)
+    (kdb-claude-sync-desktop)))
+
+(defun kdb-claude--unzip (zip dest)
+  "Extract ZIP into DEST, with unzip or (on Windows) the bundled tar."
+  (make-directory dest t)
+  (unless (zerop (if (executable-find "unzip")
+                     (call-process "unzip" nil nil nil "-o" "-q" zip "-d" dest)
+                   (call-process "tar" nil nil nil "-xf" zip "-C" dest)))
+    (user-error "Couldn't extract %s" zip)))
 
 ;;; ============================================================
 ;;; Machine setup
