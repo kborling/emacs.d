@@ -12,6 +12,7 @@
 
 (require 'json)
 (require 'cl-lib)
+(require 'org)
 
 (defcustom kdb-claude-archive-dir "~/.claude-archive"
   "Path to the private git repo for Claude session archives."
@@ -346,6 +347,16 @@ Empty input shows everything."
         "(untitled)"
       name)))
 
+(defun kdb-claude--strings (x &optional key)
+  "Return the string leaves of parsed JSON X as \"KEY: value\" lines.
+Id-like keys are skipped."
+  (cond ((and key (string-match-p "\\(?:\\`\\|_\\)\\(?:id\\|uuid\\)\\'" (symbol-name key))) nil)
+        ((stringp x) (unless (string-empty-p x)
+                       (list (if key (format "%s: %s" key x) x))))
+        ((and (consp x) (consp (car x)) (symbolp (caar x)))
+         (mapcan (lambda (kv) (kdb-claude--strings (cdr kv) (car kv))) x))
+        ((consp x) (mapcan (lambda (e) (kdb-claude--strings e key)) x))))
+
 (defun kdb-claude--extract-text (content)
   "Extract text from message CONTENT."
   (cond
@@ -357,7 +368,11 @@ Empty input shows everything."
          (cond
           ((equal type "text") (or (alist-get 'text block) ""))
           ((equal type "tool_use")
-           (format "[Tool: %s]" (or (alist-get 'name block) "unknown")))
+           (let ((detail (string-join (kdb-claude--strings (alist-get 'input block)) "\n")))
+             (concat (format "[Tool: %s]" (or (alist-get 'name block) "unknown"))
+                     (unless (string-empty-p detail)
+                       (format "\n#+begin_example\n%s\n#+end_example"
+                               (org-escape-code-in-string detail))))))
           (t ""))))
      content "\n"))
    (t (format "%s" content))))
