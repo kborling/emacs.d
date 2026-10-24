@@ -59,6 +59,8 @@ Sessions run in [agent-shell](https://github.com/xenodium/agent-shell) over ACP,
 - **Sessions** — [agent-shell-attention](https://github.com/ultronozm/agent-shell-attention.el) tracks sessions waiting on you; jump, dashboard, or switch grouped by project
 - **History** — every past session (agent-shell, CLI, Desktop's Code tab, imported Desktop chats) in one list: filter, full-text search, ask Claude about them, resume
 
+**New machine:** install node and the [Claude Code CLI](https://claude.com/claude-code), run `claude` once to log in, then `M-x kdb-claude-setup` (or `C-c l !`). It creates the archive, makes Claude keep transcripts and lets every session read the archive (merging into your existing `~/.claude/settings.json` and `CLAUDE.md`), and offers to install the ACP adapter and the [emacs-skills](https://github.com/xenodium/emacs-skills) plugin. It's safe to re-run; it reports what was already in place.
+
 Every session can read the archive (`~/.claude-archive`, via `permissions.additionalDirectories` and `~/.claude/CLAUDE.md`), so Claude can look up earlier work itself.
 
 ### Org Mode

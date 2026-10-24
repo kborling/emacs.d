@@ -1771,7 +1771,8 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
                 ("init-claude-print" kdb-claude-print)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
                  kdb-claude-search kdb-claude-import-export
-                 kdb-claude-ask-archive kdb-claude-resume-archived kdb-claude-history)))
+                 kdb-claude-ask-archive kdb-claude-resume-archived kdb-claude-history
+                 kdb-claude-setup)))
   (dolist (fn (cdr spec))
     (autoload fn (car spec) nil t)))
 

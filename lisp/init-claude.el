@@ -42,12 +42,15 @@
 ;;; Claude Code Session Sync
 ;;; ============================================================
 
-(defun kdb-claude--projects-dir ()
-  "Return Claude Code's session directory.
+(defun kdb-claude--config-dir ()
+  "Return Claude Code's config directory.
 Windows Emacs often sets HOME to AppData, but Claude uses USERPROFILE."
-  (expand-file-name "projects"
-                    (or (getenv "CLAUDE_CONFIG_DIR")
-                        (expand-file-name ".claude" (or (getenv "USERPROFILE") "~")))))
+  (or (getenv "CLAUDE_CONFIG_DIR")
+      (expand-file-name ".claude" (or (getenv "USERPROFILE") "~"))))
+
+(defun kdb-claude--projects-dir ()
+  "Return Claude Code's session directory."
+  (expand-file-name "projects" (kdb-claude--config-dir)))
 
 (defun kdb-claude-sync-code-sessions (&optional force)
   "Sync Claude Code sessions to the archive.
@@ -432,6 +435,88 @@ Empty input shows everything."
     (message "Claude export set to: %s" kdb-claude-export-directory)
     (when (yes-or-no-p "Sync to archive now? ")
       (kdb-claude-sync-desktop))))
+
+;;; ============================================================
+;;; Machine setup
+;;; ============================================================
+
+(defconst kdb-claude--acp-package "@agentclientprotocol/claude-agent-acp")
+
+(defconst kdb-claude--archive-note
+  "Past Claude sessions are archived as org files under %s (one file per \
+session, with #+TITLE and #+CWD headers).  When the user refers to earlier \
+work you have no context for, search there with Grep before asking.\n")
+
+(defun kdb-claude--merge-settings (file archive)
+  "Make Claude settings FILE keep transcripts and allow reading ARCHIVE.
+Other settings are left alone.  Return non-nil if FILE changed."
+  (let* ((old (when (file-exists-p file)
+                (with-temp-buffer
+                  (insert-file-contents file)
+                  (json-parse-buffer :object-type 'alist :null-object :null
+                                     :false-object :false))))
+         (new (copy-tree old))
+         (perms (alist-get 'permissions new))
+         (dirs (append (alist-get 'additionalDirectories perms) nil)))
+    (unless (and (numberp (alist-get 'cleanupPeriodDays new))
+                 (>= (alist-get 'cleanupPeriodDays new) 36500))
+      (setf (alist-get 'cleanupPeriodDays new) 36500))
+    (unless (member archive dirs)
+      (setf (alist-get 'additionalDirectories perms) (vconcat dirs (list archive)))
+      (setf (alist-get 'permissions new) perms))
+    (unless (equal old new)
+      (make-directory (file-name-directory file) t)
+      (with-temp-file file
+        (insert (json-serialize new :null-object :null :false-object :false))
+        (json-pretty-print-buffer)
+        (insert "\n"))
+      t)))
+
+;;;###autoload
+(defun kdb-claude-setup ()
+  "Set up this machine for the Claude workflow; safe to re-run.
+Creates the archive, makes Claude keep transcripts and let every
+session read the archive, and offers to install the ACP adapter (npm)
+and the emacs-skills plugin.  Installs run in a compilation buffer."
+  (interactive)
+  (unless (executable-find "claude")
+    (user-error "Install the Claude Code CLI and log in first: https://claude.com/claude-code"))
+  (let* ((archive (kdb-claude--ensure-archive))
+         (config (kdb-claude--config-dir))
+         (settings (expand-file-name "settings.json" config))
+         (memory (expand-file-name "CLAUDE.md" config))
+         (note (format kdb-claude--archive-note (abbreviate-file-name archive)))
+         (done (list (format "Archive: %s" archive)))
+         cmds)
+    (push (if (kdb-claude--merge-settings settings archive)
+              "settings.json: transcripts kept, archive readable (updated)"
+            "settings.json: already set")
+          done)
+    (if (and (file-exists-p memory)
+             (with-temp-buffer (insert-file-contents memory)
+                               (search-forward (abbreviate-file-name archive) nil t)))
+        (push "CLAUDE.md: already mentions the archive" done)
+      (make-directory config t)
+      (write-region (concat "\n" note) nil memory t 'silent)
+      (push "CLAUDE.md: archive note added" done))
+    (cond ((executable-find "claude-agent-acp")
+           (push "ACP adapter: installed" done))
+          ((not (executable-find "npm"))
+           (push (format "ACP adapter: MISSING, install node, then npm install -g %s"
+                         kdb-claude--acp-package)
+                 done))
+          ((y-or-n-p "Install the ACP adapter with npm? ")
+           (push (format "npm install -g %s" kdb-claude--acp-package) cmds)))
+    (if (with-temp-buffer (insert-file-contents settings)
+                          (search-forward "\"emacs-skills@" nil t))
+        (push "emacs-skills: installed" done)
+      (when (y-or-n-p "Install the emacs-skills plugin (lets Claude open files in Emacs)? ")
+      (setq cmds (append cmds
+                         '("claude plugin marketplace add xenodium/emacs-skills"
+                           "claude plugin install emacs-skills@xenodium-emacs-skills")))))
+    (when cmds
+      (compile (mapconcat #'identity cmds " && ")))
+    (message "Claude setup: %s" (mapconcat #'identity (nreverse done) "; "))))
 
 ;;; ============================================================
 ;;; Ask & Resume

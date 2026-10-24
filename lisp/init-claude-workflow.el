@@ -200,7 +200,8 @@ opens its worktree; a new name creates the branch in a new worktree."
     ("/" "Search text" kdb-claude-search)
     ("A" "Ask past sessions" kdb-claude-ask-archive)
     ("S" "Sync & commit" kdb-claude-sync)
-    ("i" "Import Desktop export" kdb-claude-import-export)]])
+    ("i" "Import Desktop export" kdb-claude-import-export)
+    ("!" "Set up this machine" kdb-claude-setup)]])
 
 (defun kdb-claude ()
   "Claude menu."
