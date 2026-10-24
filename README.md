@@ -59,7 +59,7 @@ Sessions run in [agent-shell](https://github.com/xenodium/agent-shell) over ACP,
 - **Sessions** — [agent-shell-attention](https://github.com/ultronozm/agent-shell-attention.el) tracks sessions waiting on you; jump, dashboard, or switch grouped by project
 - **History** — every past session (agent-shell, CLI, Desktop's Code tab, imported Desktop chats) in one list: filter, full-text search, ask Claude about them, resume
 
-**New machine:** install node and the [Claude Code CLI](https://claude.com/claude-code), run `claude` once to log in, then `M-x kdb-claude-setup` (or `C-c l !`). It creates the archive, makes Claude keep transcripts and lets every session read the archive (merging into your existing `~/.claude/settings.json` and `CLAUDE.md`), and offers to install the ACP adapter and the [emacs-skills](https://github.com/xenodium/emacs-skills) plugin. It's safe to re-run; it reports what was already in place.
+**New machine** (see [Claude setup checklist](#claude-setup-checklist)): install node and the Claude Code CLI, log in, then `C-c l !`.
 
 Every session can read the archive (`~/.claude-archive`, via `permissions.additionalDirectories` and `~/.claude/CLAUDE.md`), so Claude can look up earlier work itself.
 
@@ -286,6 +286,27 @@ In line-mode, Emacs keys are translated for X applications:
 | `M-w` | Copy |
 | `C-y` | Paste |
 | `C-s` | Find |
+
+## Claude setup checklist
+
+Do this once per machine (e.g. the Windows work machine).
+
+1. Install [node](https://nodejs.org) and the [Claude Code CLI](https://claude.com/claude-code); run `claude` once and log in with the Max account.
+2. Pull this config and restart Emacs (`agent-shell` and `agent-shell-attention` install themselves).
+3. Run `C-c l !` (`M-x kdb-claude-setup`). Answer yes to the ACP adapter and emacs-skills. It:
+   - creates the archive (`~/.claude-archive`, a git repo)
+   - sets `cleanupPeriodDays` to 36500 in Claude's `settings.json` so transcripts aren't deleted after 30 days
+   - adds the archive to `permissions.additionalDirectories` and a note to `CLAUDE.md`, so sessions can look up past work
+   - runs `npm install -g @agentclientprotocol/claude-agent-acp` and installs the emacs-skills plugin
+
+   On Windows these live in `%USERPROFILE%\.claude`, not Emacs's AppData home.  Safe to re-run.
+4. Check it works: `C-c l n` in a project should open a Claude shell.  If agent-shell misbehaves on Windows, `M-x kdb-claude-print` is the pipe-based fallback.
+5. Optional — bring in claude.ai / Desktop chat history:
+   1. claude.ai → Settings → Privacy → Export data; save the emailed `manifest-*.json` to Downloads.
+   2. `C-c l i` on the manifest opens its 5 zip links in the browser (they need your login and expire in 24h); let them save next to the manifest.
+   3. `C-c l i` on the same manifest again unpacks and imports them; they appear in `C-c l h` as project `desktop`.
+
+   On Windows the zips are unpacked with the built-in `tar` (no `unzip` needed).
 
 ## personal.el
 
