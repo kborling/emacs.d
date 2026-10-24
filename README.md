@@ -28,8 +28,9 @@ personal.el                   Private settings (API keys — not tracked)
 personal.el.template          Template for personal.el
 custom.el                     Customize output
 lisp/
-  init-claude-workflow.el     Unified Claude transient, code actions, sessions
-  init-claude.el              Claude session archive and Desktop import
+  init-claude-workflow.el     Claude transient over agent-shell: start, send, sessions
+  init-claude.el              Claude session archive, history, search, Desktop import
+  init-claude-print.el        Fallback Claude backend over pipes (M-x kdb-claude-print)
   init-org.el                 Org mode, capture templates, org-modern
   init-vc.el                  VC/Git transient menu (Magit-like, built-in VC)
   init-exwm.el                EXWM window manager (X11 only)
@@ -51,17 +52,14 @@ lisp/
 
 ### Claude AI (`C-c l`)
 
-Everything runs through the `claude` CLI login (works with a Max subscription). `C-c l` opens a unified transient:
+Sessions run in [agent-shell](https://github.com/xenodium/agent-shell) over ACP, using the `claude` CLI login (works with a Max subscription, Linux and native Windows). Requires node and `npm install -g @agentclientprotocol/claude-agent-acp`.
 
-- **Start** — agent-shell (ACP, needs node), Claude Code TUI (needs a PTY), or a pipe session (works anywhere, incl. native Windows); new sessions on another branch open in a git worktree
-- **Send to Target** — prompt, region or file to any session; accept/reject permission prompts without switching
-- **Sessions** — jump to sessions waiting on you, target, star/bookmark
-- **Archive** — recall, browse, search, ask questions of past sessions, resume them
-- **Move** — send a past session or a `:claude:` org note to the target
+- **Start** — new session at the project root, pre-filled with the region, Dired files or org entry at point; or pick any project (recent Claude directories first) and branch, which opens in its own git worktree
+- **Send** — region, note, files or a file to a session you pick
+- **Sessions** — [agent-shell-attention](https://github.com/ultronozm/agent-shell-attention.el) tracks sessions waiting on you; jump, dashboard, or switch grouped by project
+- **History** — every past session (agent-shell, CLI, Desktop's Code tab, imported Desktop chats) in one list: filter, full-text search, ask Claude about them, resume
 
-Session shortcuts outside the transient:
-- `C-c ;` — switch between active sessions
-- `C-c '` — jump to the next session waiting on you (mode line shows `Claude[N]`)
+Every session can read the archive (`~/.claude-archive`, via `permissions.additionalDirectories` and `~/.claude/CLAUDE.md`), so Claude can look up earlier work itself.
 
 ### Org Mode
 - org-modern styling, org-appear
@@ -134,34 +132,24 @@ Session shortcuts outside the transient:
 
 ### Claude (`C-c l`)
 
-`C-c l` opens the unified Claude transient. All keys below follow `C-c l`.
+`C-c l` opens the Claude transient. All keys below follow `C-c l`.
 
-| | **Start** | | **Send to Target** | | **Quick Fix** |
-|---|---|---|---|---|---|
-| `N` | New (pick project) | `s` | Prompt | `e` | Explain |
-| `x` | Agent here | `r` | Region | `R` | Refactor |
-| `l` | Chat here | `F` | File | `f` | Fix Bugs |
-| | | `y` | Accept | `t` | Gen Tests |
-| | | `n` | Reject | `d` | Add Docs |
-| | | | | `w` | Rewrite |
-| | | | | `I` | Paste Image |
+| | **Start** | | **Send** | | **Sessions** | | **History** |
+|---|---|---|---|---|---|---|---|
+| `n` | New here (`C-u` pick project) | `s` | Region/note/files → session | `'` | Next waiting | `h` | All sessions |
+| `N` | New on project + branch | `f` | File → session | `d` | Dashboard | `/` | Search text |
+| | | | | `l` | Switch (by project) | `A` | Ask past sessions |
+| | | | | | | `S` | Sync & commit |
+| | | | | | | `i` | Import Desktop export |
 
-| | **Sessions** | | **Move** |
-|---|---|---|---|
-| `;` | Set Target | `>` | Recall → Agent |
-| `.` | Toggle Session | `<` | Recall → Chat |
-| `K` | End Session | `q` | From Notes |
-| `*` | Star | `i` | Import Desktop |
-| `8` | Starred | `S` | Archive |
-| `o` | Recall | `m` | Settings |
-| `/` | Search | | |
+In the history list (`C-c l h`): `RET` open, `u` resume, `/` filter, `s` search, `A` ask, `g` refresh.
 
 Session shortcuts (no transient needed):
 
 | Key | Action |
 |-----|--------|
-| `C-c ;` | Switch between active sessions |
-| `C-c '` | Cycle to next session |
+| `C-c ;` | Switch session, grouped by project |
+| `C-c '` | Jump to the next session waiting on you |
 
 ### Eglot / LSP (`C-c c`)
 

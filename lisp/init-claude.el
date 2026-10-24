@@ -11,6 +11,7 @@
 ;;; Code:
 
 (require 'json)
+(require 'cl-lib)
 
 (defcustom kdb-claude-archive-dir "~/.claude-archive"
   "Path to the private git repo for Claude session archives."
@@ -116,7 +117,7 @@ reconvert every session."
     (with-temp-file org-file
       (insert (format "#+TITLE: %s\n" (kdb-claude--session-title messages)))
       (insert (format "#+DATE: %s\n"
-                      (format-time-string "%Y-%m-%d"
+                      (format-time-string "%Y-%m-%d %H:%M"
                                           (file-attribute-modification-time
                                            (file-attributes jsonl-file)))))
       (insert (format "#+SOURCE: %s\n" jsonl-file))
@@ -137,6 +138,160 @@ reconvert every session."
 (defun kdb-claude--org-title (file)
   "Return the title of archived org FILE, or its base name."
   (or (kdb-claude--org-keyword file "TITLE") (file-name-base file)))
+
+(defun kdb-claude--org-header (file)
+  "Return an alist of the #+KEYWORD values in the header of org FILE."
+  (with-temp-buffer
+    (insert-file-contents file nil 0 2000)
+    (let (kw)
+      (while (re-search-forward "^#\\+\\([A-Z]+\\): \\(.*\\)" nil t)
+        (push (cons (match-string 1) (match-string 2)) kw))
+      kw)))
+
+;;; ============================================================
+;;; Directory picker
+;;; ============================================================
+
+(defun kdb-claude--jsonl-cwd (file)
+  "Return the working directory recorded in Claude Code transcript FILE."
+  (with-temp-buffer
+    (insert-file-contents file nil 0 65536)
+    (when (re-search-forward "\"cwd\":\\(\"\\(?:[^\"\\\\]\\|\\\\.\\)*\"\\)" nil t)
+      (json-parse-string (match-string 1)))))
+
+(defun kdb-claude--session-dirs ()
+  "Return (DIR . TIME) for directories with Claude Code sessions, newest first."
+  (let (dirs)
+    (dolist (proj (ignore-errors (directory-files (kdb-claude--projects-dir) t "\\`[^.]")))
+      (when-let* ((newest (car (sort (directory-files proj t "\\.jsonl\\'")
+                                     #'file-newer-than-file-p)))
+                  (cwd (ignore-errors (kdb-claude--jsonl-cwd newest))))
+        (push (cons (file-name-as-directory (expand-file-name cwd))
+                    (file-attribute-modification-time (file-attributes newest)))
+              dirs)))
+    (sort dirs (lambda (a b) (time-less-p (cdr b) (cdr a))))))
+
+(defun kdb-claude-read-directory (prompt)
+  "Read a directory with PROMPT, defaulting to the current project.
+Directories with Claude sessions come first, most recent first, then
+known projects and the repos of recent files.  Any other input is read
+as a directory name."
+  (let* ((tmp (file-truename temporary-file-directory))
+         (claude (seq-remove (lambda (d) (or (not (file-directory-p (car d)))
+                                             (string-prefix-p tmp (file-truename (car d)))))
+                             (kdb-claude--session-dirs)))
+         (others (append (and (fboundp 'project-known-project-roots)
+                              (project-known-project-roots))
+                         (delq nil (mapcar (lambda (f)
+                                             (locate-dominating-file (file-name-directory f) ".git"))
+                                           (bound-and-true-p recentf-list)))))
+         (dirs (seq-uniq (append (mapcar #'car claude)
+                                 (mapcar (lambda (d) (file-name-as-directory (expand-file-name d)))
+                                         (seq-filter #'file-directory-p others)))))
+         (cands (mapcar #'abbreviate-file-name dirs))
+         (here (and (project-current) (abbreviate-file-name (project-root (project-current)))))
+         (choice (completing-read
+                  (format-prompt (string-remove-suffix ": " prompt) here)
+                  (lambda (str pred action)
+                    (if (eq action 'metadata)
+                        `(metadata
+                          (display-sort-function . identity)
+                          (annotation-function
+                           . ,(lambda (c)
+                                (when-let* ((time (cdr (assoc (expand-file-name c) claude))))
+                                  (format-time-string "  claude %Y-%m-%d %H:%M" time)))))
+                      (complete-with-action action cands str pred)))
+                  nil nil nil nil here)))
+    (file-name-as-directory
+     (expand-file-name (if (file-directory-p choice) choice (read-directory-name "Directory: " choice))))))
+
+;;; ============================================================
+;;; History
+;;; ============================================================
+
+(defvar-local kdb-claude--history-filter nil
+  "Regexp the history list is narrowed to, matched against project and title.")
+
+(declare-function agent-shell-buffers "agent-shell")
+(declare-function agent-shell-session-id "agent-shell")
+(declare-function kdb-claude--start-with "init-claude-workflow")
+
+(defun kdb-claude--live-sessions ()
+  "Return (SESSION-ID . BUFFER) for open agent-shell sessions."
+  (when (fboundp 'agent-shell-buffers)
+    (cl-loop for b in (agent-shell-buffers)
+             for id = (agent-shell-session-id :shell-buffer b)
+             when id collect (cons id b))))
+
+(defun kdb-claude--history-entries ()
+  "Return `tabulated-list-entries' for every archived session."
+  (let ((live (mapcar #'car (kdb-claude--live-sessions))))
+    (seq-filter
+     (lambda (e)
+       (or (null kdb-claude--history-filter)
+           (string-match-p kdb-claude--history-filter
+                           (concat (aref (cadr e) 2) " " (aref (cadr e) 3)))))
+     (mapcar
+      (lambda (f)
+        (let* ((h (kdb-claude--org-header f))
+               (cwd (cdr (assoc "CWD" h))))
+          (list f (vector (if (member (file-name-base f) live) "●" "")
+                          (or (cdr (assoc "UPDATED" h)) (cdr (assoc "DATE" h)) "")
+                          (cond (cwd (file-name-nondirectory (directory-file-name cwd)))
+                                ((string-match-p "/desktop/" f) "desktop")
+                                (t ""))
+                          (or (cdr (assoc "TITLE" h)) (file-name-base f))))))
+      (directory-files-recursively (kdb-claude--ensure-archive) "\\.org$")))))
+
+(defvar kdb-claude-history-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'kdb-claude-history-open)
+    (define-key map (kbd "u") #'kdb-claude-history-resume)
+    (define-key map (kbd "/") #'kdb-claude-history-filter)
+    (define-key map (kbd "s") #'kdb-claude-search)
+    (define-key map (kbd "A") #'kdb-claude-ask-archive)
+    map)
+  "Keymap for `kdb-claude-history-mode'.")
+
+(define-derived-mode kdb-claude-history-mode tabulated-list-mode "Claude-History"
+  "Past Claude sessions, newest first.  ● marks sessions open in Emacs.
+\\{kdb-claude-history-mode-map}"
+  (setq tabulated-list-format [("" 1 t) ("Last active" 16 t) ("Project" 20 t) ("Title" 0 t)]
+        tabulated-list-sort-key '("Last active" . t)
+        tabulated-list-entries #'kdb-claude--history-entries)
+  (add-hook 'tabulated-list-revert-hook #'kdb-claude-sync-code-sessions nil t)
+  (setq-local header-line-format
+              (substitute-command-keys
+               "\\<kdb-claude-history-mode-map>\\[kdb-claude-history-open] open  \\[kdb-claude-history-resume] resume  \\[kdb-claude-history-filter] filter  \\[kdb-claude-search] search text  \\[kdb-claude-ask-archive] ask  \\[revert-buffer] refresh")))
+
+;;;###autoload
+(defun kdb-claude-history ()
+  "List every past Claude session — Claude Code and imported Desktop chats."
+  (interactive)
+  (kdb-claude-sync-code-sessions)
+  (with-current-buffer (get-buffer-create "*Claude History*")
+    (kdb-claude-history-mode)
+    (tabulated-list-print)
+    (pop-to-buffer-same-window (current-buffer))))
+
+(defun kdb-claude-history-filter (regexp)
+  "Narrow the history to sessions whose project or title match REGEXP.
+Empty input shows everything."
+  (interactive (list (read-string "Filter (project/title, empty = all): ")))
+  (setq kdb-claude--history-filter (unless (string-empty-p regexp) regexp))
+  (tabulated-list-print))
+
+(defun kdb-claude-history-open ()
+  "View the session at point."
+  (interactive)
+  (view-file (or (tabulated-list-get-id) (user-error "No session here"))))
+
+(defun kdb-claude-history-resume ()
+  "Continue the session at point, switching to it if it is already open."
+  (interactive)
+  (let* ((file (or (tabulated-list-get-id) (user-error "No session here")))
+         (buf (cdr (assoc (file-name-base file) (kdb-claude--live-sessions)))))
+    (if buf (switch-to-buffer buf) (kdb-claude-resume-archived file))))
 
 ;;; ============================================================
 ;;; Claude Desktop Export
@@ -252,84 +407,10 @@ reconvert every session."
     (message "Claude archive synced and committed")))
 
 ;;;###autoload
-(defun kdb-claude-browse ()
-  "Browse Claude sessions from the archive or Desktop export."
-  (interactive)
-  (let* ((source (completing-read "Browse: "
-                                  '("Code Sessions" "Desktop Export") nil t))
-         (dir (pcase source
-                ("Code Sessions"
-                 (expand-file-name "code-sessions/" (kdb-claude--ensure-archive)))
-                ("Desktop Export"
-                 (kdb-claude--find-export-dir)))))
-    (if (and (equal source "Code Sessions") (file-directory-p dir))
-        (let* ((files (directory-files-recursively dir "\\.org$"))
-               (candidates (mapcar
-                            (lambda (f)
-                              (cons (format "%-12s  %-24s  %s"
-                                            (format-time-string "%Y-%m-%d"
-                                              (file-attribute-modification-time
-                                               (file-attributes f)))
-                                            (truncate-string-to-width
-                                             (file-name-nondirectory
-                                              (directory-file-name (file-name-directory f)))
-                                             24 nil nil "…")
-                                            (kdb-claude--org-title f))
-                                    f))
-                            (sort files (lambda (a b)
-                                          (time-less-p
-                                           (file-attribute-modification-time (file-attributes b))
-                                           (file-attribute-modification-time (file-attributes a)))))))
-               (choice (completing-read "Session: " candidates nil t))
-               (file (cdr (assoc choice candidates))))
-          (when file (find-file file)))
-      ;; Desktop export browse
-      (let* ((conversations (kdb-claude--parse-conversations dir))
-             (sorted (sort (copy-sequence conversations)
-                           (lambda (a b)
-                             (string> (or (alist-get 'updated_at a) "")
-                                      (or (alist-get 'updated_at b) "")))))
-             (candidates (mapcar
-                          (lambda (conv)
-                            (cons (format "%-20s  %s"
-                                          (kdb-claude--format-date (alist-get 'updated_at conv))
-                                          (kdb-claude--conversation-title conv))
-                                  conv))
-                          sorted))
-             (choice (completing-read "Conversation: " candidates nil t))
-             (conv (cdr (assoc choice candidates))))
-        (when conv
-          (kdb-claude--display-conversation conv))))))
-
-(defun kdb-claude--display-conversation (conv)
-  "Display CONV in an org-mode buffer."
-  (let* ((title (kdb-claude--conversation-title conv))
-         (buf-name (format "*Claude: %s*" title))
-         (chat-messages (alist-get 'chat_messages conv)))
-    (with-current-buffer (get-buffer-create buf-name)
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert (format "#+TITLE: %s\n" title))
-        (insert (format "#+DATE: %s\n" (kdb-claude--format-date (alist-get 'created_at conv))))
-        (insert (format "#+UPDATED: %s\n\n" (kdb-claude--format-date (alist-get 'updated_at conv))))
-        (if chat-messages
-            (dolist (msg chat-messages)
-              (let ((sender (or (alist-get 'sender msg) "unknown"))
-                    (text (kdb-claude--extract-text
-                           (or (alist-get 'content msg) (alist-get 'text msg) ""))))
-                (insert (format "* %s\n\n%s\n\n"
-                                (if (equal sender "human") "You" "Claude")
-                                text))))
-          (insert "No messages found.\n")))
-      (goto-char (point-min))
-      (org-mode)
-      (setq buffer-read-only t)
-      (switch-to-buffer (current-buffer)))))
-
-;;;###autoload
 (defun kdb-claude-search (query)
   "Search all Claude archives for QUERY."
   (interactive "sSearch Claude sessions: ")
+  (kdb-claude-sync-code-sessions)
   (let ((dir (kdb-claude--ensure-archive)))
     (if (fboundp 'deadgrep)
         (deadgrep query dir)
@@ -356,49 +437,33 @@ reconvert every session."
 ;;; Ask & Resume
 ;;; ============================================================
 
-(defvar kdb-claude-print-permission-mode)
-(defvar kdb-claude-print--session-id)
-(declare-function kdb-claude-print--run "init-claude-print")
-(declare-function kdb-claude-print--new-buffer "init-claude-print")
-
 ;;;###autoload
 (defun kdb-claude-ask-archive (question)
-  "Ask Claude QUESTION about past sessions, searching the archive read-only."
-  (interactive "sAsk the archive: ")
-  (require 'init-claude-print)
+  "Ask Claude QUESTION about past sessions; it searches the archive to answer."
+  (interactive "sAsk past sessions: ")
+  (require 'init-claude-workflow)
   (kdb-claude-sync-code-sessions)
-  (let* ((default-directory (kdb-claude--ensure-archive))
-         (buf (kdb-claude-print--new-buffer "archive")))
-    (with-current-buffer buf
-      (setq-local kdb-claude-print-permission-mode "dontAsk")
-      (setq-local kdb-claude-print-extra-args
-                  '("--allowedTools" "Read" "Bash(rg *)" "Bash(grep *)" "Bash(ls *)"
-                    "Bash(echo *)" "Bash(head *)" "Bash(wc *)")))
-    (kdb-claude-print--run
-     (concat "This directory archives past Claude sessions as org files "
-             "(code-sessions/, desktop/).  Search them with rg to answer, "
-             "citing the files you used:\n\n" question)
-     nil nil buf)))
+  (kdb-claude--start-with
+   (kdb-claude--ensure-archive)
+   (concat "This directory archives past Claude sessions as org files "
+           "(code-sessions/, desktop/).  Search them with Grep to answer, "
+           "citing the files you used.  Don't modify anything.\n\n" question)))
 
 ;;;###autoload
 (defun kdb-claude-resume-archived (file)
-  "Continue the Claude Code session archived in org FILE.
-Opens a print-mode buffer that resumes the session on its next prompt."
+  "Continue the Claude Code session archived in org FILE, in its directory."
   (interactive
    (list (if (and buffer-file-name (kdb-claude--org-keyword buffer-file-name "SOURCE"))
              buffer-file-name
            (read-file-name "Archived session: "
                            (expand-file-name "code-sessions/" (kdb-claude--ensure-archive))))))
-  (require 'init-claude-print)
-  (let* ((source (or (kdb-claude--org-keyword file "SOURCE")
-                     (user-error "Not an archived Claude Code session")))
-         (default-directory (file-name-as-directory
-                             (or (kdb-claude--org-keyword file "CWD") default-directory)))
-         (buf (kdb-claude-print--new-buffer)))
-    (with-current-buffer buf
-      (setq kdb-claude-print--session-id (file-name-base source)))
-    (kdb-claude-print--run (read-string (format "Resume \"%s\": " (kdb-claude--org-title file)))
-                           t nil buf)))
+  (require 'init-claude-workflow)
+  (let ((source (or (kdb-claude--org-keyword file "SOURCE")
+                    (user-error "Not an archived Claude Code session")))
+        (cwd (kdb-claude--org-keyword file "CWD")))
+    (unless (and cwd (file-directory-p cwd))
+      (user-error "Session directory %s no longer exists" cwd))
+    (kdb-claude--start-with (file-name-as-directory cwd) nil (file-name-base source))))
 
 (provide 'init-claude)
 ;;; init-claude.el ends here

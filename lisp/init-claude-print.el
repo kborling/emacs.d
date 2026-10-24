@@ -10,11 +10,15 @@
 ;; `--permission-prompt-tool stdio' the CLI asks Emacs before any tool the
 ;; permission mode doesn't already allow: the request shows in the buffer,
 ;; the session is flagged as waiting, and y / a / n answer it.
+;;
+;; Fallback only (M-x kdb-claude-print): agent-shell is the main backend.
 
 ;;; Code:
 
 (require 'json)
 (require 'ansi-color)
+(require 'project)
+(require 'init-claude)
 
 (declare-function kdb-claude-flag-buffer "init-claude-workflow")
 
@@ -111,6 +115,9 @@ reads, and background prefetches.  Note: `--bare' forces API-key auth
 \\{kdb-claude-print-mode-map}"
   (setq-local truncate-lines nil)
   (visual-line-mode 1)
+  (setq-local header-line-format
+              (substitute-command-keys
+               "\\<kdb-claude-print-mode-map>\\[kdb-claude-print-continue] follow-up  \\[kdb-claude-print-new] new  \\[kdb-claude-print-allow]/\\[kdb-claude-print-allow-always]/\\[kdb-claude-print-deny] allow/always/deny  \\[kdb-claude-print-stop] stop  \\[quit-window] hide"))
   (setq-local bookmark-make-record-function #'kdb-claude-print--bookmark-record)
   (add-hook 'kill-buffer-hook #'kdb-claude-print--kill nil t))
 
@@ -239,6 +246,19 @@ RESUME non-nil continues the buffer's session id."
         (cond
          ;; Session bootstrap — capture the id for `--resume'.
          ((equal type "system")
+          (pcase (alist-get 'subtype obj)
+            ;; A turn we didn't start: another session messaged this one.
+            ("session_state_changed"
+             (when (and (equal (alist-get 'state obj) "running")
+                        (not kdb-claude-print--busy))
+               (setq kdb-claude-print--busy t)
+               (kdb-claude-print--insert
+                "%s\n\n" (propertize "── message from another session ──" 'face 'warning))))
+            ("peer_message_hold"
+             (kdb-claude-print--insert
+              "%s\n\n" (propertize "── message from another session held (permission modes differ) ──"
+                                   'face 'warning))
+             (kdb-claude-print--flag)))
           (when (equal (alist-get 'subtype obj) "init")
             (let ((sid (alist-get 'session_id obj)))
               (unless (equal sid kdb-claude-print--session-id)
@@ -371,11 +391,57 @@ file tools.  BUF defaults to `kdb-claude-print--buffer'."
 ;;; Interactive commands
 ;;; ============================================================
 
+(defun kdb-claude-print--start-dir (&optional pick)
+  "Return where a new session starts: the current project's root, else
+`default-directory'.  PICK non-nil prompts for a known project instead."
+  (file-name-as-directory
+   (expand-file-name
+    (cond (pick (kdb-claude-read-directory "Project: "))
+          ((project-current) (project-root (project-current)))
+          (t default-directory)))))
+
+(defun kdb-claude-print--start (dir prompt)
+  "Start a new session in DIR with PROMPT, in its own buffer."
+  (let ((default-directory dir))
+    (kdb-claude-print--run prompt nil nil (kdb-claude-print--new-buffer))))
+
 ;;;###autoload
-(defun kdb-claude-print (prompt)
-  "Start a new Claude session for PROMPT in its own buffer."
-  (interactive "sClaude: ")
-  (kdb-claude-print--run prompt nil nil (kdb-claude-print--new-buffer)))
+(defun kdb-claude-print (dir prompt)
+  "Start a new Claude session in DIR (the project root) for PROMPT.
+With a prefix arg, pick the project first."
+  (interactive
+   (let ((dir (kdb-claude-print--start-dir current-prefix-arg)))
+     (list dir (read-string (format "Claude [%s]: " (abbreviate-file-name dir))))))
+  (kdb-claude-print--start dir prompt))
+
+;;;###autoload
+(defun kdb-claude-print-from (&optional pick)
+  "Start a new session seeded with what you're looking at.
+That is the region, else the org entry at point, else the marked files in
+Dired, else the whole buffer.  Runs at the current project's root; with
+prefix arg PICK, or outside any project, pick the project first."
+  (interactive "P")
+  (let* ((files (and (derived-mode-p 'dired-mode) (dired-get-marked-files)))
+         (bounds (cond (files nil)
+                       ((use-region-p) (cons (region-beginning) (region-end)))
+                       ((derived-mode-p 'org-mode)
+                        (save-excursion
+                          (when (ignore-errors (org-back-to-heading t) t)
+                            (cons (point) (progn (org-end-of-subtree t t) (point))))))))
+         (what (cond (files (format "%d file(s)" (length files)))
+                     ((use-region-p) "region")
+                     (bounds "org entry")
+                     (t (buffer-name))))
+         (context (if files
+                      (concat "Files:\n" (mapconcat (lambda (f) (concat "- " f)) files "\n"))
+                    (format "From %s:\n\n%s"
+                            (or buffer-file-name (buffer-name))
+                            (buffer-substring-no-properties
+                             (or (car bounds) (point-min)) (or (cdr bounds) (point-max))))))
+         (dir (kdb-claude-print--start-dir (or pick (not (project-current)))))
+         (instr (read-string (format "Claude [%s] (about %s): "
+                                     (abbreviate-file-name dir) what))))
+    (kdb-claude-print--start dir (format "%s\n\n%s" instr context))))
 
 ;;;###autoload
 (defun kdb-claude-print-continue (prompt)

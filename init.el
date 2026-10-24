@@ -1746,47 +1746,38 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (global-set-key (kbd "C-c t V") #'kdb-evil-toggle-buffer)
 
 ;; Claude ================================================= ;;
-;; agent-shell, claude-code and pipe sessions all use the `claude' CLI
-;; login, so a Max subscription covers them.  Pipe sessions
-;; (init-claude-print) need neither a PTY nor node.
+;; agent-shell runs Claude Code over ACP using the `claude' login (Max).
+;; Needs node: npm install -g @agentclientprotocol/claude-agent-acp
 
-;; ACP client; needs node: npm install -g @agentclientprotocol/claude-agent-acp
-(defvar kdb-agent-shell-enabled (and (executable-find "claude-agent-acp") t)
-  "Non-nil when the ACP adapter is installed.")
 (use-package agent-shell
-  :if kdb-agent-shell-enabled
   :ensure t
-  :commands agent-shell-anthropic-start-claude-code
+  :commands (agent-shell-anthropic-start-claude-code agent-shell-send-file-to)
   :config
-  (add-hook 'agent-shell-mode-hook #'kdb-claude-watch-agent-shell)
   (setq agent-shell-anthropic-authentication
-        (agent-shell-anthropic-make-authentication :login t)))
+        (agent-shell-anthropic-make-authentication :login t)
+        agent-shell-preferred-agent-config 'claude-code
+        ;; Resume from the history list (C-c l h), not a picker on every start.
+        agent-shell-session-strategy 'new))
 
-;; Claude Code TUI in eat; needs a PTY, so not on native Windows.
-(use-package claude-code
-  :if (not (eq system-type 'windows-nt))
-  :vc (:url "https://github.com/stevemolitor/claude-code.el" :rev :newest)
-  :defer t
-  :custom
-  (claude-code-optimize-window-resize nil))
+(use-package agent-shell-attention
+  :vc (:url "https://github.com/ultronozm/agent-shell-attention.el" :rev :newest)
+  :after agent-shell
+  :demand t
+  :config
+  (agent-shell-attention-mode 1))
 
-(dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-sessions kdb-claude-next-waiting)
-                ("init-claude-print" kdb-claude-print kdb-claude-print-continue
-                 kdb-claude-print-new kdb-claude-print-region kdb-claude-print-buffer
-                 kdb-claude-print-stop kdb-claude-print-allow kdb-claude-print-deny)
+(dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-sessions kdb-claude-new
+                 kdb-claude-send kdb-claude-start)
+                ("init-claude-print" kdb-claude-print)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
-                 kdb-claude-browse kdb-claude-search kdb-claude-import-export
-                 kdb-claude-ask-archive kdb-claude-resume-archived)))
+                 kdb-claude-search kdb-claude-import-export
+                 kdb-claude-ask-archive kdb-claude-resume-archived kdb-claude-history)))
   (dolist (fn (cdr spec))
     (autoload fn (car spec) nil t)))
-;; Non-interactive entry points: Claude Code hooks (emacsclient) and agent-shell.
-(autoload 'kdb-claude-flag "init-claude-workflow")
-(autoload 'kdb-claude-watch-agent-shell "init-claude-workflow")
-(autoload 'kdb-claude-print--bookmark-jump "init-claude-print")
 
 (global-set-key (kbd "C-c l") #'kdb-claude)
 (global-set-key (kbd "C-c ;") #'kdb-claude-sessions)
-(global-set-key (kbd "C-c '") #'kdb-claude-next-waiting)
+(global-set-key (kbd "C-c '") #'agent-shell-attention-jump)
 
 ;; Keep the archive current so search/ask/resume see recent sessions.
 (run-with-idle-timer 300 t (lambda ()

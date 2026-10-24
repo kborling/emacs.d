@@ -11,11 +11,6 @@
 (setq user-full-name "Your Name"
       user-mail-address "your.email@example.com")
 
-;; Claude sessions over pipes (C-c l p) — no PTY or node needed
-;; (setq kdb-claude-print-permission-mode "acceptEdits") ; or "default" to ask for edits too
-;; (setq kdb-claude-print-model "opus")
-;; (setq kdb-claude-print-executable "C:/Users/me/.local/bin/claude.exe")
-
 ;; Claude session archive
 ;; (setq kdb-claude-archive-dir "~/.claude-archive")
 ;; (setq kdb-claude-export-directory "~/Downloads/")
