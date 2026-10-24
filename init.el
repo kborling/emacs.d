@@ -1757,7 +1757,12 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
         (agent-shell-anthropic-make-authentication :login t)
         agent-shell-preferred-agent-config 'claude-code
         ;; Resume from the history list (C-c l h), not a picker on every start.
-        agent-shell-session-strategy 'new))
+        agent-shell-session-strategy 'new
+        ;; Keep conversation data out of projects and this repo: the private
+        ;; archive already has every transcript, so agent-shell's copy is off.
+        agent-shell-transcript-file-path-function nil
+        agent-shell-dot-subdir-function #'kdb-claude-agent-shell-subdir
+        shell-maker-root-path (kdb-claude-agent-shell-subdir "")))
 
 (use-package agent-shell-attention
   :vc (:url "https://github.com/ultronozm/agent-shell-attention.el" :rev :newest)
@@ -1766,6 +1771,7 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
   :config
   (agent-shell-attention-mode 1))
 
+(autoload 'kdb-claude-agent-shell-subdir "init-claude")
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-sessions kdb-claude-new
                  kdb-claude-send kdb-claude-start)
                 ("init-claude-print" kdb-claude-print)

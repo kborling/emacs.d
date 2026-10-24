@@ -61,6 +61,8 @@ Sessions run in [agent-shell](https://github.com/xenodium/agent-shell) over ACP,
 
 **New machine** (see [Claude setup checklist](#claude-setup-checklist)): install node and the Claude Code CLI, log in, then `C-c l !`.
 
+Conversation data stays out of this repo and out of your projects: transcripts, agent-shell screenshots and prompt history all live in the archive (set `kdb-claude-archive-dir` in `personal.el` to move it).
+
 Every session can read the archive (`~/.claude-archive`, via `permissions.additionalDirectories` and `~/.claude/CLAUDE.md`), so Claude can look up earlier work itself.
 
 ### Org Mode
@@ -293,8 +295,9 @@ Do this once per machine (e.g. the Windows work machine).
 
 1. Install [node](https://nodejs.org) and the [Claude Code CLI](https://claude.com/claude-code); run `claude` once and log in with the Max account.
 2. Pull this config and restart Emacs (`agent-shell` and `agent-shell-attention` install themselves).
-3. Run `C-c l !` (`M-x kdb-claude-setup`). Answer yes to the ACP adapter and emacs-skills. It:
-   - creates the archive (`~/.claude-archive`, a git repo)
+3. Create an empty **private** repo for this machine's archive (keep work conversations in a separate repo from personal ones), then run `C-c l !` (`M-x kdb-claude-setup`). Answer yes to the ACP adapter and emacs-skills. It:
+   - creates the archive (`~/.claude-archive`, its own git repo, never inside this config), or clones an existing one if you give its URL
+   - asks for the private remote; `C-c l S` then commits and pushes it in the background
    - sets `cleanupPeriodDays` to 36500 in Claude's `settings.json` so transcripts aren't deleted after 30 days
    - adds the archive to `permissions.additionalDirectories` and a note to `CLAUDE.md`, so sessions can look up past work
    - runs `npm install -g @agentclientprotocol/claude-agent-acp` and installs the emacs-skills plugin

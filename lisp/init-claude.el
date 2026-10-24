@@ -420,9 +420,17 @@ Id-like keys are skipped."
     (call-process "git" nil nil nil "add" "-A")
     (call-process "git" nil nil nil "commit" "-m"
                   (format "Sync %s" (format-time-string "%Y-%m-%d %H:%M")))
-    (when (zerop (call-process "git" nil nil nil "remote" "get-url" "origin"))
-      (call-process "git" nil nil nil "push"))
-    (message "Claude archive synced and committed")))
+    (if (not (kdb-claude--git-remote default-directory))
+        (message "Claude archive committed (no remote; add one with C-c l !)")
+      (message "Claude archive committed; pushing...")
+      (make-process
+       :name "claude-archive-push" :buffer "*claude-archive-push*"
+       :command '("git" "push" "-u" "origin" "HEAD")
+       :sentinel (lambda (p _)
+                   (unless (process-live-p p)
+                     (message "Claude archive push %s"
+                              (if (zerop (process-exit-status p)) "done"
+                                "FAILED, see *claude-archive-push*"))))))))
 
 ;;;###autoload
 (defun kdb-claude-search (query)
@@ -478,6 +486,12 @@ in your browser, and running again on the same manifest imports them."
                    (call-process "tar" nil nil nil "-xf" zip "-C" dest)))
     (user-error "Couldn't extract %s" zip)))
 
+(defun kdb-claude-agent-shell-subdir (subdir)
+  "Return agent-shell's SUBDIR (screenshots, history) inside the archive."
+  (file-name-as-directory
+   (expand-file-name (file-name-concat "agent-shell" subdir)
+                     (expand-file-name kdb-claude-archive-dir))))
+
 ;;; ============================================================
 ;;; Machine setup
 ;;; ============================================================
@@ -488,6 +502,13 @@ in your browser, and running again on the same manifest imports them."
   "Past Claude sessions are archived as org files under %s (one file per \
 session, with #+TITLE and #+CWD headers).  When the user refers to earlier \
 work you have no context for, search there with Grep before asking.\n")
+
+(defun kdb-claude--git-remote (dir)
+  "Return the origin URL of the git repo in DIR, or nil."
+  (let ((default-directory dir))
+    (with-temp-buffer
+      (when (zerop (call-process "git" nil t nil "remote" "get-url" "origin"))
+        (string-trim (buffer-string))))))
 
 (defun kdb-claude--merge-settings (file archive)
   "Make Claude settings FILE keep transcripts and allow reading ARCHIVE.
@@ -523,20 +544,34 @@ and the emacs-skills plugin.  Installs run in a compilation buffer."
   (interactive)
   (unless (executable-find "claude")
     (user-error "Install the Claude Code CLI and log in first: https://claude.com/claude-code"))
+  (let ((dir (expand-file-name kdb-claude-archive-dir)))
+    (unless (file-directory-p dir)
+      (let ((url (read-string "Clone an existing private archive repo (URL, RET = new): ")))
+        (unless (string-empty-p url)
+          (unless (zerop (call-process "git" nil nil nil "clone" url dir))
+            (user-error "git clone %s failed" url))))))
   (let* ((archive (kdb-claude--ensure-archive))
          (config (kdb-claude--config-dir))
          (settings (expand-file-name "settings.json" config))
          (memory (expand-file-name "CLAUDE.md" config))
-         (note (format kdb-claude--archive-note (abbreviate-file-name archive)))
+         (note (format kdb-claude--archive-note archive))
          (done (list (format "Archive: %s" archive)))
          cmds)
+    (if (kdb-claude--git-remote archive)
+        (push (format "Archive remote: %s" (kdb-claude--git-remote archive)) done)
+      (let ((url (read-string "Private git remote to back up the archive (URL, RET = skip): ")))
+        (if (string-empty-p url)
+            (push "Archive remote: none (local only)" done)
+          (let ((default-directory archive))
+            (call-process "git" nil nil nil "remote" "add" "origin" url))
+          (push (format "Archive remote: %s (push with C-c l S)" url) done))))
     (push (if (kdb-claude--merge-settings settings archive)
               "settings.json: transcripts kept, archive readable (updated)"
             "settings.json: already set")
           done)
     (if (and (file-exists-p memory)
              (with-temp-buffer (insert-file-contents memory)
-                               (search-forward (abbreviate-file-name archive) nil t)))
+                               (search-forward archive nil t)))
         (push "CLAUDE.md: already mentions the archive" done)
       (make-directory config t)
       (write-region (concat "\n" note) nil memory t 'silent)
