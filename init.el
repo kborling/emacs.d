@@ -1762,18 +1762,24 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
         ;; archive already has every transcript, so agent-shell's copy is off.
         agent-shell-transcript-file-path-function nil
         agent-shell-dot-subdir-function #'kdb-claude-agent-shell-subdir
-        shell-maker-root-path (kdb-claude-agent-shell-subdir "")))
+        shell-maker-root-path (kdb-claude-agent-shell-subdir "")
+        ;; Queue permission requests so C-c ' can answer them from anywhere.
+        agent-shell-permission-responder-function #'kdb-claude--capture-permission)
+  (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions))
 
 (use-package agent-shell-attention
   :vc (:url "https://github.com/ultronozm/agent-shell-attention.el" :rev :newest)
   :after agent-shell
   :demand t
   :config
+  (setq agent-shell-attention-notify-function #'kdb-claude--notify)
   (agent-shell-attention-mode 1))
 
 (autoload 'kdb-claude-agent-shell-subdir "init-claude")
+(dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify))
+  (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-sessions kdb-claude-new
-                 kdb-claude-send kdb-claude-start)
+                 kdb-claude-send kdb-claude-start kdb-claude-answer)
                 ("init-claude-print" kdb-claude-print)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
                  kdb-claude-search kdb-claude-import-export
@@ -1784,7 +1790,7 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 
 (global-set-key (kbd "C-c l") #'kdb-claude)
 (global-set-key (kbd "C-c ;") #'kdb-claude-sessions)
-(global-set-key (kbd "C-c '") #'agent-shell-attention-jump)
+(global-set-key (kbd "C-c '") #'kdb-claude-answer)
 
 ;; Keep the archive current so search/ask/resume see recent sessions.
 (run-with-idle-timer 300 t (lambda ()

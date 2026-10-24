@@ -19,6 +19,10 @@
 (declare-function agent-shell-status "agent-shell")
 (declare-function agent-shell-subscribe-to "agent-shell")
 (declare-function agent-shell-unsubscribe "agent-shell")
+(declare-function agent-shell-attention-jump "agent-shell-attention")
+(declare-function agent-shell-interrupt "agent-shell")
+(declare-function notifications-notify "notifications")
+(declare-function agent-shell-jump-to-latest-permission-button-row "agent-shell")
 (declare-function org-back-to-heading "org")
 (declare-function org-mark-subtree "org")
 (defvar agent-shell-cwd-function)
@@ -73,6 +77,103 @@ Sessions in the current project are listed first."
   "Switch to a live Claude session, grouped by project."
   (interactive)
   (switch-to-buffer (kdb-claude--read-session "Session: ")))
+
+;;; ============================================================
+;;; Attention
+;;; ============================================================
+
+(defvar kdb-claude--responders (make-hash-table :test #'equal)
+  "Permission request id -> agent-shell permission alist (with :respond).")
+
+(defvar kdb-claude--permissions nil
+  "Pending permission requests, oldest first, as (ID BUFFER PERMISSION).")
+
+;;;###autoload
+(defun kdb-claude--capture-permission (permission)
+  "Remember PERMISSION so it can be answered from anywhere.
+Return nil so agent-shell still shows its inline card."
+  (puthash (map-elt (map-elt permission :tool-call) :permission-request-id)
+           permission kdb-claude--responders)
+  nil)
+
+(defun kdb-claude--forget-permission (id)
+  "Drop permission request ID from the queue."
+  (remhash id kdb-claude--responders)
+  (setq kdb-claude--permissions (seq-remove (lambda (e) (equal (car e) id))
+                                            kdb-claude--permissions)))
+
+;;;###autoload
+(defun kdb-claude--track-permissions ()
+  "Queue this shell's permission requests for `kdb-claude-answer'."
+  (let ((buf (current-buffer)))
+    (agent-shell-subscribe-to
+     :shell-buffer buf
+     :on-event (lambda (event)
+                 (let ((id (map-elt (map-elt event :data) :request-id)))
+                   (pcase (map-elt event :event)
+                     ('permission-request
+                      (when-let* ((perm (gethash id kdb-claude--responders)))
+                        (setq kdb-claude--permissions
+                              (append kdb-claude--permissions (list (list id buf perm))))))
+                     ('permission-response (kdb-claude--forget-permission id))
+                     ('clean-up
+                      (dolist (e kdb-claude--permissions)
+                        (when (eq (nth 1 e) buf) (kdb-claude--forget-permission (car e)))))))))))
+
+(defconst kdb-claude--permission-keys
+  '(("allow_once" . ?y) ("allow_always" . ?!) ("reject_once" . ?n) ("reject_always" . ?N)))
+
+;;;###autoload
+(defun kdb-claude-answer ()
+  "Answer the oldest permission request from any session, without leaving
+the current buffer, then the next one.  With none pending, jump to the
+next session waiting on you."
+  (interactive)
+  (setq kdb-claude--permissions (seq-filter (lambda (e) (buffer-live-p (nth 1 e)))
+                                            kdb-claude--permissions))
+  (pcase (car kdb-claude--permissions)
+    ('nil (agent-shell-attention-jump))
+    (`(,id ,buf ,perm)
+     (let* ((options (seq-filter (lambda (o) (assoc (map-elt o :kind) kdb-claude--permission-keys))
+                                 (map-elt perm :options)))
+            (choices (append (mapcar (lambda (o)
+                                       (list (cdr (assoc (map-elt o :kind) kdb-claude--permission-keys))
+                                             (map-elt o :option) o))
+                                     options)
+                             '((?g "go to session") (?q "later"))))
+            (more (1- (length kdb-claude--permissions)))
+            (key (car (read-multiple-choice
+                       (format "%s%s: %s" (buffer-name buf)
+                               (if (> more 0) (format " (+%d waiting)" more) "")
+                               (or (map-elt (map-elt perm :tool-call) :title) "tool"))
+                       (mapcar (lambda (c) (seq-take c 2)) choices))))
+            (opt (nth 2 (assq key choices))))
+       (cond (opt
+              (with-current-buffer buf
+                (funcall (map-elt perm :respond) (map-elt opt :option-id))
+                (when (equal (map-elt opt :kind) "reject_once")
+                  (agent-shell-interrupt t)))
+              (kdb-claude--forget-permission id)
+              (when kdb-claude--permissions (kdb-claude-answer)))
+             ((eq key ?g)
+              (pop-to-buffer buf)
+              (agent-shell-jump-to-latest-permission-button-row)))))))
+
+(defvar kdb-claude--notification nil
+  "Id of the last Windows notification, which must be closed before the next.")
+
+;;;###autoload
+(defun kdb-claude--notify (_buffer title body)
+  "Show TITLE/BODY as a desktop notification, only when Emacs isn't focused."
+  (unless (seq-some #'frame-focus-state (frame-list))
+    (cond ((fboundp 'w32-notification-notify)
+           (when kdb-claude--notification
+             (w32-notification-close kdb-claude--notification))
+           (setq kdb-claude--notification
+                 (w32-notification-notify :title title :body (concat body "  (C-c ' in Emacs)"))))
+          ((require 'notifications nil t)
+           (notifications-notify :app-name "Emacs" :title title
+                                 :body (concat body "  (C-c ' in Emacs)"))))))
 
 ;;; ============================================================
 ;;; Starting
@@ -192,7 +293,7 @@ opens its worktree; a new name creates the branch in a new worktree."
     ("s" "Region/note/files → session" kdb-claude-send)
     ("f" "File → session" agent-shell-send-file-to)]
    ["Sessions"
-    ("'" "Next waiting" agent-shell-attention-jump)
+    ("'" "Answer / next waiting" kdb-claude-answer)
     ("d" "Dashboard" agent-shell-attention-dashboard)
     ("l" "Switch (by project)" kdb-claude-sessions)]
    ["History"
