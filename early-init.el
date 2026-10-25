@@ -31,9 +31,11 @@
         inhibit-compacting-font-caches t
         ;; One pre-built autoloads file instead of one per package
         package-quickstart t)
-  ;; Every `load' during startup matches against these; restore after
+  ;; Every `load' during startup matches against these; restore after.
+  ;; jka-compr stays so libraries shipped only as .el.gz still load.
   (let ((handlers file-name-handler-alist))
-    (setq file-name-handler-alist nil)
+    (setq file-name-handler-alist
+          (delq nil (list (rassq 'jka-compr-handler handlers))))
     (add-hook 'emacs-startup-hook
               (lambda ()
                 (setq file-name-handler-alist

@@ -114,6 +114,8 @@ served by a fresh run right after it."
     (let ((callbacks (cons callback kdb-claude--sync-next)))
       (setq kdb-claude--sync-next nil)
       (kdb-claude--ensure-archive)
+      (with-current-buffer (get-buffer-create " *claude-archive-sync*")
+        (erase-buffer))
       (setq kdb-claude--sync-process
             (make-process
              :name "claude-archive-sync" :buffer " *claude-archive-sync*" :noquery t
@@ -343,8 +345,8 @@ Shows the archive as it is, then redraws once a background sync is done."
   (with-current-buffer (get-buffer-create "*Claude History*")
     (kdb-claude-history-mode)
     (tabulated-list-print)
-    (kdb-claude--history-refresh)
-    (pop-to-buffer-same-window (current-buffer))))
+    (pop-to-buffer-same-window (current-buffer))
+    (kdb-claude--history-refresh)))
 
 (defun kdb-claude--history-refresh ()
   "Sync in the background, then redraw this history buffer."

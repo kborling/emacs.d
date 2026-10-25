@@ -82,6 +82,10 @@
     (package-refresh-contents)))
 (dolist (fn '(package-install package-vc-install-dependencies))
   (advice-add fn :before #'kdb--refresh-package-list-once))
+;; use-package refreshes by itself when a package isn't in the (unread)
+;; list; count that, or the first install downloads the list twice.
+(advice-add 'package-refresh-contents :after
+            (lambda (&rest _) (setq kdb--package-list-refreshed t)))
 
 ;;; Package Management ========================================= ;;
 
@@ -1578,10 +1582,9 @@ Falls back to DIRS or project roots."
 
 (use-package mhtml-mode
   :ensure nil
+  :mode "\\.cshtml\\'"
   :bind (:map mhtml-mode-map
-              ("C-c C-d" . nil))
-  :config
-  (add-to-list 'auto-mode-alist '("\\.cshtml\\'" . mhtml-mode)))
+              ("C-c C-d" . nil)))
 
 
 ;; Memmet Mode ============================================= ;;
@@ -1867,7 +1870,8 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (run-with-idle-timer 300 t (lambda ()
                              (require 'init-claude)
                              (when (kdb-claude--archive-repo-p)
-                               (kdb-claude-sync-code-sessions-async))))
+                               (with-demoted-errors "Claude archive sync: %S"
+                                 (kdb-claude-sync-code-sessions-async)))))
 
 
 ;; Local Variables:
