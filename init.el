@@ -1223,7 +1223,7 @@ Falls back to DIRS or project roots."
    eglot-events-buffer-size (if (eq system-type 'windows-nt) 0 2000000))
 
   ;; Language Servers
-  (add-to-list 'eglot-server-programs '(csharp-mode . ("csharp-ls")))
+  (add-to-list 'eglot-server-programs '((csharp-mode csharp-ts-mode) . ("csharp-ls")))
   (add-to-list 'eglot-server-programs '(typescript-ts-mode . ("typescript-language-server" "--stdio")))
   (add-to-list 'eglot-server-programs '(html-ts-mode . ("vscode-html-language-server" "--stdio")))
   (add-to-list 'eglot-server-programs '(css-ts-mode . ("vscode-css-language-server" "--stdio")))
@@ -1617,9 +1617,10 @@ Falls back to DIRS or project roots."
 
 (use-package memmet-mode
   :vc (:url "https://github.com/kborling/memmet-mode" :rev :newest)
-  :bind (:map mhtml-mode-map ("C-<tab>" . memmet-expand))
   :hook ((mhtml-mode mhtml-ts-mode) . memmet-mode)
   :config
+  (with-eval-after-load 'mhtml-mode
+    (keymap-set mhtml-mode-map "C-<tab>" #'memmet-expand))
   (with-eval-after-load 'mhtml-ts-mode
     (keymap-set mhtml-ts-mode-map "C-<tab>" #'memmet-expand)))
 
@@ -1682,7 +1683,8 @@ Falls back to DIRS or project roots."
                      ("C-c n b" . kdb-dotnet-build)
                      ("C-c n t" . kdb-dotnet-test)
                      ("C-c n !" . kdb-dotnet-command)))
-    (define-key csharp-mode-map (kbd (car binding)) (cdr binding))))
+    (define-key csharp-mode-map (kbd (car binding)) (cdr binding))
+    (define-key csharp-ts-mode-map (kbd (car binding)) (cdr binding))))
 
 ;; EAT (Terminal) ========================================== ;;
 

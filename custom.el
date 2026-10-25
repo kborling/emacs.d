@@ -5,16 +5,16 @@
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
  '(package-selected-packages
-   '(acme-theme agent-shell angular-mode tabspaces cape compat corfu cperl-mode
-                csharp-mode csv-mode deadgrep deft dictionary diff-hl
-                eat editorconfig eglot-booster elixir-ts-mode
+   '(acme-theme agent-shell angular-mode cape compat corfu cperl-mode
+                csv-mode deadgrep deft dictionary diff-hl eat
+                editorconfig eglot-booster elixir-ts-mode
                 evil-collection exec-path-from-shell exwm faceup
-                fleury-theme flymake hl-todo less-css-mode
-                lua-mode marginalia markdown-mode markdown-ts-mode
-                memmet-mode multiple-cursors orderless org org-appear
-                org-modern peg project tempel-collection
-                tramp transient treesit-expand uwu-theme vc-msg
-                verilog-mode wallpaper))
+                fleury-theme flymake hl-todo less-css-mode lua-mode
+                marginalia markdown-mode markdown-ts-mode memmet-mode
+                multiple-cursors orderless org org-appear org-modern
+                peg project tabspaces tempel-collection tramp
+                transient treesit-expand uwu-theme vc-msg verilog-mode
+                wallpaper))
  '(package-vc-selected-packages
    '((fleury-theme :url "https://github.com/kborling/fleury-theme.el")
      (uwu-theme :url "https://github.com/kborling/uwu-theme")
@@ -23,7 +23,8 @@
      (angular-mode :url "https://github.com/kborling/angular-mode")
      (agent-shell-attention :url
                             "https://github.com/ultronozm/agent-shell-attention.el")
-     (agent-shell-hq :url "https://github.com/SreenivasVRao/agent-shell-hq")
+     (agent-shell-hq :url
+                     "https://github.com/SreenivasVRao/agent-shell-hq")
      (agent-review :url "https://github.com/nineluj/agent-review")
      (treesit-expand :url "https://github.com/kborling/treesit-expand")
      (eglot-booster :url "https://github.com/jdtsmith/eglot-booster"))))
