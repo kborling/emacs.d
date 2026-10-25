@@ -62,20 +62,20 @@
 
 (require 'package)
 (package-initialize)
-(unless package-archive-contents
-  (package-refresh-contents))
-
 ;; A cached package list goes stale (MELPA drops old versions, deps move
-;; on), so installs from it fail.  Refresh once and retry.
+;; on), so refresh it before the first install of the session.  Both entry
+;; points: :vc dependencies go through `package-vc-install-dependencies',
+;; which never calls `package-install' and only reports what's missing.
 (defvar kdb--package-list-refreshed nil)
-(define-advice package-install (:around (fn &rest args) refresh-stale-list)
-  (condition-case err
-      (apply fn args)
-    (error (if kdb--package-list-refreshed
-               (signal (car err) (cdr err))
-             (setq kdb--package-list-refreshed t)
-             (package-refresh-contents)
-             (apply fn args)))))
+(defun kdb--refresh-package-list-once (&rest _)
+  "Refresh the package list unless that already happened this session."
+  (unless kdb--package-list-refreshed
+    (setq kdb--package-list-refreshed t)
+    (package-refresh-contents)))
+(unless package-archive-contents
+  (kdb--refresh-package-list-once))
+(dolist (fn '(package-install package-vc-install-dependencies))
+  (advice-add fn :before #'kdb--refresh-package-list-once))
 
 ;;; Package Management ========================================= ;;
 
@@ -1788,6 +1788,21 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 ;; agent-shell runs Claude Code over ACP using the `claude' login (Max).
 ;; Needs node: npm install -g @agentclientprotocol/claude-agent-acp
 
+;; Before any use-package below: installing a :vc package compiles it,
+;; which loads agent-shell and runs its :config mid-install.
+(autoload 'kdb-claude-agent-shell-subdir "init-claude")
+(dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify))
+  (autoload fn "init-claude-workflow"))
+(dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
+                 kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review)
+                ("init-claude-print" kdb-claude-print)
+                ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
+                 kdb-claude-search kdb-claude-import-export
+                 kdb-claude-ask-archive kdb-claude-resume-archived kdb-claude-history
+                 kdb-claude-setup)))
+  (dolist (fn (cdr spec))
+    (autoload fn (car spec) nil t)))
+
 (use-package agent-shell
   :ensure t
   :commands (agent-shell-anthropic-start-claude-code agent-shell-send-file-to)
@@ -1829,19 +1844,6 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
   :config
   (setq agent-shell-attention-notify-function #'kdb-claude--notify)
   (agent-shell-attention-mode 1))
-
-(autoload 'kdb-claude-agent-shell-subdir "init-claude")
-(dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify))
-  (autoload fn "init-claude-workflow"))
-(dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
-                 kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review)
-                ("init-claude-print" kdb-claude-print)
-                ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
-                 kdb-claude-search kdb-claude-import-export
-                 kdb-claude-ask-archive kdb-claude-resume-archived kdb-claude-history
-                 kdb-claude-setup)))
-  (dolist (fn (cdr spec))
-    (autoload fn (car spec) nil t)))
 
 (global-set-key (kbd "C-c l") #'kdb-claude)
 (global-set-key (kbd "C-c ;") #'agent-shell-hq-peek)
