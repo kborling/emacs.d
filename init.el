@@ -235,7 +235,7 @@
 
 ;; Frame sizing — large but not fullscreen (EXWM handles its own)
 (unless (memq window-system '(x))  ; Skip on EXWM
-  (when (display-graphic-p)
+  (when (or (display-graphic-p) (daemonp))
     (add-to-list 'default-frame-alist '(width . 120))
     (add-to-list 'default-frame-alist '(height . 45))))
 
@@ -356,26 +356,36 @@
 
 (setopt line-spacing 0.20)
 
-(let* ((settings (cond
-                  ((eq system-type 'windows-nt)    '(:size 110 :families ("Comic Code" "Rec Mono Semicasual" "Cascadia Code" "Consolas" "Courier New")))
-                  ((eq system-type 'darwin)        '(:size 140 :families ("Overpass Mono" "Monaco" "Menlo" "monospace")))
-                  (t '(:size 110 :families ("Comic Code" "JetBrains Mono" "DejaVu Sans Mono" "Liberation Mono" "monospace")))))  ; Linux, BSD, etc.
-       (default-font-size (plist-get settings :size))
-       (font-families (plist-get settings :families))
-       (default-font-family (cl-find-if (lambda (font) (find-font (font-spec :family font))) font-families)))
+(defun kdb-apply-fonts ()
+  "Set the default, fixed and variable-pitch fonts.
+Needs a graphical frame: a daemon has none at startup, so fonts can't
+be found until the first emacsclient frame opens."
+  (when (display-graphic-p)
+    (remove-hook 'server-after-make-frame-hook #'kdb-apply-fonts)
+    (let* ((settings (cond
+                      ((eq system-type 'windows-nt)    '(:size 110 :families ("Comic Code" "Rec Mono Semicasual" "Cascadia Code" "Consolas" "Courier New")))
+                      ((eq system-type 'darwin)        '(:size 140 :families ("Overpass Mono" "Monaco" "Menlo" "monospace")))
+                      (t '(:size 110 :families ("Comic Code" "JetBrains Mono" "DejaVu Sans Mono" "Liberation Mono" "monospace")))))  ; Linux, BSD, etc.
+           (default-font-size (plist-get settings :size))
+           (font-families (plist-get settings :families))
+           (default-font-family (cl-find-if (lambda (font) (find-font (font-spec :family font))) font-families)))
 
-  ;; Set the font if we found one available
-  (when default-font-family
-    (set-face-attribute 'default nil
-                        :family default-font-family :weight 'medium :height default-font-size)
-    (set-face-attribute 'fixed-pitch nil
-                        :family default-font-family :height 1.0))
+      ;; Set the font if we found one available
+      (when default-font-family
+        (set-face-attribute 'default nil
+                            :family default-font-family :weight 'medium :height default-font-size)
+        (set-face-attribute 'fixed-pitch nil
+                            :family default-font-family :height 1.0))
 
-  (let ((vp-family (cl-find-if (lambda (f) (find-font (font-spec :family f)))
-                                 '("FreeSans" "Helvetica Neue" "Segoe UI" "sans-serif"))))
-    (when vp-family
-      (set-face-attribute 'variable-pitch nil
-                          :family vp-family :height 1.0 :weight 'regular))))
+      (let ((vp-family (cl-find-if (lambda (f) (find-font (font-spec :family f)))
+                                   '("FreeSans" "Helvetica Neue" "Segoe UI" "sans-serif"))))
+        (when vp-family
+          (set-face-attribute 'variable-pitch nil
+                              :family vp-family :height 1.0 :weight 'regular))))))
+
+(if (daemonp)
+    (add-hook 'server-after-make-frame-hook #'kdb-apply-fonts)
+  (kdb-apply-fonts))
 
 (set-display-table-slot standard-display-table 'truncation (make-glyph-code ?…))
 (set-display-table-slot standard-display-table 'wrap (make-glyph-code ?–))
