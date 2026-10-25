@@ -23,6 +23,7 @@
      (angular-mode :url "https://github.com/kborling/angular-mode")
      (agent-shell-attention :url
                             "https://github.com/ultronozm/agent-shell-attention.el")
+     (agent-shell-hq :url "https://github.com/SreenivasVRao/agent-shell-hq")
      (treesit-expand :url "https://github.com/kborling/treesit-expand")
      (eglot-booster :url "https://github.com/jdtsmith/eglot-booster"))))
 (custom-set-faces

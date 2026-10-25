@@ -26,6 +26,10 @@
 (setq custom-file (locate-user-emacs-file "custom.el"))
 (load custom-file :no-error-if-file-is-missing)
 
+;; Windows defaults to cp1252, which can't encode the quotes, ellipses and
+;; emoji in Claude transcripts, so Emacs asked for a coding system on save.
+(set-language-environment "UTF-8")
+
 ;;; ============================================================
 ;;;                  PERFORMANCE SETTINGS
 ;;; ============================================================
@@ -61,11 +65,24 @@
 (unless package-archive-contents
   (package-refresh-contents))
 
+;; A cached package list goes stale (MELPA drops old versions, deps move
+;; on), so installs from it fail.  Refresh once and retry.
+(defvar kdb--package-list-refreshed nil)
+(define-advice package-install (:around (fn &rest args) refresh-stale-list)
+  (condition-case err
+      (apply fn args)
+    (error (if kdb--package-list-refreshed
+               (signal (car err) (cdr err))
+             (setq kdb--package-list-refreshed t)
+             (package-refresh-contents)
+             (apply fn args)))))
+
 ;;; Package Management ========================================= ;;
 
 (setq use-package-always-ensure t
       package-native-compile t
-      warning-minimum-level :emergency)
+      ;; :error, not :emergency, so failed package installs are visible.
+      warning-minimum-level :error)
 
 (setq package-install-upgrade-built-in t
       package-vc-register-as-project nil)
@@ -1767,6 +1784,12 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
         agent-shell-permission-responder-function #'kdb-claude--capture-permission)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions))
 
+;; Peek: sessions grouped by project with live status; RET switches.
+;; Label: Claude names the session.  (hq's HUD needs persp-mode; unused.)
+(use-package agent-shell-hq
+  :vc (:url "https://github.com/SreenivasVRao/agent-shell-hq" :rev :newest)
+  :commands (agent-shell-hq-peek agent-shell-hq-label))
+
 (use-package agent-shell-attention
   :vc (:url "https://github.com/ultronozm/agent-shell-attention.el" :rev :newest)
   :after agent-shell
@@ -1778,7 +1801,7 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (autoload 'kdb-claude-agent-shell-subdir "init-claude")
 (dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify))
   (autoload fn "init-claude-workflow"))
-(dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-sessions kdb-claude-new
+(dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
                  kdb-claude-send kdb-claude-start kdb-claude-answer)
                 ("init-claude-print" kdb-claude-print)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
@@ -1789,7 +1812,7 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
     (autoload fn (car spec) nil t)))
 
 (global-set-key (kbd "C-c l") #'kdb-claude)
-(global-set-key (kbd "C-c ;") #'kdb-claude-sessions)
+(global-set-key (kbd "C-c ;") #'agent-shell-hq-peek)
 (global-set-key (kbd "C-c '") #'kdb-claude-answer)
 
 ;; Keep the archive current so search/ask/resume see recent sessions.

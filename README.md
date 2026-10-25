@@ -56,7 +56,7 @@ Sessions run in [agent-shell](https://github.com/xenodium/agent-shell) over ACP,
 
 - **Start** — new session at the project root, pre-filled with the region, Dired files or org entry at point; or pick any project (recent Claude directories first) and branch, which opens in its own git worktree
 - **Send** — region, note, files or a file to a session you pick
-- **Sessions** — `C-c '` answers the oldest permission request from any session right in the minibuffer (`y` allow, `!` always, `n` reject, `g` go there, `q` later), then the next; with none pending it jumps to the next session that finished. [agent-shell-attention](https://github.com/ultronozm/agent-shell-attention.el) shows `AS:n` in the mode line, echoes when a session needs you, and sends a desktop notification only while Emacs isn't focused; dashboard and switching grouped by project too
+- **Sessions** — `C-c '` answers the oldest permission request from any session right in the minibuffer (`y` allow, `!` always, `n` reject, `g` go there, `q` later), then the next; with none pending it jumps to the next session that finished. [agent-shell-attention](https://github.com/ultronozm/agent-shell-attention.el) shows `AS:n` in the mode line, echoes when a session needs you, and sends a desktop notification only while Emacs isn't focused; `C-c ;` opens [agent-shell-hq](https://github.com/SreenivasVRao/agent-shell-hq)'s peek: every session grouped by project with live status, previewed as you move (`n`/`p`, `RET` switch, `s` new); `C-c l r` has Claude name the current session
 - **History** — every past session (agent-shell, CLI, Desktop's Code tab, imported Desktop chats) in one list: filter, full-text search, ask Claude about them, resume
 
 **New machine** (see [Claude setup checklist](#claude-setup-checklist)): install node and the Claude Code CLI, log in, then `C-c l !`.
@@ -142,8 +142,8 @@ Every session can read the archive (`~/.claude-archive`, via `permissions.additi
 |---|---|---|---|---|---|---|---|
 | `n` | New here (`C-u` pick project) | `s` | Region/note/files → session | `'` | Answer / next waiting | `h` | All sessions |
 | `N` | New on project + branch | `f` | File → session | `d` | Dashboard | `/` | Search text |
-| | | | | `l` | Switch (by project) | `A` | Ask past sessions |
-| | | | | | | `S` | Sync & commit |
+| | | | | `l` | Peek / switch (by project) | `A` | Ask past sessions |
+| | | | | `r` | Name this session | `S` | Sync & commit |
 | | | | | | | `i` | Import Desktop export |
 
 In the history list (`C-c l h`): `RET` open, `u` resume (imported chats continue in a new session that reads the old one), `/` filter, `s` search, `A` ask, `g` refresh.
@@ -152,7 +152,7 @@ Session shortcuts (no transient needed):
 
 | Key | Action |
 |-----|--------|
-| `C-c ;` | Switch session, grouped by project |
+| `C-c ;` | Peek at sessions grouped by project (live status, preview), `RET` to switch |
 | `C-c '` | Answer the oldest permission request from any session, else jump to the next waiting session |
 
 ### Eglot / LSP (`C-c c`)

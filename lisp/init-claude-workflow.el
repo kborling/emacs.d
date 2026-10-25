@@ -12,11 +12,9 @@
 
 (declare-function agent-shell-anthropic-make-claude-code-config "agent-shell-anthropic")
 (declare-function agent-shell-anthropic-start-claude-code "agent-shell-anthropic")
-(declare-function agent-shell-buffers "agent-shell")
 (declare-function agent-shell-insert "agent-shell")
 (declare-function agent-shell-send-dwim "agent-shell")
 (declare-function agent-shell-start "agent-shell")
-(declare-function agent-shell-status "agent-shell")
 (declare-function agent-shell-subscribe-to "agent-shell")
 (declare-function agent-shell-unsubscribe "agent-shell")
 (declare-function agent-shell-attention-jump "agent-shell-attention")
@@ -26,57 +24,6 @@
 (declare-function org-back-to-heading "org")
 (declare-function org-mark-subtree "org")
 (defvar agent-shell-cwd-function)
-
-;;; ============================================================
-;;; Sessions
-;;; ============================================================
-
-(defun kdb-claude--project-branch (dir)
-  "Return (PROJECT . BRANCH) for DIR; worktrees report their main repo."
-  (pcase (kdb-claude--git-lines dir "rev-parse" "--path-format=absolute"
-                                "--git-common-dir" "--abbrev-ref" "HEAD")
-    (`(,common ,branch)
-     (cons (file-name-nondirectory
-            (directory-file-name (file-name-directory (directory-file-name common))))
-           branch))
-    (_ (cons (abbreviate-file-name dir) nil))))
-
-(defun kdb-claude--read-session (prompt)
-  "Read a live session with PROMPT, grouped by project, and return its buffer.
-Sessions in the current project are listed first."
-  (require 'agent-shell)
-  (let* ((here (car (kdb-claude--project-branch default-directory)))
-         (cands (mapcar
-                 (lambda (buf)
-                   (let ((pb (kdb-claude--project-branch
-                              (buffer-local-value 'default-directory buf))))
-                     (cons (propertize (format "%-8s %-24s %s"
-                                               (agent-shell-status :shell-buffer buf)
-                                               (or (cdr pb) "-") (buffer-name buf))
-                                       'kdb-project (car pb))
-                           buf)))
-                 (or (agent-shell-buffers)
-                     (user-error "No active sessions.  Start one with C-c l n"))))
-         (cands (seq-sort-by (lambda (c)
-                               (let ((p (get-text-property 0 'kdb-project (car c))))
-                                 (if (equal p here) "" p)))
-                             #'string< cands))
-         (choice (completing-read
-                  prompt
-                  (lambda (str pred action)
-                    (if (eq action 'metadata)
-                        `(metadata (display-sort-function . identity)
-                                   (group-function
-                                    . ,(lambda (c transform)
-                                         (if transform c (get-text-property 0 'kdb-project c)))))
-                      (complete-with-action action cands str pred)))
-                  nil t)))
-    (cdr (assoc choice cands))))
-
-(defun kdb-claude-sessions ()
-  "Switch to a live Claude session, grouped by project."
-  (interactive)
-  (switch-to-buffer (kdb-claude--read-session "Session: ")))
 
 ;;; ============================================================
 ;;; Attention
@@ -295,7 +242,8 @@ opens its worktree; a new name creates the branch in a new worktree."
    ["Sessions"
     ("'" "Answer / next waiting" kdb-claude-answer)
     ("d" "Dashboard" agent-shell-attention-dashboard)
-    ("l" "Switch (by project)" kdb-claude-sessions)]
+    ("l" "Peek / switch (by project)" agent-shell-hq-peek)
+    ("r" "Name this session" agent-shell-hq-label)]
    ["History"
     ("h" "All sessions" kdb-claude-history)
     ("/" "Search text" kdb-claude-search)
