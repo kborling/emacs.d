@@ -39,12 +39,11 @@
         '((sequence "TODO(t)" "WAITING(w)" "FOLLOWUP(f)" "|" "DONE(d)" "CANCELLED(c)")))
 
   ;; Check for encrypted version first, fall back to regular org file
+  ;; Only existing files: missing ones make the agenda prompt for each.
   (setq org-agenda-files
-        (append (list "~/.org/inbox.org"
-                      "~/.org/todo.org"
-                      "~/.org/notes.org"
-                      "~/.org/projects.org"
-                      "~/.org/work.org")
+        (append (seq-filter #'file-exists-p
+                            '("~/.org/inbox.org" "~/.org/todo.org" "~/.org/notes.org"
+                              "~/.org/projects.org" "~/.org/work.org"))
                 (when (file-directory-p "~/.org/people/")
                   (directory-files "~/.org/people/" t "\\.org$")))
         org-log-done 'time
@@ -123,10 +122,11 @@
           ("a" "Ask Claude" entry (file "~/.org/inbox.org")
            "* %? :claude:\n%U\n** Source\n\n** Thoughts\n\n** Next Actions\n- [ ] \n** Prompt\n" :empty-lines 1)))
 
-  (setq org-refile-targets '(("~/.org/notes.org" :maxlevel . 3)
-                              ("~/.org/todo.org" :maxlevel . 2)
-                              ("~/.org/work.org" :maxlevel . 2)
-                              ("~/.org/projects.org" :maxlevel . 2))
+  (setq org-refile-targets (seq-filter (lambda (target) (file-exists-p (car target)))
+                                       '(("~/.org/notes.org" :maxlevel . 3)
+                                         ("~/.org/todo.org" :maxlevel . 2)
+                                         ("~/.org/work.org" :maxlevel . 2)
+                                         ("~/.org/projects.org" :maxlevel . 2)))
         org-refile-use-outline-path 'file
         org-outline-path-complete-in-steps nil)
 

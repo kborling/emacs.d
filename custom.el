@@ -12,7 +12,7 @@
                 fleury-theme flymake hl-todo less-css-mode
                 lua-mode marginalia markdown-mode markdown-ts-mode
                 memmet-mode multiple-cursors orderless org org-appear
-                org-modern peg project ssh-agency tempel-collection
+                org-modern peg project tempel-collection
                 tramp transient treesit-expand uwu-theme vc-msg
                 verilog-mode wallpaper))
  '(package-vc-selected-packages

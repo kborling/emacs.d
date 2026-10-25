@@ -227,10 +227,12 @@ RESUME non-nil continues the buffer's session id."
 (defun kdb-claude-print--kill ()
   "Kill this buffer's process; on Windows its whole tree (claude.cmd spawns node)."
   (when (process-live-p kdb-claude-print--process)
-    (if (eq system-type 'windows-nt)
-        (call-process "taskkill" nil nil nil "/T" "/F" "/PID"
-                      (number-to-string (process-id kdb-claude-print--process)))
-      (delete-process kdb-claude-print--process))))
+    (when (eq system-type 'windows-nt)
+      (call-process "taskkill" nil nil nil "/T" "/F" "/PID"
+                    (number-to-string (process-id kdb-claude-print--process))))
+    ;; taskkill returns before the process is gone; drop it now so the
+    ;; next prompt starts a fresh one instead of reusing a dying one.
+    (delete-process kdb-claude-print--process)))
 
 ;;; ============================================================
 ;;; Streaming JSONL parser
@@ -334,7 +336,8 @@ RESUME non-nil continues the buffer's session id."
 (defun kdb-claude-print--filter (proc chunk)
   "Process filter: buffer CHUNK, render complete JSONL lines from PROC."
   (let ((buf (process-buffer proc)))
-    (when (buffer-live-p buf)
+    (when (and (buffer-live-p buf)
+               (eq proc (buffer-local-value 'kdb-claude-print--process buf)))
       (with-current-buffer buf
         (setq kdb-claude-print--stdout-acc
               (concat kdb-claude-print--stdout-acc chunk))
@@ -347,9 +350,12 @@ RESUME non-nil continues the buffer's session id."
                 (kdb-claude-print--parse-line line)))))))))
 
 (defun kdb-claude-print--sentinel (proc event)
-  "Process sentinel for PROC; report abnormal EVENT and clear state."
+  "Process sentinel for PROC; report abnormal EVENT and clear state.
+Ignores a process the buffer has already replaced (a killed one's
+sentinel can fire after its successor started)."
   (let ((buf (process-buffer proc)))
-    (when (buffer-live-p buf)
+    (when (and (buffer-live-p buf)
+               (eq proc (buffer-local-value 'kdb-claude-print--process buf)))
       (with-current-buffer buf
         (setq kdb-claude-print--process nil
               kdb-claude-print--busy nil

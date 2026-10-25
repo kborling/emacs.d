@@ -103,16 +103,22 @@ reconvert every session."
   "The background Emacs converting sessions, while one runs.")
 (defvar kdb-claude--sync-next nil
   "Callbacks for the sync to run after the current one; non-nil = rerun.")
+(defvar kdb-claude--sync-next-commit nil
+  "Non-nil if the next sync should also commit the archive.")
 
-(defun kdb-claude-sync-code-sessions-async (&optional callback)
+(defun kdb-claude-sync-code-sessions-async (&optional callback commit)
   "Sync Claude Code sessions in a background Emacs, then call CALLBACK.
-Conversion reads every changed JSONL, which can be GBs, so it never runs
-in this Emacs.  One sync at a time: a request made while one runs is
-served by a fresh run right after it."
+With COMMIT, that Emacs also commits the archive.  Conversion reads every
+changed JSONL, which can be GBs, and git is slow on Windows, so neither
+runs in this Emacs.  One sync at a time: a request made while one runs
+is served by a fresh run right after it."
   (if (process-live-p kdb-claude--sync-process)
-      (push callback kdb-claude--sync-next)
-    (let ((callbacks (cons callback kdb-claude--sync-next)))
-      (setq kdb-claude--sync-next nil)
+      (progn (push callback kdb-claude--sync-next)
+             (when commit (setq kdb-claude--sync-next-commit t)))
+    (let ((callbacks (cons callback kdb-claude--sync-next))
+          (commit (or commit kdb-claude--sync-next-commit)))
+      (setq kdb-claude--sync-next nil
+            kdb-claude--sync-next-commit nil)
       (kdb-claude--ensure-archive)
       (with-current-buffer (get-buffer-create " *claude-archive-sync*")
         (erase-buffer))
@@ -125,8 +131,9 @@ served by a fresh run right after it."
                    "--batch" "-Q" "-L" (file-name-directory (locate-library "init-claude"))
                    "-l" "init-claude"
                    "--eval" (format "(progn (set-language-environment \"UTF-8\") \
-(setq kdb-claude-archive-dir %S) (kdb-claude-sync-code-sessions))"
-                                    (expand-file-name kdb-claude-archive-dir)))
+(setq kdb-claude-archive-dir %S) (kdb-claude-sync-code-sessions)%s)"
+                                    (expand-file-name kdb-claude-archive-dir)
+                                    (if commit " (kdb-claude--commit-archive)" "")))
              :sentinel
              (lambda (p _)
                (unless (process-live-p p)
@@ -150,8 +157,11 @@ served by a fresh run right after it."
       "Claude Code Session")))
 
 (defun kdb-claude--jsonl-to-org (jsonl-file org-file)
-  "Convert JSONL-FILE to a readable ORG-FILE."
-  (let (messages cwd)
+  "Convert JSONL-FILE to a readable ORG-FILE.
+ORG-FILE gets the JSONL's mtime from before it was read, so turns
+appended while converting make the JSONL newer and are picked up next sync."
+  (let ((mtime (file-attribute-modification-time (file-attributes jsonl-file)))
+        messages cwd)
     (with-temp-buffer
       (insert-file-contents jsonl-file)
       (goto-char (point-min))
@@ -171,19 +181,18 @@ served by a fresh run right after it."
           (error nil))
         (forward-line 1)))
     (setq messages (nreverse messages))
-    (with-temp-file org-file
-      (insert (format "#+TITLE: %s\n" (kdb-claude--session-title messages)))
-      (insert (format "#+DATE: %s\n"
-                      (format-time-string "%Y-%m-%d %H:%M"
-                                          (file-attribute-modification-time
-                                           (file-attributes jsonl-file)))))
-      (insert (format "#+SOURCE: %s\n" jsonl-file))
-      (when cwd (insert (format "#+CWD: %s\n" cwd)))
-      (insert "\n")
-      (dolist (msg messages)
-        (insert (format "* %s\n\n%s\n\n"
-                        (if (equal (car msg) "user") "You" "Claude")
-                        (cdr msg)))))))
+    (let ((coding-system-for-write 'utf-8-unix))  ; no CRLF churn from Windows
+      (with-temp-file org-file
+        (insert (format "#+TITLE: %s\n" (kdb-claude--session-title messages)))
+        (insert (format "#+DATE: %s\n" (format-time-string "%Y-%m-%d %H:%M" mtime)))
+        (insert (format "#+SOURCE: %s\n" jsonl-file))
+        (when cwd (insert (format "#+CWD: %s\n" cwd)))
+        (insert "\n")
+        (dolist (msg messages)
+          (insert (format "* %s\n\n%s\n\n"
+                          (if (equal (car msg) "user") "You" "Claude")
+                          (cdr msg))))))
+    (set-file-times org-file mtime)))
 
 (defun kdb-claude--org-keyword (file keyword)
   "Return the value of #+KEYWORD in the header of org FILE."
@@ -246,18 +255,21 @@ served by a fresh run right after it."
 Directories with Claude sessions come first, most recent first, then
 known projects and the repos of recent files.  Any other input is read
 as a directory name."
-  (let* ((tmp (file-truename temporary-file-directory))
-         (claude (seq-remove (lambda (d) (or (not (file-directory-p (car d)))
-                                             (string-prefix-p tmp (file-truename (car d)))))
+  (let* ((tmps (list (expand-file-name temporary-file-directory)
+                     (file-truename temporary-file-directory)))
+         (claude (seq-remove (lambda (d) (or (seq-some (lambda (tmp) (string-prefix-p tmp (car d))) tmps)
+                                             (not (file-directory-p (car d)))))
                              (kdb-claude--session-dirs)))
          (others (seq-remove
                   #'file-remote-p
                   (append (and (fboundp 'project-known-project-roots)
                                (project-known-project-roots))
-                          (delq nil (mapcar (lambda (f)
-                                              (unless (file-remote-p f)
-                                                (locate-dominating-file (file-name-directory f) ".git")))
-                                            (bound-and-true-p recentf-list))))))
+                          ;; One lookup per directory, not per recent file.
+                          (delq nil (mapcar (lambda (dir)
+                                              (unless (file-remote-p dir)
+                                                (locate-dominating-file dir ".git")))
+                                            (seq-uniq (mapcar #'file-name-directory
+                                                              (bound-and-true-p recentf-list))))))))
          (dirs (seq-uniq (append (mapcar #'car claude)
                                  (mapcar (lambda (d) (file-name-as-directory (expand-file-name d)))
                                          (seq-filter #'file-directory-p others)))))
@@ -470,18 +482,19 @@ Id-like keys are skipped."
              (title (kdb-claude--conversation-title conv))
              (org-file (expand-file-name (format "%s.org" uuid) dest))
              (chat-messages (alist-get 'chat_messages conv)))
-        (with-temp-file org-file
-          (insert (format "#+TITLE: %s\n" title))
-          (insert (format "#+DATE: %s\n" (kdb-claude--format-date (alist-get 'created_at conv))))
-          (insert (format "#+UPDATED: %s\n\n" (kdb-claude--format-date (alist-get 'updated_at conv))))
-          (when chat-messages
-            (dolist (msg chat-messages)
-              (let ((sender (or (alist-get 'sender msg) "unknown"))
-                    (text (kdb-claude--extract-text
-                           (or (alist-get 'content msg) (alist-get 'text msg) ""))))
-                (insert (format "* %s\n\n%s\n\n"
-                                (if (equal sender "human") "You" "Claude")
-                                text))))))
+        (let ((coding-system-for-write 'utf-8-unix))
+          (with-temp-file org-file
+            (insert (format "#+TITLE: %s\n" title))
+            (insert (format "#+DATE: %s\n" (kdb-claude--format-date (alist-get 'created_at conv))))
+            (insert (format "#+UPDATED: %s\n\n" (kdb-claude--format-date (alist-get 'updated_at conv))))
+            (when chat-messages
+              (dolist (msg chat-messages)
+                (let ((sender (or (alist-get 'sender msg) "unknown"))
+                      (text (kdb-claude--extract-text
+                             (or (alist-get 'content msg) (alist-get 'text msg) ""))))
+                  (insert (format "* %s\n\n%s\n\n"
+                                  (if (equal sender "human") "You" "Claude")
+                                  text)))))))
         (cl-incf count)))
     (message "Synced %d Claude Desktop conversations" count)))
 
@@ -491,17 +504,21 @@ Id-like keys are skipped."
 
 ;;;###autoload
 (defun kdb-claude-sync ()
-  "Sync all Claude sessions to the archive in the background, then commit."
+  "Sync and commit the archive in the background, then push it."
   (interactive)
   (message "Claude archive syncing...")
-  (kdb-claude-sync-code-sessions-async #'kdb-claude--commit-archive))
+  (kdb-claude-sync-code-sessions-async #'kdb-claude--push-archive t))
 
 (defun kdb-claude--commit-archive ()
-  "Commit the archive and push it if it has a remote."
+  "Stage and commit everything in the archive (run in the batch Emacs)."
   (let ((default-directory (kdb-claude--ensure-archive)))
     (call-process "git" nil nil nil "add" "-A")
-    (call-process "git" nil nil nil "commit" "-m"
-                  (format "Sync %s" (format-time-string "%Y-%m-%d %H:%M")))
+    (call-process "git" nil nil nil "commit" "-q" "-m"
+                  (format "Sync %s" (format-time-string "%Y-%m-%d %H:%M")))))
+
+(defun kdb-claude--push-archive ()
+  "Push the archive in the background if it has a remote."
+  (let ((default-directory (kdb-claude--ensure-archive)))
     (if (not (kdb-claude--git-remote default-directory))
         (message "Claude archive committed (no remote; add one with C-c l !)")
       (message "Claude archive committed; pushing...")

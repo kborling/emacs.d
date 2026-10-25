@@ -349,11 +349,20 @@
       (when (zerop (call-process-region (point-min) (point-max) prog nil t nil "-a"))
         prog))))
 
-(when-let* ((speller (kdb-spell-checker)))
-  (setq ispell-program-name speller
-        flyspell-issue-message-flag nil)
-  (add-hook 'text-mode-hook #'flyspell-mode)
-  (add-hook 'prog-mode-hook #'flyspell-prog-mode))
+(defun kdb-spell-setup ()
+  "Enable flyspell if a working checker exists, in this and future buffers."
+  (when-let* ((speller (kdb-spell-checker)))
+    (setq ispell-program-name speller
+          flyspell-issue-message-flag nil)
+    (add-hook 'text-mode-hook #'flyspell-mode)
+    (add-hook 'prog-mode-hook #'flyspell-prog-mode)
+    (dolist (buf (buffer-list))
+      (with-current-buffer buf
+        (cond ((derived-mode-p 'prog-mode) (flyspell-prog-mode))
+              ((derived-mode-p 'text-mode) (flyspell-mode 1)))))))
+
+;; Probing runs the checker (~0.3s), so do it once Emacs is idle.
+(run-with-idle-timer 1.5 nil #'kdb-spell-setup)
 
 (autoload 'zap-up-to-char "misc"
   "Kill up to, but not including ARGth occurrence of CHAR." t)
@@ -364,7 +373,7 @@
 
 ;; Fonts ================================================ ;;
 
-(setopt line-spacing 0.20)
+(setq-default line-spacing 0.20)        ; setopt would load cus-edit (~0.1s)
 
 (defun kdb-apply-fonts ()
   "Set the default, fixed and variable-pitch fonts.
@@ -584,13 +593,19 @@ be found until the first emacsclient frame opens."
                            (window-height . 0.3))))))))
 
 (defun kdb-eat-new ()
-  "Create a new terminal using eat (GUI) or term (terminal).
+  "Create a new terminal: eat (GUI), term (terminal), or pwsh on Windows.
 Names buffer after the directory for easier identification."
   (interactive)
-  (if (and (display-graphic-p) (fboundp 'eat))
-      (eat nil (generate-new-buffer-name
-                (format "*eat: %s*" (abbreviate-file-name default-directory))))
-    (term (or (getenv "SHELL") (getenv "COMSPEC") "/bin/bash"))))
+  (let ((dir (abbreviate-file-name default-directory)))
+    (cond ((eq system-type 'windows-nt)
+           ;; eat launches everything through /usr/bin/env sh
+           (let ((explicit-shell-file-name (or (executable-find "pwsh")
+                                               (executable-find "powershell")
+                                               "cmd.exe")))
+             (shell (generate-new-buffer-name (format "*shell: %s*" dir)))))
+          ((and (display-graphic-p) (fboundp 'eat))
+           (eat nil (generate-new-buffer-name (format "*eat: %s*" dir))))
+          (t (term (or (getenv "SHELL") "/bin/bash"))))))
 
 
 (defun toggle-theme ()
@@ -1179,6 +1194,9 @@ Falls back to DIRS or project roots."
 
 (use-package eglot
   :ensure nil
+  :hook ((typescript-ts-mode tsx-ts-mode js-ts-mode css-ts-mode html-ts-mode
+          c-ts-mode c++-ts-mode rust-ts-mode zig-ts-mode csharp-mode csharp-ts-mode)
+         . eglot-ensure)
   :bind (:map eglot-mode-map
               ("C-c c r" . eglot-rename)
               ("C-c c f" . eglot-format-buffer)
@@ -1234,18 +1252,7 @@ Falls back to DIRS or project roots."
                           #'eldoc-documentation-compose)))
 
   ;; Remove inlay hints
-  (add-hook 'eglot-managed-mode-hook (lambda () (eglot-inlay-hints-mode -1)))
-
-  (dolist (mode '(html-ts-mode
-                  typescript-ts-mode
-                  css-ts-mode
-                  js-ts-mode
-                  c-ts-mode
-                  c++-ts-mode
-                  rust-ts-mode
-                  zig-ts-mode
-                  csharp-mode))
-    (add-hook (intern (concat (symbol-name mode) "-hook")) #'eglot-ensure)))
+  (add-hook 'eglot-managed-mode-hook (lambda () (eglot-inlay-hints-mode -1))))
 
 ;; NOTE: Be sure to grab the latest release 'https://github.com/blahgeek/emacs-lsp-booster/releases'
 ;; and place in PATH
@@ -1369,6 +1376,11 @@ Falls back to DIRS or project roots."
   "Load init-vc configuration once."
   (unless (featurep 'init-vc)
     (require 'init-vc)))
+
+;; Only Git: otherwise every file visit probes 8 VC backends (slow on Windows).
+(setq vc-handled-backends '(Git))
+;; Shortly after startup, so diff-hl and the rest of init-vc are active.
+(run-with-idle-timer 1 nil #'kdb-load-init-vc)
 
 (autoload 'kdb-vc-transient "init-vc" "VC transient menu" t)
 (global-set-key (kbd "C-c g") 'kdb-vc-transient)
@@ -1505,14 +1517,25 @@ Falls back to DIRS or project roots."
 
 ;; Tree-sitter (Built-in Emacs 31) ======================== ;;
 
-;; Automatically use tree-sitter modes when grammars are available
-(setq treesit-enabled-modes t)              ; Remap all supported modes
+;; Use tree-sitter modes for the languages whose grammar is installed.
+;; `setq' skips the variable's :set, which is what adds the remaps; and t
+;; would remap languages without a grammar too, which then ask to install
+;; one on every visit.  Calling the setter directly avoids loading cus-edit.
+(when (and (require 'treesit nil t) (treesit-available-p))
+  (let ((langs '((csharp . c-sharp) (js . javascript) (c++ . cpp) (c-or-c++ . cpp)
+                 (mhtml . html) (go-mod . gomod) (go-work . gowork))))
+    (funcall (get 'treesit-enabled-modes 'custom-set) 'treesit-enabled-modes
+             (seq-filter (lambda (mode)
+                           (let ((name (intern (string-remove-suffix "-ts-mode" (symbol-name mode)))))
+                             (treesit-language-available-p (alist-get name langs name))))
+                         (seq-uniq (mapcar #'cdr treesit-major-mode-remap-alist))))))
 
 ;; Grammar sources for treesit-install-language-grammar
 (with-eval-after-load 'treesit
   (dolist (source '((typescript "https://github.com/tree-sitter/tree-sitter-typescript" "master" "typescript/src")
                     (tsx "https://github.com/tree-sitter/tree-sitter-typescript" "master" "tsx/src")
                     (javascript "https://github.com/tree-sitter/tree-sitter-javascript")
+                    (c-sharp "https://github.com/tree-sitter/tree-sitter-c-sharp")
                     (python "https://github.com/tree-sitter/tree-sitter-python")
                     (json "https://github.com/tree-sitter/tree-sitter-json")
                     (css "https://github.com/tree-sitter/tree-sitter-css")
@@ -1586,14 +1609,19 @@ Falls back to DIRS or project roots."
   :bind (:map mhtml-mode-map
               ("C-c C-d" . nil)))
 
+(with-eval-after-load 'mhtml-ts-mode
+  (define-key mhtml-ts-mode-map (kbd "C-c C-d") nil))
+
 
 ;; Memmet Mode ============================================= ;;
 
 (use-package memmet-mode
   :vc (:url "https://github.com/kborling/memmet-mode" :rev :newest)
-  :bind (:map mhtml-mode-map
-              ("C-<tab>" . memmet-expand))
-  :hook (mhtml-mode . memmet-mode))
+  :bind (:map mhtml-mode-map ("C-<tab>" . memmet-expand))
+  :hook ((mhtml-mode mhtml-ts-mode) . memmet-mode)
+  :config
+  (with-eval-after-load 'mhtml-ts-mode
+    (keymap-set mhtml-ts-mode-map "C-<tab>" #'memmet-expand)))
 
 
 ;; XML Mode ================================================ ;;
@@ -1664,6 +1692,11 @@ Falls back to DIRS or project roots."
   :commands eat
   ;; Terminal rows are sized ignoring `line-spacing'; extra spacing overflows the window.
   :hook (eat-mode . (lambda () (setq-local line-spacing nil)))
+  :init
+  ;; Eshell integration (not on Windows: eat runs commands via /usr/bin/env sh)
+  (unless (eq system-type 'windows-nt)
+    (add-hook 'eshell-load-hook #'eat-eshell-mode)
+    (add-hook 'eshell-load-hook #'eat-eshell-visual-command-mode))
   :config
   ;; Performance settings
   (setq eat-kill-buffer-on-exit t
@@ -1671,18 +1704,7 @@ Falls back to DIRS or project roots."
         eat-enable-directory-tracking t
         eat-enable-shell-command-history t)
 
-  ;; Windows-specific settings
-  (when (eq system-type 'windows-nt)
-    (setq eat-shell (or (executable-find "pwsh")
-                        (executable-find "powershell")
-                        (executable-find "bash")
-                        "cmd.exe")))
-
   (setq eat-term-name "xterm-256color")
-
-  ;; Eshell integration
-  (add-hook 'eshell-load-hook #'eat-eshell-mode)
-  (add-hook 'eshell-load-hook #'eat-eshell-visual-command-mode)
 
   (add-hook 'eat-mode-hook
             (lambda ()

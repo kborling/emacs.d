@@ -128,7 +128,11 @@ desktop wallpaper."
   (setq w32-lwindow-modifier 'super
         w32-rwindow-modifier 'super
         w32-pass-lwindow-to-system nil
-        w32-pass-rwindow-to-system nil))
+        w32-pass-rwindow-to-system nil)
+  ;; Win+T is a system shortcut; claim it so it reaches Emacs at all.
+  (when (fboundp 'w32-register-hot-key)
+    (w32-register-hot-key [s-t])
+    (w32-register-hot-key [s-T])))
 
 ;; super-t: avoids the C-c t (eat) prefix and matches the old EXWM binding.
 (global-set-key (kbd "s-t") #'kdb/theme-cycle)

@@ -12,7 +12,6 @@
   :ensure nil
   :config
   (setq vc-follow-symlinks t
-        vc-handled-backends '(Git)
         vc-git-diff-switches '("--histogram" "--color=never")
         vc-git-print-log-follow t
         vc-git-log-edit-summary-target-len 50
@@ -248,11 +247,10 @@
     "Show diff for next (newer) commit."
     (interactive)
     (when (bound-and-true-p kdb-current-commit-hash)
-      (let ((next-hash (string-trim
-                        (shell-command-to-string
-                         (format "git log --reverse --ancestry-path %s..HEAD --format=%%h | head -1"
-                                 (shell-quote-argument kdb-current-commit-hash))))))
-        (if (and next-hash (not (string-empty-p next-hash)))
+      (let ((next-hash (car (ignore-errors
+                              (process-lines "git" "log" "--reverse" "--ancestry-path" "--format=%h"
+                                             (concat kdb-current-commit-hash "..HEAD"))))))
+        (if next-hash
             (kdb-vc-commit-show-diff-in-buffer next-hash)
           (message "No next commit")))))
   
@@ -260,11 +258,10 @@
     "Show diff for previous commit."
     (interactive)
     (when (bound-and-true-p kdb-current-commit-hash)
-      (let ((prev-hash (string-trim
-                        (shell-command-to-string
-                         (format "git rev-parse %s^"
-                                 (shell-quote-argument kdb-current-commit-hash))))))
-        (if (and prev-hash (not (string-empty-p prev-hash)))
+      (let ((prev-hash (car (ignore-errors
+                              (process-lines "git" "rev-parse" "--short"
+                                             (concat kdb-current-commit-hash "^"))))))
+        (if prev-hash
             (kdb-vc-commit-show-diff-in-buffer prev-hash)
           (message "No previous commit")))))
   
@@ -289,10 +286,6 @@
     "Minor mode for commit diff navigation."
     :lighter " CommitDiff"
     :keymap kdb-commit-diff-mode-map))
-
-(use-package ssh-agency
-  :if (eq system-type 'windows-nt)
-  :vc (:url "https://github.com/magit/ssh-agency" :rev :newest))
 
 
 ;; VC-msg - Show commit messages for current line
@@ -489,15 +482,21 @@ vc check-in).  \\`C-c C-e' in log-edit toggles amend on any commit."
               vc-git-log-edit-toggle-amend))
   (autoload fn "vc-git" nil t))
 
+(declare-function w32-shell-execute "w32fns.c")
+
 (defun kdb-lazygit ()
   "Open lazygit in an eat terminal at the repository root.
 For history surgery vc doesn't cover: interactive rebase, cherry-pick."
   (interactive)
-  (unless (executable-find "lazygit")
-    (user-error "lazygit is not installed (sudo xbps-install lazygit)"))
-  (require 'eat)
-  (let ((default-directory (or (vc-root-dir) default-directory)))
-    (eat "lazygit" t)))
+  (let ((lazygit (or (executable-find "lazygit")
+                     (user-error "lazygit is not installed")))
+        (root (expand-file-name (or (vc-root-dir) default-directory))))
+    (if (eq system-type 'windows-nt)
+        ;; eat can't run on Windows, and lazygit needs a real console
+        (w32-shell-execute "open" lazygit (format "-p \"%s\"" root))
+      (require 'eat)
+      (let ((default-directory root))
+        (eat "lazygit" t)))))
 
 (defun kdb-vc-git-list-tags ()
   "List all tags in the repository."
