@@ -1847,6 +1847,13 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (global-set-key (kbd "C-c ;") #'agent-shell-hq-peek)
 (global-set-key (kbd "C-c '") #'kdb-claude-answer)
 
+;; Session transcripts stay out of recent files (and so out of var/recentf).
+(with-eval-after-load 'recentf
+  (add-to-list 'recentf-exclude
+               (lambda (f)
+                 (file-in-directory-p
+                  f (or (bound-and-true-p kdb-claude-archive-dir) "~/.claude-archive")))))
+
 ;; Keep the archive current so search/ask/resume see recent sessions.
 (run-with-idle-timer 300 t (lambda ()
                              (require 'init-claude)

@@ -411,7 +411,7 @@ file tools.  BUF defaults to `kdb-claude-print--buffer'."
 With a prefix arg, pick the project first."
   (interactive
    (let ((dir (kdb-claude-print--start-dir current-prefix-arg)))
-     (list dir (read-string (format "Claude [%s]: " (abbreviate-file-name dir))))))
+     (list dir (kdb-claude--read (format "Claude [%s]: " (abbreviate-file-name dir))))))
   (kdb-claude-print--start dir prompt))
 
 ;;;###autoload
@@ -439,20 +439,20 @@ prefix arg PICK, or outside any project, pick the project first."
                             (buffer-substring-no-properties
                              (or (car bounds) (point-min)) (or (cdr bounds) (point-max))))))
          (dir (kdb-claude-print--start-dir (or pick (not (project-current)))))
-         (instr (read-string (format "Claude [%s] (about %s): "
+         (instr (kdb-claude--read (format "Claude [%s] (about %s): "
                                      (abbreviate-file-name dir) what))))
     (kdb-claude-print--start dir (format "%s\n\n%s" instr context))))
 
 ;;;###autoload
 (defun kdb-claude-print-continue (prompt)
   "Send a follow-up PROMPT to the current session."
-  (interactive "sClaude (follow-up): ")
+  (interactive (list (kdb-claude--read "Claude (follow-up): ")))
   (kdb-claude-print--run prompt t))
 
 ;;;###autoload
 (defun kdb-claude-print-new (prompt)
   "Reset the current buffer's session and start over with PROMPT."
-  (interactive "sClaude (new session): ")
+  (interactive (list (kdb-claude--read "Claude (new session): ")))
   (with-current-buffer (kdb-claude-print--buffer)
     (kdb-claude-print--kill)
     (setq kdb-claude-print--session-id nil
@@ -465,7 +465,7 @@ prefix arg PICK, or outside any project, pick the project first."
   "Send the region START..END to Claude, prefixed with an instruction."
   (interactive "r")
   (let* ((code (buffer-substring-no-properties start end))
-         (instr (read-string "Claude (about region): "))
+         (instr (kdb-claude--read "Claude (about region): "))
          (prompt (format "%s\n\n```\n%s\n```" instr code)))
     (kdb-claude-print--run prompt t)))
 

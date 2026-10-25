@@ -19,6 +19,15 @@
   :type 'directory
   :group 'claude)
 
+(defvar kdb-claude-prompt-history nil
+  "Minibuffer history for what you type to Claude; never saved to disk.")
+(with-eval-after-load 'savehist
+  (add-to-list 'savehist-ignored-variables 'kdb-claude-prompt-history))
+
+(defun kdb-claude--read (prompt)
+  "Read a string with PROMPT, keeping it out of saved minibuffer history."
+  (read-string prompt nil 'kdb-claude-prompt-history))
+
 (defcustom kdb-claude-export-directory nil
   "Path to extracted Claude Desktop data export directory."
   :type '(choice (const nil) directory)
@@ -288,7 +297,7 @@ as a directory name."
 (defun kdb-claude-history-filter (regexp)
   "Narrow the history to sessions whose project or title match REGEXP.
 Empty input shows everything."
-  (interactive (list (read-string "Filter (project/title, empty = all): ")))
+  (interactive (list (kdb-claude--read "Filter (project/title, empty = all): ")))
   (setq kdb-claude--history-filter (unless (string-empty-p regexp) regexp))
   (tabulated-list-print))
 
@@ -441,7 +450,7 @@ Id-like keys are skipped."
 ;;;###autoload
 (defun kdb-claude-search (query)
   "Search all Claude archives for QUERY."
-  (interactive "sSearch Claude sessions: ")
+  (interactive (list (kdb-claude--read "Search Claude sessions: ")))
   (kdb-claude-sync-code-sessions)
   (let ((dir (kdb-claude--ensure-archive)))
     (if (fboundp 'deadgrep)
@@ -627,7 +636,7 @@ and the emacs-skills plugin.  Installs run in a compilation buffer."
 ;;;###autoload
 (defun kdb-claude-ask-archive (question)
   "Ask Claude QUESTION about past sessions; it searches the archive to answer."
-  (interactive "sAsk past sessions: ")
+  (interactive (list (kdb-claude--read "Ask past sessions: ")))
   (require 'init-claude-workflow)
   (kdb-claude-sync-code-sessions)
   (kdb-claude--start-with
@@ -653,7 +662,7 @@ new session in a project you pick that reads FILE first and carries on."
     (if (and source cwd (file-directory-p cwd))
         (kdb-claude--start-with (file-name-as-directory cwd) nil (file-name-base source))
       (let* ((dir (kdb-claude-read-directory "Continue in project: "))
-             (ask (read-string (format "Continue \"%s\" with (RET = recap): "
+             (ask (kdb-claude--read (format "Continue \"%s\" with (RET = recap): "
                                        (kdb-claude--org-title file)))))
         (kdb-claude--start-with
          dir
