@@ -313,7 +313,10 @@
   :hook (dired-mode . diff-hl-dired-mode)
   :config
   (global-diff-hl-mode 1)
-  (diff-hl-flydiff-mode 1)      ; update indicators without waiting for save
+  (if (eq system-type 'windows-nt)
+      ;; flydiff runs git on every idle pause; process startup is slow there
+      (setq diff-hl-update-async t)
+    (diff-hl-flydiff-mode 1))   ; update indicators without waiting for save
   ;; Hunk-level workflow on the vc prefix:
   ;;   C-x v S  stage hunk at point   C-x v K  discard hunk at point
   ;;   C-x v *  peek hunk popup       C-x v [ / ]  previous/next hunk

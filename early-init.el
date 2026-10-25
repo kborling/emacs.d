@@ -21,11 +21,23 @@
 
 (setq large-file-warning-threshold 200000000)
 
-;; Windows pipe optimizations
-(when (boundp 'w32-pipe-read-delay)
-  (setq w32-pipe-read-delay 0))
-(when (boundp 'w32-pipe-buffer-size)
-  (setq w32-pipe-buffer-size (* 64 1024)))
+;; Windows: file and process I/O is the bottleneck there
+(when (eq system-type 'windows-nt)
+  (setq w32-pipe-read-delay 0
+        w32-pipe-buffer-size (* 64 1024)
+        ;; Skip the slow security-descriptor lookup on every file stat
+        w32-get-true-file-attributes nil
+        ;; Don't compact font caches on GC; costly with many fonts
+        inhibit-compacting-font-caches t
+        ;; One pre-built autoloads file instead of one per package
+        package-quickstart t)
+  ;; Every `load' during startup matches against these; restore after
+  (let ((handlers file-name-handler-alist))
+    (setq file-name-handler-alist nil)
+    (add-hook 'emacs-startup-hook
+              (lambda ()
+                (setq file-name-handler-alist
+                      (delete-dups (append file-name-handler-alist handlers)))))))
 
 ;; UI chrome — disable before frame draws to avoid flicker
 ;; Keep macOS menu bar (integrates with system top bar)

@@ -12,7 +12,7 @@
 
 (require 'json)
 (require 'cl-lib)
-(require 'org)
+(declare-function org-escape-code-in-string "org-src")
 
 (defcustom kdb-claude-archive-dir "~/.claude-archive"
   "Path to the private git repo for Claude session archives."
@@ -21,6 +21,7 @@
 
 (defvar kdb-claude-prompt-history nil
   "Minibuffer history for what you type to Claude; never saved to disk.")
+(defvar savehist-ignored-variables)
 (with-eval-after-load 'savehist
   (add-to-list 'savehist-ignored-variables 'kdb-claude-prompt-history))
 
@@ -98,6 +99,43 @@ reconvert every session."
             (cl-incf count)))))
     (message "Synced %d Claude Code sessions" count)))
 
+(defvar kdb-claude--sync-process nil
+  "The background Emacs converting sessions, while one runs.")
+(defvar kdb-claude--sync-next nil
+  "Callbacks for the sync to run after the current one; non-nil = rerun.")
+
+(defun kdb-claude-sync-code-sessions-async (&optional callback)
+  "Sync Claude Code sessions in a background Emacs, then call CALLBACK.
+Conversion reads every changed JSONL, which can be GBs, so it never runs
+in this Emacs.  One sync at a time: a request made while one runs is
+served by a fresh run right after it."
+  (if (process-live-p kdb-claude--sync-process)
+      (push callback kdb-claude--sync-next)
+    (let ((callbacks (cons callback kdb-claude--sync-next)))
+      (setq kdb-claude--sync-next nil)
+      (kdb-claude--ensure-archive)
+      (setq kdb-claude--sync-process
+            (make-process
+             :name "claude-archive-sync" :buffer " *claude-archive-sync*" :noquery t
+             :command
+             (list (let ((emacs (expand-file-name invocation-name invocation-directory)))
+                     (or (executable-find emacs) emacs)) ; adds .exe on Windows
+                   "--batch" "-Q" "-L" (file-name-directory (locate-library "init-claude"))
+                   "-l" "init-claude"
+                   "--eval" (format "(progn (set-language-environment \"UTF-8\") \
+(setq kdb-claude-archive-dir %S) (kdb-claude-sync-code-sessions))"
+                                    (expand-file-name kdb-claude-archive-dir)))
+             :sentinel
+             (lambda (p _)
+               (unless (process-live-p p)
+                 (setq kdb-claude--sync-process nil)
+                 (unless (zerop (process-exit-status p))
+                   (message "Claude archive sync failed; see buffer \" *claude-archive-sync*\""))
+                 (dolist (cb (delq nil callbacks))
+                   (with-demoted-errors "Claude archive sync callback: %S" (funcall cb)))
+                 (when kdb-claude--sync-next
+                   (kdb-claude-sync-code-sessions-async)))))))))
+
 (defun kdb-claude--session-title (messages)
   "Return the first line of the first real user prompt in MESSAGES."
   (let ((first (seq-find (lambda (m)
@@ -156,8 +194,20 @@ reconvert every session."
   "Return the title of archived org FILE, or its base name."
   (or (kdb-claude--org-keyword file "TITLE") (file-name-base file)))
 
+(defvar kdb-claude--header-cache (make-hash-table :test #'equal)
+  "FILE -> (MTIME . HEADER), so redraws only reread changed files.")
+
 (defun kdb-claude--org-header (file)
   "Return an alist of the #+KEYWORD values in the header of org FILE."
+  (let ((mtime (file-attribute-modification-time (file-attributes file)))
+        (hit (gethash file kdb-claude--header-cache)))
+    (if (equal (car hit) mtime)
+        (cdr hit)
+      (cdr (puthash file (cons mtime (kdb-claude--read-org-header file))
+                    kdb-claude--header-cache)))))
+
+(defun kdb-claude--read-org-header (file)
+  "Read the #+KEYWORD values in the header of org FILE."
   (with-temp-buffer
     (insert-file-contents file nil 0 2000)
     (let (kw)
@@ -180,11 +230,12 @@ reconvert every session."
   "Return (DIR . TIME) for directories with Claude Code sessions, newest first."
   (let (dirs)
     (dolist (proj (ignore-errors (directory-files (kdb-claude--projects-dir) t "\\`[^.]")))
-      (when-let* ((newest (car (sort (directory-files proj t "\\.jsonl\\'")
-                                     #'file-newer-than-file-p)))
-                  (cwd (ignore-errors (kdb-claude--jsonl-cwd newest))))
+      (when-let* ((newest (car (sort (directory-files-and-attributes proj t "\\.jsonl\\'" t)
+                                     (lambda (a b) (time-less-p (file-attribute-modification-time (cdr b))
+                                                                (file-attribute-modification-time (cdr a)))))))
+                  (cwd (ignore-errors (kdb-claude--jsonl-cwd (car newest)))))
         (push (cons (file-name-as-directory (expand-file-name cwd))
-                    (file-attribute-modification-time (file-attributes newest)))
+                    (file-attribute-modification-time (cdr newest)))
               dirs)))
     (sort dirs (lambda (a b) (time-less-p (cdr b) (cdr a))))))
 
@@ -279,20 +330,29 @@ as a directory name."
   (setq tabulated-list-format [("" 1 t) ("Last active" 16 t) ("Project" 20 t) ("Title" 0 t)]
         tabulated-list-sort-key '("Last active" . t)
         tabulated-list-entries #'kdb-claude--history-entries)
-  (add-hook 'tabulated-list-revert-hook #'kdb-claude-sync-code-sessions nil t)
+  (add-hook 'tabulated-list-revert-hook #'kdb-claude--history-refresh nil t)
   (setq-local header-line-format
               (substitute-command-keys
                "\\<kdb-claude-history-mode-map>\\[kdb-claude-history-open] open  \\[kdb-claude-history-resume] resume  \\[kdb-claude-history-filter] filter  \\[kdb-claude-search] search text  \\[kdb-claude-ask-archive] ask  \\[revert-buffer] refresh")))
 
 ;;;###autoload
 (defun kdb-claude-history ()
-  "List every past Claude session — Claude Code and imported Desktop chats."
+  "List every past Claude session — Claude Code and imported Desktop chats.
+Shows the archive as it is, then redraws once a background sync is done."
   (interactive)
-  (kdb-claude-sync-code-sessions)
   (with-current-buffer (get-buffer-create "*Claude History*")
     (kdb-claude-history-mode)
     (tabulated-list-print)
+    (kdb-claude--history-refresh)
     (pop-to-buffer-same-window (current-buffer))))
+
+(defun kdb-claude--history-refresh ()
+  "Sync in the background, then redraw this history buffer."
+  (let ((buf (current-buffer)))
+    (kdb-claude-sync-code-sessions-async
+     (lambda ()
+       (when (buffer-live-p buf)
+         (with-current-buffer buf (tabulated-list-print t)))))))
 
 (defun kdb-claude-history-filter (regexp)
   "Narrow the history to sessions whose project or title match REGEXP.
@@ -387,6 +447,7 @@ Id-like keys are skipped."
            (let ((detail (string-join (kdb-claude--strings (alist-get 'input block)) "\n")))
              (concat (format "[Tool: %s]" (or (alist-get 'name block) "unknown"))
                      (unless (string-empty-p detail)
+                       (require 'org-src)
                        (format "\n#+begin_example\n%s\n#+end_example"
                                (org-escape-code-in-string detail))))))
           (t ""))))
@@ -428,9 +489,13 @@ Id-like keys are skipped."
 
 ;;;###autoload
 (defun kdb-claude-sync ()
-  "Sync all Claude sessions to the archive and commit."
+  "Sync all Claude sessions to the archive in the background, then commit."
   (interactive)
-  (kdb-claude-sync-code-sessions)
+  (message "Claude archive syncing...")
+  (kdb-claude-sync-code-sessions-async #'kdb-claude--commit-archive))
+
+(defun kdb-claude--commit-archive ()
+  "Commit the archive and push it if it has a remote."
   (let ((default-directory (kdb-claude--ensure-archive)))
     (call-process "git" nil nil nil "add" "-A")
     (call-process "git" nil nil nil "commit" "-m"
@@ -451,7 +516,7 @@ Id-like keys are skipped."
 (defun kdb-claude-search (query)
   "Search all Claude archives for QUERY."
   (interactive (list (kdb-claude--read "Search Claude sessions: ")))
-  (kdb-claude-sync-code-sessions)
+  (kdb-claude-sync-code-sessions-async)
   (let ((dir (kdb-claude--ensure-archive)))
     (if (fboundp 'deadgrep)
         (deadgrep query dir)
@@ -638,7 +703,7 @@ and the emacs-skills plugin.  Installs run in a compilation buffer."
   "Ask Claude QUESTION about past sessions; it searches the archive to answer."
   (interactive (list (kdb-claude--read "Ask past sessions: ")))
   (require 'init-claude-workflow)
-  (kdb-claude-sync-code-sessions)
+  (kdb-claude-sync-code-sessions-async)
   (kdb-claude--start-with
    (kdb-claude--ensure-archive)
    (concat "This directory archives past Claude sessions as org files "

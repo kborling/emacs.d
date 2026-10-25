@@ -61,7 +61,15 @@
         ("nongnu" . 1)))
 
 (require 'package)
-(package-initialize)
+;; Packages are already activated after early-init; doing it again here
+;; (and parsing the archive lists) doubled the startup cost.  The archive
+;; lists are only read when something actually needs installing.
+(unless (bound-and-true-p package--activated)
+  (package-activate-all))
+;; Installs rebuild the quickstart file (early-init, Windows); build it the
+;; first time too.
+(when (and package-quickstart (not (file-exists-p package-quickstart-file)))
+  (run-with-idle-timer 2 nil #'package-quickstart-refresh))
 ;; A cached package list goes stale (MELPA drops old versions, deps move
 ;; on), so refresh it before the first install of the session.  Both entry
 ;; points: :vc dependencies go through `package-vc-install-dependencies',
@@ -72,8 +80,6 @@
   (unless kdb--package-list-refreshed
     (setq kdb--package-list-refreshed t)
     (package-refresh-contents)))
-(unless package-archive-contents
-  (kdb--refresh-package-list-once))
 (dolist (fn '(package-install package-vc-install-dependencies))
   (advice-add fn :before #'kdb--refresh-package-list-once))
 
@@ -1857,12 +1863,11 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
                   f (or (bound-and-true-p kdb-claude-archive-dir) "~/.claude-archive")))))
 
 ;; Keep the archive current so search/ask/resume see recent sessions.
+;; The conversion runs in a background Emacs, so idle time never freezes.
 (run-with-idle-timer 300 t (lambda ()
                              (require 'init-claude)
                              (when (kdb-claude--archive-repo-p)
-                               (let ((inhibit-message t))
-                                 (with-demoted-errors "Claude archive sync: %S"
-                                   (kdb-claude-sync-code-sessions))))))
+                               (kdb-claude-sync-code-sessions-async))))
 
 
 ;; Local Variables:
