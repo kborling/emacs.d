@@ -17,6 +17,7 @@
 (declare-function agent-shell-start "agent-shell")
 (declare-function agent-shell-subscribe-to "agent-shell")
 (declare-function agent-shell-unsubscribe "agent-shell")
+(declare-function agent-review "agent-review")
 (declare-function agent-shell-attention-jump "agent-shell-attention")
 (declare-function agent-shell-interrupt "agent-shell")
 (declare-function notifications-notify "notifications")
@@ -175,6 +176,14 @@ outside any project, pick the directory."
   (kdb-claude--mark-org-entry)
   (agent-shell-send-dwim '(16)))
 
+;;;###autoload
+(defun kdb-claude-review ()
+  "Have Claude review this repo's uncommitted changes (agent-review).
+In the results, mark findings with m and send them to a session with S."
+  (interactive)
+  (require 'agent-shell)
+  (agent-review (agent-shell-anthropic-make-claude-code-config)))
+
 ;;; ============================================================
 ;;; Worktrees
 ;;; ============================================================
@@ -238,7 +247,8 @@ opens its worktree; a new name creates the branch in a new worktree."
     ("N" "New on project + branch" kdb-claude-start)]
    ["Send"
     ("s" "Region/note/files → session" kdb-claude-send)
-    ("f" "File → session" agent-shell-send-file-to)]
+    ("f" "File → session" agent-shell-send-file-to)
+    ("v" "Review my changes" kdb-claude-review)]
    ["Sessions"
     ("'" "Answer / next waiting" kdb-claude-answer)
     ("d" "Dashboard" agent-shell-attention-dashboard)

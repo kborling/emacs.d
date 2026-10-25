@@ -1706,13 +1706,25 @@ Falls back to DIRS or project roots."
         tab-bar-close-button-show nil
         tab-bar-new-button-show nil
         tab-bar-tab-hints t            ; Show tab numbers in tab names
-        tab-bar-format '(tab-bar-format-tabs tab-bar-separator))
-  :bind (("C-c TAB n" . tab-bar-new-tab)
-         ("C-c TAB r" . tab-bar-rename-tab)
-         ("C-c TAB k" . tab-bar-close-tab)
-         ("C-c TAB l" . tab-bar-switch-to-tab)
-         ("C-c TAB f" . tab-bar-switch-to-next-tab)
-         ("C-c TAB b" . tab-bar-switch-to-prev-tab)))
+        tab-bar-format '(tab-bar-format-tabs tab-bar-separator)))
+
+;; One workspace (tab) per project, each with its own windows and buffer
+;; list, so C-x b only offers this project's buffers.  Nothing is written
+;; into projects: no todo file, no session files.
+(use-package tabspaces
+  :hook (after-init . tabspaces-mode)
+  :custom
+  (tabspaces-keymap-prefix "C-c TAB")
+  (tabspaces-use-filtered-buffers-as-default (not (eq window-system 'x))) ; EXWM apps stay global
+  (tabspaces-default-tab "Default")
+  (tabspaces-remove-to-default t)
+  (tabspaces-include-buffers '("*scratch*" "*Messages*"))
+  (tabspaces-initialize-project-with-todo nil)
+  (tabspaces-initialize-project-with-vc nil)
+  (tabspaces-session nil)
+  :bind (:map tabspaces-command-map
+              ("f" . tab-bar-switch-to-next-tab)
+              ("p" . tab-bar-switch-to-prev-tab)))
 
 
 ;; Evil Mode (Vim Emulation) =============================== ;;
@@ -1791,7 +1803,12 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
         agent-shell-dot-subdir-function #'kdb-claude-agent-shell-subdir
         shell-maker-root-path (kdb-claude-agent-shell-subdir "")
         ;; Queue permission requests so C-c ' can answer them from anywhere.
-        agent-shell-permission-responder-function #'kdb-claude--capture-permission)
+        agent-shell-permission-responder-function #'kdb-claude--capture-permission
+        ;; The adapter logs to stderr unless given a log dir, and acp.el
+        ;; reports any stderr as an error, which aborts agent-review.
+        agent-shell-anthropic-claude-environment
+        (agent-shell-make-environment-variables
+         "CLAUDE_AGENT_LOGS" (expand-file-name "claude-agent-logs" temporary-file-directory)))
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions))
 
 ;; Peek: sessions grouped by project with live status; RET switches.
@@ -1799,6 +1816,11 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (use-package agent-shell-hq
   :vc (:url "https://github.com/SreenivasVRao/agent-shell-hq" :rev :newest)
   :commands (agent-shell-hq-peek agent-shell-hq-label))
+
+;; Second-opinion review of uncommitted changes; send findings back with S.
+(use-package agent-review
+  :vc (:url "https://github.com/nineluj/agent-review" :rev :newest)
+  :commands agent-review)
 
 (use-package agent-shell-attention
   :vc (:url "https://github.com/ultronozm/agent-shell-attention.el" :rev :newest)
@@ -1812,7 +1834,7 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
-                 kdb-claude-send kdb-claude-start kdb-claude-answer)
+                 kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review)
                 ("init-claude-print" kdb-claude-print)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
                  kdb-claude-search kdb-claude-import-export

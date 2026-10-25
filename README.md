@@ -55,7 +55,7 @@ lisp/
 Sessions run in [agent-shell](https://github.com/xenodium/agent-shell) over ACP, using the `claude` CLI login (works with a Max subscription, Linux and native Windows). Requires node and `npm install -g @agentclientprotocol/claude-agent-acp`.
 
 - **Start** — new session at the project root, pre-filled with the region, Dired files or org entry at point; or pick any project (recent Claude directories first) and branch, which opens in its own git worktree
-- **Send** — region, note, files or a file to a session you pick
+- **Send** — region, note, files or a file to a session you pick; `C-c l v` has Claude review your uncommitted changes ([agent-review](https://github.com/nineluj/agent-review)): `RET` jumps to an issue, `m` marks, `S` sends marked findings to a session to fix
 - **Sessions** — `C-c '` answers the oldest permission request from any session right in the minibuffer (`y` allow, `!` always, `n` reject, `g` go there, `q` later), then the next; with none pending it jumps to the next session that finished. [agent-shell-attention](https://github.com/ultronozm/agent-shell-attention.el) shows `AS:n` in the mode line, echoes when a session needs you, and sends a desktop notification only while Emacs isn't focused; `C-c ;` opens [agent-shell-hq](https://github.com/SreenivasVRao/agent-shell-hq)'s peek: every session grouped by project with live status, previewed as you move (`n`/`p`, `RET` switch, `s` new); `C-c l r` has Claude name the current session
 - **History** — every past session (agent-shell, CLI, Desktop's Code tab, imported Desktop chats) in one list: filter, full-text search, ask Claude about them, resume
 
@@ -142,7 +142,7 @@ Every session can read the archive (`~/.claude-archive`, via `permissions.additi
 |---|---|---|---|---|---|---|---|
 | `n` | New here (`C-u` pick project) | `s` | Region/note/files → session | `'` | Answer / next waiting | `h` | All sessions |
 | `N` | New on project + branch | `f` | File → session | `d` | Dashboard | `/` | Search text |
-| | | | | `l` | Peek / switch (by project) | `A` | Ask past sessions |
+| | | `v` | Review my changes | `l` | Peek / switch (by project) | `A` | Ask past sessions |
 | | | | | `r` | Name this session | `S` | Sync & commit |
 | | | | | | | `i` | Import Desktop export |
 
@@ -205,15 +205,21 @@ Capture templates: `t` todo, `n` note, `j` journal, `w` work, `l` link, `c` arti
 | `C-c n t` | Dotnet test |
 | `C-c n !` | Dotnet command |
 
-### Tab Bar (`C-c TAB`)
+### Workspaces (`C-c TAB`)
+
+[tabspaces](https://github.com/mclear-tools/tabspaces): one tab per project, each with its own windows and buffer list. `C-x C-b` (switch buffer) only offers the current workspace's buffers; `C-x b` (ibuffer) still shows everything. Nothing is written into projects.
 
 | Key | Action |
 |-----|--------|
-| `C-c TAB n` | New tab |
-| `C-c TAB r` | Rename tab |
-| `C-c TAB k` | Close tab |
-| `C-c TAB l` | Switch to tab |
-| `C-c TAB f` / `C-c TAB b` | Next/prev tab |
+| `C-c TAB o` | Open a project in its own workspace (or switch to it) |
+| `C-c TAB s` | Switch to / create a workspace |
+| `C-c TAB b` | Switch buffer within this workspace |
+| `C-c TAB t` | Switch to any buffer, jumping to its workspace |
+| `C-c TAB w` | Show workspaces |
+| `C-c TAB n` | Rename workspace |
+| `C-c TAB f` / `C-c TAB p` | Next/prev workspace |
+| `C-c TAB r` / `C-c TAB R` | Remove current / chosen buffer from workspace |
+| `C-c TAB d` | Close workspace (`k` also kills its buffers) |
 
 ### Config & Toggles
 

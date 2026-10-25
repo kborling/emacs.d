@@ -5,7 +5,7 @@
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
  '(package-selected-packages
-   '(acme-theme agent-shell angular-mode cape compat corfu cperl-mode
+   '(acme-theme agent-shell angular-mode tabspaces cape compat corfu cperl-mode
                 csharp-mode csv-mode deadgrep deft dictionary diff-hl
                 eat editorconfig eglot-booster elixir-ts-mode
                 evil-collection exec-path-from-shell exwm faceup
@@ -24,6 +24,7 @@
      (agent-shell-attention :url
                             "https://github.com/ultronozm/agent-shell-attention.el")
      (agent-shell-hq :url "https://github.com/SreenivasVRao/agent-shell-hq")
+     (agent-review :url "https://github.com/nineluj/agent-review")
      (treesit-expand :url "https://github.com/kborling/treesit-expand")
      (eglot-booster :url "https://github.com/jdtsmith/eglot-booster"))))
 (custom-set-faces
