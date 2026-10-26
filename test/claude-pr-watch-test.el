@@ -2,7 +2,9 @@
 
 ;; emacs --batch -l early-init.el -l init.el -l test/claude-pr-watch-test.el \
 ;;   -f ert-run-tests-batch-and-exit
-;; Needs a POSIX shell for the fake gh.
+;; The fake gh is a sh script; on Windows it runs through Git's sh.exe,
+;; and the suite is skipped without one.  GH_STUB_DELAY (seconds) slows
+;; it down, e.g. to rehearse Windows spawn times elsewhere.
 
 (require 'ert)
 
@@ -33,7 +35,7 @@
   (insert "#!/bin/sh
 d=$(dirname \"$0\")
 echo \"$*\" >> \"$d/calls\"
-sleep 0.3
+sleep ${GH_STUB_DELAY:-0.3}
 case \"$*\" in
   'pr view --json'*) cat \"$d/pr.json\" ;;
   'pr view '*' --json state') cat \"$d/state.json\" ;;
@@ -44,6 +46,21 @@ case \"$*\" in
 esac
 "))
 (set-file-modes (expand-file-name "gh" test-dir) #o755)
+
+(defvar test-sh
+  (if (not (eq system-type 'windows-nt))
+      "sh"
+    (seq-find #'file-executable-p
+              (cons (executable-find "sh")
+                    (when-let* ((git (executable-find "git")))
+                      (list (expand-file-name "../bin/sh.exe" (file-name-directory git))
+                            (expand-file-name "../usr/bin/sh.exe" (file-name-directory git))))))))
+
+;; exec-suffixes would find the real gh.exe before an extensionless stub.
+(when (and test-sh (eq system-type 'windows-nt))
+  (with-temp-file (expand-file-name "gh.cmd" test-dir)
+    (insert (format "@\"%s\" \"%%~dp0gh\" %%*\r\n"
+                    (subst-char-in-string ?/ ?\\ test-sh)))))
 (setq exec-path (cons test-dir exec-path))
 (setenv "PATH" (concat test-dir path-separator (getenv "PATH")))
 
@@ -58,16 +75,20 @@ esac
       0)))
 
 (defun test-wait (pred)
-  (let ((end (+ (float-time) 10)))
+  (let ((end (+ (float-time) 30)))
     (while (and (not (funcall pred)) (< (float-time) end))
       (accept-process-output nil 0.05))
     (should (funcall pred))))
 
 (defun test-settle ()
-  "Let every gh reply still in flight arrive."
-  (accept-process-output nil 1))
+  "Wait until no gh is running, so every reply in flight has arrived."
+  (accept-process-output nil 0.1)
+  (test-wait (lambda ()
+               (not (seq-find (lambda (p) (string-prefix-p "gh" (process-name p)))
+                              (process-list))))))
 
 (defun test-reset ()
+  (unless test-sh (ert-skip "no sh for the fake gh"))
   (dolist (w kdb-claude--watches) (kdb-claude--watch-stop w "reset"))
   (setq kdb-claude--pr-lookups nil)
   (dolist (f (directory-files test-dir t "\\`\\(calls\\|.*\\.fail\\)\\'"))
@@ -112,7 +133,7 @@ esac
         (t0 (float-time)))
     (setq test-busy t)
     (let ((w (kdb-claude--watch-start buf test-dir 7)))
-      (should (< (- (float-time) t0) 0.2))       ; gh takes 0.3s: nothing waited on it
+      (should (< (- (float-time) t0) 0.25))      ; gh takes >= 0.3s: nothing waited on it
       (should (timerp kdb-claude--pr-timer))
       (test-wait (lambda () test-queue))
       (should-not test-prompts)                  ; busy: left in agent-shell's queue
