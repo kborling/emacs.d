@@ -39,7 +39,12 @@
     (add-hook 'emacs-startup-hook
               (lambda ()
                 (setq file-name-handler-alist
-                      (delete-dups (append file-name-handler-alist handlers)))))))
+                      (delete-dups (append file-name-handler-alist handlers))))))
+  ;; Explorer keeps a stale PATH until sign-in; npm global bin may be missing.
+  (let ((npm (expand-file-name "npm" (getenv "APPDATA"))))
+    (when (and (file-directory-p npm) (not (member npm exec-path)))
+      (add-to-list 'exec-path npm)
+      (setenv "PATH" (concat npm path-separator (getenv "PATH"))))))
 
 ;; UI chrome — disable before frame draws to avoid flicker
 ;; Keep macOS menu bar (integrates with system top bar)
