@@ -14,6 +14,8 @@
 
 ;;; Code:
 
+(require 'subr-x)
+
 ;;; ============================================================
 ;;;                    PERSONAL SETTINGS
 ;;; ============================================================
@@ -60,7 +62,6 @@
         ("melpa" . 2)
         ("nongnu" . 1)))
 
-(require 'package)
 ;; Packages are already activated after early-init; doing it again here
 ;; (and parsing the archive lists) doubled the startup cost.  The archive
 ;; lists are only read when something actually needs installing.
@@ -68,8 +69,11 @@
   (package-activate-all))
 ;; Installs rebuild the quickstart file (early-init, Windows); build it the
 ;; first time too.
-(when (and package-quickstart (not (file-exists-p package-quickstart-file)))
-  (run-with-idle-timer 2 nil #'package-quickstart-refresh))
+(when (and (bound-and-true-p package-quickstart)
+           (not (file-exists-p (locate-user-emacs-file "package-quickstart.el"))))
+  (run-with-idle-timer 2 nil (lambda ()
+                               (require 'package)
+                               (package-quickstart-refresh))))
 ;; A cached package list goes stale (MELPA drops old versions, deps move
 ;; on), so refresh it before the first install of the session.  Both entry
 ;; points: :vc dependencies go through `package-vc-install-dependencies',
@@ -88,6 +92,21 @@
             (lambda (&rest _) (setq kdb--package-list-refreshed t)))
 
 ;;; Package Management ========================================= ;;
+
+;; Checking installed packages loads package.el (slow on Windows); skip
+;; it for anything already activated or on the load-path.
+(defun kdb--package-present-p (name &rest _)
+  "Non-nil if package NAME is activated or its library is found."
+  (let ((name (use-package-as-symbol name)))
+    (or (memq name (bound-and-true-p package-activated-list))
+        (locate-library (symbol-name name)))))
+
+(setq use-package-ensure-function
+      (lambda (name args state &optional no-refresh)
+        (unless (kdb--package-present-p name)
+          (use-package-ensure-elpa name args state no-refresh))))
+(advice-add 'use-package-vc-install :before-until
+            (lambda (arg &rest _) (kdb--package-present-p (car arg))))
 
 (setq use-package-always-ensure t
       package-native-compile t
@@ -257,13 +276,15 @@
 
 (use-package recentf
   :ensure nil
-  :hook (after-init . recentf-mode)
-  :custom
-  (recentf-save-file (expand-file-name "recentf" user-emacs-var-directory))
-  (recentf-max-saved-items 1000)
-  (recentf-max-menu-items 20)
-  (recentf-auto-cleanup 'never)
-  (recentf-exclude '(".gz" ".xz" ".zip" "/elpa/" "/opt/" "/.rustup/" "/ssh:" "/sudo:" "/node_modules/" "/nix/"))
+  :defer t
+  :init
+  ;; setq, not :custom: customizing loads recentf at startup.
+  (setq recentf-save-file (expand-file-name "recentf" user-emacs-var-directory)
+        recentf-max-saved-items 1000
+        recentf-max-menu-items 20
+        recentf-auto-cleanup 'never
+        recentf-exclude '(".gz" ".xz" ".zip" "/elpa/" "/opt/" "/.rustup/" "/ssh:" "/sudo:" "/node_modules/" "/nix/"))
+  (run-with-idle-timer 1 nil #'recentf-mode)
   :config
   ;; Save silently every 5 minutes
   (run-at-time nil (* 5 60) (lambda ()
@@ -320,7 +341,7 @@
 ;; Time and battery in mode line
 (setq display-time-default-load-average nil)
 (display-time-mode t)
-(ignore-errors (display-battery-mode t))
+(run-with-idle-timer 1 nil (lambda () (ignore-errors (display-battery-mode t))))
 
 ;; Smooth scrolling (GUI only)
 (when (display-graphic-p)
@@ -1090,16 +1111,45 @@ If point is at the end of the line, kill the whole line including the newline."
 
   ;; Use fd instead of find for project file listing (much faster)
   (when (executable-find "fd")
+    (defvar kdb--project-files-cache (make-hash-table :test #'equal))
+    (defvar kdb--project-files-refreshing (make-hash-table :test #'equal))
+
+    (defun kdb--fd-args (roots)
+      "fd arguments listing all files under ROOTS."
+      (append '("--type" "f" "--hidden" "--follow" "--exclude" ".git")
+              (mapcan (lambda (dir) (list "--search-path" (expand-file-name dir)))
+                      roots)))
+
+    (defun kdb--project-files-refresh (roots)
+      "Re-list ROOTS with fd in the background and update the cache."
+      (unless (gethash roots kdb--project-files-refreshing)
+        (let ((buf (generate-new-buffer " *fd*")))
+          (puthash roots t kdb--project-files-refreshing)
+          (make-process
+           :name "fd" :buffer buf :noquery t
+           :command (cons "fd" (kdb--fd-args roots))
+           :stderr (get-buffer-create " *fd-stderr*")
+           :sentinel (lambda (proc _)
+                       (unless (process-live-p proc)
+                         (when (and (eq (process-status proc) 'exit)
+                                    (zerop (process-exit-status proc)))
+                           (puthash roots
+                                    (with-current-buffer buf
+                                      (split-string (buffer-string) "\n" t))
+                                    kdb--project-files-cache))
+                         (remhash roots kdb--project-files-refreshing)
+                         (kill-buffer buf)))))))
+
     (defun kdb-project-files-fd (project &optional dirs)
-      "Find files in PROJECT using fd for speed.
-Falls back to DIRS or project roots."
+      "Files in PROJECT (or DIRS) via fd, cached per root list.
+The first call runs fd synchronously; later calls return the cache
+and refresh it in the background."
       (let* ((roots (or dirs (list (project-root project))))
-             (args (append '("--type" "f" "--hidden" "--follow"
-                            "--exclude" ".git")
-                           (mapcan (lambda (dir)
-                                    (list "--search-path" (expand-file-name dir)))
-                                   roots))))
-        (apply #'process-lines "fd" args)))
+             (cached (gethash roots kdb--project-files-cache)))
+        (if cached
+            (progn (kdb--project-files-refresh roots) cached)
+          (puthash roots (apply #'process-lines "fd" (kdb--fd-args roots))
+                   kdb--project-files-cache))))
     (cl-defmethod project-files ((project (head vc)) &optional dirs)
       (kdb-project-files-fd project dirs))))
 
@@ -1760,7 +1810,10 @@ Falls back to DIRS or project roots."
 ;; list, so C-x b only offers this project's buffers.  Nothing is written
 ;; into projects: no todo file, no session files.
 (use-package tabspaces
-  :hook (after-init . tabspaces-mode)
+  :defer t
+  :init
+  ;; Loads dired and vc; keep it out of startup.
+  (run-with-idle-timer 0.5 nil #'tabspaces-mode)
   :custom
   (tabspaces-keymap-prefix "C-c TAB")
   (tabspaces-use-filtered-buffers-as-default (not (eq window-system 'x))) ; EXWM apps stay global
