@@ -248,7 +248,7 @@
 (setq cursor-in-non-selected-windows 'hollow)  ; Hollow cursor in inactive windows
 
 ;; Contextual menu with right mouse button
-(when (display-graphic-p)
+(when (or (display-graphic-p) (daemonp))
   (context-menu-mode))
 
 ;; Auto-scroll Messages buffer when displayed
@@ -344,7 +344,7 @@
 (run-with-idle-timer 1 nil (lambda () (ignore-errors (display-battery-mode t))))
 
 ;; Smooth scrolling (GUI only)
-(when (display-graphic-p)
+(when (or (display-graphic-p) (daemonp))
   (setq pixel-scroll-precision-use-momentum t
         pixel-scroll-precision-momentum-tick 0.016  ; ~60fps
         pixel-scroll-precision-momentum-seconds 0.75
@@ -1416,6 +1416,19 @@ and refresh it in the background."
     (when (memq system-type '(darwin windows-nt))
       (setenv "SSH_ASKPASS_REQUIRE" "force"))))
 
+;; server-running-p trusts any live PID; on Windows a reused PID leaves a
+;; stale server file that blocks server-start and --daemon.
+(when (eq system-type 'windows-nt)
+  (let ((file (locate-user-emacs-file "server/server")))
+    (when (file-exists-p file)
+      (let ((pid (with-temp-buffer
+                   (insert-file-contents-literally file)
+                   (and (looking-at "127\\.0\\.0\\.1:[0-9]+ \\([0-9]+\\)")
+                        (string-to-number (match-string 1))))))
+        (unless (and pid (string-prefix-p
+                          "emacs" (or (alist-get 'comm (process-attributes pid)) "") t))
+          (delete-file file))))))
+
 (add-hook 'after-init-hook
           (lambda ()
             (require 'server)
@@ -1509,7 +1522,7 @@ and refresh it in the background."
 (global-set-key (kbd "C-c s d") #'kdb-decrypt-file)
 (global-set-key (kbd "C-c s c") #'epa-dired-do-encrypt)
 
-(when (not (display-graphic-p))
+(unless (or (display-graphic-p) (daemonp))
   (require 'init-terminal))
 
 
