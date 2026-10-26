@@ -7,6 +7,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'init-claude)
 (require 'transient)
 
@@ -236,6 +237,270 @@ opens its worktree; a new name creates the branch in a new worktree."
                      (unless (string-empty-p b) b)))))
     (kdb-claude--new-in (if branch (kdb-claude--worktree project branch) project))))
 
+(defun kdb-claude-start-branch (project branch &optional prompt)
+  "Start a Claude session on BRANCH of PROJECT in its own worktree.
+A new BRANCH is created from PROJECT's HEAD.  Submit PROMPT when ready."
+  (kdb-claude--start-with (kdb-claude--worktree (file-name-as-directory project) branch)
+                          prompt))
+
+;;;###autoload
+(defun kdb-claude-schedule (time dir prompt)
+  "At TIME, start a Claude session in DIR and submit PROMPT.
+TIME is anything `run-at-time' takes: \"11:30pm\", \"2 hours\", \"30 min\".
+A clock time already past today means tomorrow.  Only runs while Emacs
+does; for that, see Windows Task Scheduler."
+  (interactive (list (read-string "When (e.g. 11:30pm, 2 hours): ")
+                     (kdb-claude-read-directory "Project: ")
+                     (read-string "Prompt: ")))
+  (when (string-blank-p time)
+    (user-error "No time given"))
+  (let ((timer (run-at-time time nil #'kdb-claude--start-with dir prompt)))
+    (when (time-less-p (timer--time timer) nil)
+      (cancel-timer timer)
+      (timer-inc-time timer (* 24 60 60))
+      (timer-activate timer))
+    (message "Claude session scheduled for %s in %s"
+             (format-time-string "%a %H:%M" (timer--time timer)) dir)
+    timer))
+
+;;; ============================================================
+;;; PR / CI watcher
+;;; ============================================================
+
+(declare-function shell-maker-busy "shell-maker")
+(declare-function agent-shell--prompt-queue-enqueue "agent-shell-prompt-queue")
+(declare-function agent-shell--prompt-queue-process-next "agent-shell-prompt-queue")
+
+(defvar kdb-claude-pr-poll-interval 150
+  "Seconds between CI polls of watched PRs.")
+
+(defvar kdb-claude-pr-log-lines 200
+  "Failed-log lines sent per job.")
+
+(defvar kdb-claude-pr-merged-functions nil
+  "Abnormal hook run with (NUMBER BUFFER) when a watched PR is merged.")
+
+(cl-defstruct (kdb-claude--watch (:constructor kdb-claude--watch-create))
+  buffer dir number seen polling)
+
+(defvar kdb-claude--watches nil "Active PR watches.")
+(defvar kdb-claude--pr-lookups nil "Session buffers whose PR is being looked up.")
+(defvar kdb-claude--pr-timer nil)
+
+(defun kdb-claude--gh (dir args callback)
+  "Run gh ARGS in DIR asynchronously.
+Call CALLBACK with stdout, exit code and stderr; a failed spawn
+reports exit code -1."
+  (let ((buf (generate-new-buffer " *gh*"))
+        (err (generate-new-buffer " *gh-stderr*"))
+        (default-directory dir))
+    (condition-case e
+        (make-process
+         :name "gh" :buffer buf :noquery t :connection-type 'pipe
+         :coding 'utf-8 :command (cons "gh" args) :stderr err
+         :sentinel (lambda (proc _)
+                     (unless (process-live-p proc)
+                       (let ((out (with-current-buffer buf (buffer-string)))
+                             (msg (with-current-buffer err (buffer-string))))
+                         (when-let* ((p (get-buffer-process err))) (delete-process p))
+                         (kill-buffer buf)
+                         (kill-buffer err)
+                         (funcall callback out (process-exit-status proc) msg)))))
+      (error (kill-buffer buf)
+             (kill-buffer err)
+             (funcall callback "" -1 (error-message-string e))))))
+
+(defun kdb-claude--json (string)
+  "Parse STRING as JSON (alists, lists), or nil."
+  (ignore-errors (json-parse-string string :object-type 'alist :array-type 'list
+                                    :null-object nil :false-object nil)))
+
+(defun kdb-claude--watch-live-p (w)
+  "Non-nil if W is still watched and its session is alive."
+  (and (memq w kdb-claude--watches) (buffer-live-p (kdb-claude--watch-buffer w))))
+
+(defun kdb-claude--watch-send (w text)
+  "Queue TEXT in W's session; agent-shell submits it when the turn is over.
+Its queue keeps the user's own queued prompts in order, sets aside an
+unsent draft, and asks before continuing after a cancelled turn."
+  (with-current-buffer (kdb-claude--watch-buffer w)
+    (agent-shell--prompt-queue-enqueue :prompt text)
+    (unless (shell-maker-busy)
+      (agent-shell--prompt-queue-process-next))))
+
+(defun kdb-claude--watch-stop (w why)
+  "Stop watching W and say WHY."
+  (setq kdb-claude--watches (delq w kdb-claude--watches))
+  (let ((buf (kdb-claude--watch-buffer w)))
+    (when (buffer-live-p buf)
+      (kdb-claude--notify buf (format "PR #%d" (kdb-claude--watch-number w)) why))
+    (message "PR #%d: %s; stopped watching" (kdb-claude--watch-number w) why))
+  (when (and (null kdb-claude--watches) kdb-claude--pr-timer)
+    (cancel-timer kdb-claude--pr-timer)
+    (setq kdb-claude--pr-timer nil)))
+
+(defun kdb-claude--failed-log (output)
+  "Last `kdb-claude-pr-log-lines' lines per job of `gh run --log-failed' OUTPUT."
+  (let (jobs)
+    (dolist (line (split-string output "\n" t))
+      (let* ((tab (string-search "\t" line))
+             (job (if tab (substring line 0 tab) ""))
+             (cell (or (assoc job jobs) (car (push (list job) jobs)))))
+        (push (if tab (substring line (1+ tab)) line) (cdr cell))))
+    (mapconcat (lambda (cell)
+                 (concat "### " (car cell) "\n"
+                         (string-join (reverse (seq-take (cdr cell) kdb-claude-pr-log-lines)) "\n")))
+               (nreverse jobs) "\n\n")))
+
+(defun kdb-claude--watch-failure (w checks run-id)
+  "Send W's session the failed CHECKS, with RUN-ID's log if it is an Actions run.
+Each set of failed jobs is sent once; a re-run has new job links, so it
+counts as new.  A log that can't be fetched yet is retried next poll."
+  (let ((key (string-join (sort (mapcar (lambda (c) (concat (alist-get 'name c) " "
+                                                            (alist-get 'link c)))
+                                        checks)
+                                #'string<)
+                          "\n"))
+        (n (kdb-claude--watch-number w))
+        (name (mapconcat (lambda (c) (alist-get 'name c)) checks ", "))
+        (link (alist-get 'link (car checks))))
+    (unless (member key (kdb-claude--watch-seen w))
+      (push key (kdb-claude--watch-seen w))
+      (cl-flet ((send (log)
+                  (when (kdb-claude--watch-live-p w)
+                    (kdb-claude--watch-send
+                     w (format "CI check %s failed on PR #%d. Log below. Diagnose, fix, commit and push.\n%s\n\n```\n%s\n```"
+                               name n link (if (string-blank-p log) "(no log available)" (string-trim log))))
+                    (kdb-claude--notify (kdb-claude--watch-buffer w) (format "PR #%d CI failed" n) name))))
+        (if (not run-id)
+            (send "")
+          (kdb-claude--gh (kdb-claude--watch-dir w) (list "run" "view" run-id "--log-failed")
+                          (lambda (out status _)
+                            (if (zerop status)
+                                (send (kdb-claude--failed-log out))
+                              (setf (kdb-claude--watch-seen w)
+                                    (delete key (kdb-claude--watch-seen w)))))))))))
+
+(defun kdb-claude--check-run (check)
+  "The Actions run id of CHECK, or nil."
+  (let ((link (or (alist-get 'link check) "")))
+    (and (string-match "/actions/runs/\\([0-9]+\\)" link) (match-string 1 link))))
+
+(defun kdb-claude--watch-checks (w checks)
+  "Act on CHECKS (parsed `gh pr checks' JSON) for W."
+  (let ((bucket (lambda (c) (alist-get 'bucket c))))
+    (if (and checks (not (seq-find (lambda (c) (member (funcall bucket c) '("fail" "pending")))
+                                   checks)))
+        (kdb-claude--watch-stop w "all checks passed")
+      ;; One prompt per finished run with failures: a run still going may
+      ;; fail more jobs, and gh has no logs for it yet.
+      (pcase-dolist (`(,run . ,group) (seq-group-by #'kdb-claude--check-run checks))
+        (let ((failed (seq-filter (lambda (c) (equal (funcall bucket c) "fail")) group)))
+          (cond ((null failed))
+                ((null run)
+                 (dolist (c failed) (kdb-claude--watch-failure w (list c) nil)))
+                ((not (seq-find (lambda (c) (equal (funcall bucket c) "pending")) group))
+                 (kdb-claude--watch-failure w failed run))))))))
+
+(defun kdb-claude--watch-poll (w)
+  "Check W's PR state, then its checks, without blocking."
+  (unless (kdb-claude--watch-polling w)
+    (setf (kdb-claude--watch-polling w) t)
+    (let ((dir (kdb-claude--watch-dir w))
+          (n (number-to-string (kdb-claude--watch-number w))))
+      (kdb-claude--gh
+       dir (list "pr" "view" n "--json" "state")
+       (lambda (out &rest _)
+         (if (not (kdb-claude--watch-live-p w))
+             (setf (kdb-claude--watch-polling w) nil)
+           (pcase (alist-get 'state (kdb-claude--json out))
+             ("MERGED"
+              (setf (kdb-claude--watch-polling w) nil)
+              (kdb-claude--watch-stop w "merged")
+              (run-hook-with-args 'kdb-claude-pr-merged-functions
+                                  (kdb-claude--watch-number w) (kdb-claude--watch-buffer w)))
+             ("CLOSED"
+              (setf (kdb-claude--watch-polling w) nil)
+              (kdb-claude--watch-stop w "closed"))
+             (_
+              ;; gh exits non-zero while checks fail or are pending; trust the JSON.
+              (kdb-claude--gh
+               dir (list "pr" "checks" n "--json" "name,state,bucket,link")
+               (lambda (out &rest _)
+                 (setf (kdb-claude--watch-polling w) nil)
+                 (when (kdb-claude--watch-live-p w)
+                   (when-let* ((checks (kdb-claude--json out)))
+                     (kdb-claude--watch-checks w checks)))))))))))))
+
+(defun kdb-claude--pr-poll ()
+  "Poll every watched PR."
+  (dolist (w kdb-claude--watches)
+    (if (buffer-live-p (kdb-claude--watch-buffer w))
+        (kdb-claude--watch-poll w)
+      (kdb-claude--watch-stop w "session closed"))))
+
+(defun kdb-claude--buffer-watch (buf)
+  "The watch on session BUF, or nil."
+  (seq-find (lambda (w) (eq (kdb-claude--watch-buffer w) buf)) kdb-claude--watches))
+
+(defun kdb-claude--watch-start (buf dir number)
+  "Watch PR NUMBER (in repo DIR) for session BUF."
+  (let ((w (kdb-claude--watch-create :buffer buf :dir dir :number number)))
+    (with-current-buffer buf
+      (add-hook 'kill-buffer-hook
+                (lambda () (when (memq w kdb-claude--watches)
+                             (kdb-claude--watch-stop w "session closed")))
+                nil t))
+    (push w kdb-claude--watches)
+    (unless kdb-claude--pr-timer
+      (setq kdb-claude--pr-timer (run-at-time kdb-claude-pr-poll-interval
+                                              kdb-claude-pr-poll-interval
+                                              #'kdb-claude--pr-poll)))
+    (message "Watching PR #%d CI for %s" number (buffer-name buf))
+    (kdb-claude--watch-poll w)
+    w))
+
+;;;###autoload
+(defun kdb-claude-watch-pr ()
+  "Watch CI on this session's PR and have the session fix failures.
+Finds the PR for the session's branch, or asks for its number.  Each
+failed run's log is sent once it finishes, through the session's prompt
+queue.  Watching stops when all checks pass, the PR is merged or closed,
+or the session ends.  Run again in a watched session to stop."
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-mode)
+    (user-error "Run this in a Claude session buffer"))
+  (let ((buf (current-buffer))
+        (dir default-directory))
+    (cond
+     ((kdb-claude--buffer-watch buf)
+      (let ((w (kdb-claude--buffer-watch buf)))
+        (when (y-or-n-p (format "Stop watching PR #%d? " (kdb-claude--watch-number w)))
+          (kdb-claude--watch-stop w "stopped"))))
+     ((memq buf kdb-claude--pr-lookups)
+      (message "Still looking up this session's PR..."))
+     (t
+      (push buf kdb-claude--pr-lookups)
+      (message "Looking up the PR for this branch...")
+      (kdb-claude--gh
+       dir '("pr" "view" "--json" "number,url,headRefName,state")
+       (lambda (out status err)
+         (unwind-protect
+             (let ((pr (kdb-claude--json out)))
+               (when (and (buffer-live-p buf) (not (kdb-claude--buffer-watch buf)))
+                 (kdb-claude--watch-start
+                  buf dir
+                  (if (equal (alist-get 'state pr) "OPEN")
+                      (alist-get 'number pr)
+                    (read-number
+                     (cond (pr (format "PR #%s is %s; watch PR number: "
+                                       (alist-get 'number pr) (downcase (alist-get 'state pr))))
+                           ((and (/= status 0) (not (string-match-p "no pull requests found" err)))
+                            (format "gh failed (%s); PR number: "
+                                    (string-trim (or (car (split-string err "\n" t)) "no output"))))
+                           (t "No open PR for this branch; PR number: ")))))))
+           (setq kdb-claude--pr-lookups (delq buf kdb-claude--pr-lookups)))))))))
+
 ;;; ============================================================
 ;;; Menu
 ;;; ============================================================
@@ -244,7 +509,8 @@ opens its worktree; a new name creates the branch in a new worktree."
   "Claude"
   [["Start"
     ("n" "New here (C-u pick project)" kdb-claude-new)
-    ("N" "New on project + branch" kdb-claude-start)]
+    ("N" "New on project + branch" kdb-claude-start)
+    ("t" "Schedule a session" kdb-claude-schedule)]
    ["Send"
     ("s" "Region/note/files → session" kdb-claude-send)
     ("f" "File → session" agent-shell-send-file-to)
@@ -253,7 +519,8 @@ opens its worktree; a new name creates the branch in a new worktree."
     ("'" "Answer / next waiting" kdb-claude-answer)
     ("d" "Dashboard" agent-shell-attention-dashboard)
     ("l" "Peek / switch (by project)" agent-shell-hq-peek)
-    ("r" "Name this session" agent-shell-hq-label)]
+    ("r" "Name this session" agent-shell-hq-label)
+    ("w" "Watch PR CI, auto-fix (toggle)" kdb-claude-watch-pr)]
    ["History"
     ("h" "All sessions" kdb-claude-history)
     ("/" "Search text" kdb-claude-search)

@@ -1400,6 +1400,12 @@ and refresh it in the background."
 (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
 (require 'init-theme)   ; cross-platform theme switching (s-t / s-T)
 
+;; Full path for askpass and for Claude sessions starting sibling sessions;
+;; Emacs's bin dir isn't always on PATH (Windows).
+(setenv "EMACSCLIENT"
+        (expand-file-name (if (eq system-type 'windows-nt) "emacsclient.exe" "emacsclient")
+                          invocation-directory))
+
 ;; SSH/Git passphrase prompts via emacs-askpass (subprocesses have no TTY).
 (let ((askpass (seq-find #'file-exists-p
                          (list (expand-file-name "~/.local/bin/emacs-askpass")
@@ -1407,11 +1413,6 @@ and refresh it in the background."
   (when askpass
     (setenv "SSH_ASKPASS" askpass)
     (setenv "GIT_ASKPASS" askpass)
-    (setenv "EMACSCLIENT"
-            (expand-file-name (if (eq system-type 'windows-nt)
-                                  "emacsclient.exe"
-                                "emacsclient")
-                              invocation-directory))
     ;; macOS/Windows have no DISPLAY, so ssh won't use askpass unforced
     (when (memq system-type '(darwin windows-nt))
       (setenv "SSH_ASKPASS_REQUIRE" "force"))))
@@ -1905,10 +1906,12 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 ;; Before any use-package below: installing a :vc package compiles it,
 ;; which loads agent-shell and runs its :config mid-install.
 (autoload 'kdb-claude-agent-shell-subdir "init-claude")
-(dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify))
+(dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify
+              kdb-claude--start-with kdb-claude-start-branch))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
-                 kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review)
+                 kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review
+                 kdb-claude-watch-pr kdb-claude-schedule)
                 ("init-claude-print" kdb-claude-print)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
                  kdb-claude-search kdb-claude-import-export
