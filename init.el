@@ -1907,7 +1907,8 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 ;; which loads agent-shell and runs its :config mid-install.
 (autoload 'kdb-claude-agent-shell-subdir "init-claude")
 (dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify
-              kdb-claude--start-with kdb-claude-start-branch))
+              kdb-claude--start-with kdb-claude-spawn kdb-claude-message
+              kdb-claude--tag-client))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
                  kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review
@@ -1941,7 +1942,9 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
         agent-shell-anthropic-claude-environment
         (agent-shell-make-environment-variables
          "CLAUDE_AGENT_LOGS" (expand-file-name "claude-agent-logs" temporary-file-directory)))
-  (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions))
+  (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions)
+  ;; Each session knows its id (KDB_CLAUDE_SESSION) for kdb-claude-message.
+  (advice-add 'agent-shell-anthropic-make-claude-client :around #'kdb-claude--tag-client))
 
 ;; Peek: sessions grouped by project with live status; RET switches.
 ;; Label: Claude names the session.  (hq's HUD needs persp-mode; unused.)

@@ -237,11 +237,94 @@ opens its worktree; a new name creates the branch in a new worktree."
                      (unless (string-empty-p b) b)))))
     (kdb-claude--new-in (if branch (kdb-claude--worktree project branch) project))))
 
-(defun kdb-claude-start-branch (project branch &optional prompt)
-  "Start a Claude session on BRANCH of PROJECT in its own worktree.
-A new BRANCH is created from PROJECT's HEAD.  Submit PROMPT when ready."
-  (kdb-claude--start-with (kdb-claude--worktree (file-name-as-directory project) branch)
-                          prompt))
+;;; ============================================================
+;;; Sessions talking to sessions
+;;; ============================================================
+
+(defvar agent-shell-anthropic-claude-environment)
+(declare-function shell-maker-busy "shell-maker")
+(declare-function agent-shell--prompt-queue-enqueue "agent-shell-prompt-queue")
+(declare-function agent-shell--prompt-queue-process-next "agent-shell-prompt-queue")
+
+(defvar-local kdb-claude--id nil
+  "This session's id, also in its environment as KDB_CLAUDE_SESSION.")
+(put 'kdb-claude--id 'permanent-local t)
+
+(defvar kdb-claude--next-id nil
+  "Id for the session being started, when the caller picked it.")
+
+(defun kdb-claude--session-id (buf)
+  "BUF's session id, assigned on first use."
+  (with-current-buffer buf
+    (or kdb-claude--id
+        (setq kdb-claude--id
+              (or kdb-claude--next-id
+                  (format "%s-%04x"
+                          (file-name-nondirectory (directory-file-name default-directory))
+                          (random #x10000)))))))
+
+;;;###autoload
+(defun kdb-claude--tag-client (make-client &rest args)
+  "Around MAKE-CLIENT: give the session's process KDB_CLAUDE_SESSION.
+ARGS has the session buffer under :buffer."
+  (let ((agent-shell-anthropic-claude-environment
+         (cons (concat "KDB_CLAUDE_SESSION="
+                       (kdb-claude--session-id (plist-get args :buffer)))
+               agent-shell-anthropic-claude-environment)))
+    (apply make-client args)))
+
+(defun kdb-claude--session-buffer (id)
+  "The live Claude session with ID (or buffer name ID), or nil."
+  (or (seq-find (lambda (b) (equal (buffer-local-value 'kdb-claude--id b) id))
+                (buffer-list))
+      (when-let* ((b (get-buffer id)))
+        (and (buffer-local-value 'kdb-claude--id b) b))))
+
+(defun kdb-claude--queue-prompt (buf text)
+  "Queue TEXT in session BUF; agent-shell submits it when the turn is over.
+Its queue keeps the user's own queued prompts in order, sets aside an
+unsent draft, and asks before continuing after a cancelled turn."
+  (with-current-buffer buf
+    (agent-shell--prompt-queue-enqueue :prompt text)
+    (unless (shell-maker-busy)
+      (agent-shell--prompt-queue-process-next))))
+
+;;;###autoload
+(defun kdb-claude-message (to text &optional from)
+  "Send TEXT to the Claude session TO (an id or buffer name), as from FROM.
+Delivered when TO's current turn is over.  Meant for `emacsclient --eval'."
+  (let ((buf (or (kdb-claude--session-buffer to)
+                 (user-error "No Claude session %s" to))))
+    (kdb-claude--queue-prompt
+     buf (if from (format "[Message from Claude session %s]\n%s" from text) text))
+    (format "Queued for %s" to)))
+
+(defun kdb-claude--report-back (from id)
+  "Instructions for session ID to report back to session FROM."
+  (format "
+
+---
+You were started by Claude session %s; your session id is %s.  When you
+finish, or need a decision, report back by running:
+
+\"${EMACSCLIENT:-emacsclient}\" --eval \"$(cat <<'EOF'
+(kdb-claude-message \"%s\" \"SUMMARY\" \"%s\")
+EOF
+)\"" from id from id))
+
+;;;###autoload
+(defun kdb-claude-spawn (dir prompt &optional from branch)
+  "Start a Claude session in DIR and submit PROMPT; return its id.
+With BRANCH, work in that branch's worktree (created if needed).  With
+FROM, the id of the calling session, PROMPT ends with how to report back."
+  (let* ((dir (file-name-as-directory (expand-file-name dir)))
+         (dir (if branch (kdb-claude--worktree dir branch) dir))
+         (id (format "%s-%04x" (file-name-nondirectory (directory-file-name dir))
+                     (random #x10000)))
+         (buf (let ((kdb-claude--next-id id))
+                (kdb-claude--start-with
+                 dir (if from (concat prompt (kdb-claude--report-back from id)) prompt)))))
+    (kdb-claude--session-id buf)))
 
 ;;;###autoload
 (defun kdb-claude-schedule (time dir prompt)
@@ -266,10 +349,6 @@ does; for that, see Windows Task Scheduler."
 ;;; ============================================================
 ;;; PR / CI watcher
 ;;; ============================================================
-
-(declare-function shell-maker-busy "shell-maker")
-(declare-function agent-shell--prompt-queue-enqueue "agent-shell-prompt-queue")
-(declare-function agent-shell--prompt-queue-process-next "agent-shell-prompt-queue")
 
 (defvar kdb-claude-pr-poll-interval 150
   "Seconds between CI polls of watched PRs.")
@@ -319,15 +398,6 @@ reports exit code -1."
   "Non-nil if W is still watched and its session is alive."
   (and (memq w kdb-claude--watches) (buffer-live-p (kdb-claude--watch-buffer w))))
 
-(defun kdb-claude--watch-send (w text)
-  "Queue TEXT in W's session; agent-shell submits it when the turn is over.
-Its queue keeps the user's own queued prompts in order, sets aside an
-unsent draft, and asks before continuing after a cancelled turn."
-  (with-current-buffer (kdb-claude--watch-buffer w)
-    (agent-shell--prompt-queue-enqueue :prompt text)
-    (unless (shell-maker-busy)
-      (agent-shell--prompt-queue-process-next))))
-
 (defun kdb-claude--watch-stop (w why)
   "Stop watching W and say WHY."
   (setq kdb-claude--watches (delq w kdb-claude--watches))
@@ -368,8 +438,8 @@ counts as new.  A log that can't be fetched yet is retried next poll."
       (push key (kdb-claude--watch-seen w))
       (cl-flet ((send (log)
                   (when (kdb-claude--watch-live-p w)
-                    (kdb-claude--watch-send
-                     w (format "CI check %s failed on PR #%d. Log below. Diagnose, fix, commit and push.\n%s\n\n```\n%s\n```"
+                    (kdb-claude--queue-prompt
+                     (kdb-claude--watch-buffer w) (format "CI check %s failed on PR #%d. Log below. Diagnose, fix, commit and push.\n%s\n\n```\n%s\n```"
                                name n link (if (string-blank-p log) "(no log available)" (string-trim log))))
                     (kdb-claude--notify (kdb-claude--watch-buffer w) (format "PR #%d CI failed" n) name))))
         (if (not run-id)

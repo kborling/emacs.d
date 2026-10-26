@@ -12,7 +12,7 @@
   (and (not (featurep 'init-claude-workflow))
        (seq-every-p (lambda (f) (autoloadp (symbol-function f)))
                     '(kdb-claude-watch-pr kdb-claude-schedule
-                      kdb-claude--start-with kdb-claude-start-branch))))
+                      kdb-claude--start-with kdb-claude-spawn kdb-claude-message))))
 
 (require 'init-claude-workflow)
 
