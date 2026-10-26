@@ -45,7 +45,7 @@
                             '("~/.org/inbox.org" "~/.org/todo.org" "~/.org/notes.org"
                               "~/.org/projects.org" "~/.org/work.org"))
                 (when (file-directory-p "~/.org/people/")
-                  (directory-files "~/.org/people/" t "\\.org$")))
+                  '("~/.org/people/")))
         org-log-done 'time
         org-agenda-include-diary nil
         org-agenda-start-on-weekday nil
@@ -85,12 +85,19 @@
           ("c" . "center")
           ("C" . "comment")))
 
-  (org-babel-do-load-languages
-   'org-babel-load-languages
-   '((emacs-lisp . t)
-     (shell . t)
-     (python . t)
-     (sql . t)))
+  ;; The default pulls in Gnus, Rmail, MH-E, EWW, etc. on first org visit.
+  (setq org-modules '(ol-doi ol-info))
+
+  ;; Load babel languages (python.el, sh-script, ...) on first execution.
+  (defun kdb/org-babel-load-languages (&rest _)
+    (advice-remove 'org-babel-execute-src-block #'kdb/org-babel-load-languages)
+    (org-babel-do-load-languages
+     'org-babel-load-languages
+     '((emacs-lisp . t)
+       (shell . t)
+       (python . t)
+       (sql . t))))
+  (advice-add 'org-babel-execute-src-block :before #'kdb/org-babel-load-languages)
 
   ;; Capture templates
   (setq org-capture-templates
@@ -156,10 +163,11 @@
   :hook (org-mode . org-modern-mode)
   :config
   (when (eq system-type 'windows-nt)
-    (set-fontset-font "fontset-default" 'unicode "Segoe UI Symbol" nil 'append)
-    (set-fontset-font "fontset-default" 'unicode "Segoe UI Emoji" nil 'append)
-    (set-fontset-font "fontset-default" 'unicode "Noto Color Emoji" nil 'append)
-    (setq org-modern-star '("◉" "○" "✸" "✿" "✤" "✜" "◆" "▶")
+    (dolist (range '((#x25A0 . #x25FF) (#x2600 . #x26FF) (#x2700 . #x27BF)))
+      (set-fontset-font t range "Segoe UI Symbol"))
+    (set-fontset-font t 'unicode "Segoe UI Emoji" nil 'append)
+    (setq org-modern-star 'replace
+          org-modern-replace-stars '("◉" "○" "✸" "✿" "✤" "✜" "◆" "▶")
           org-modern-block-name '("▼" . "▶")
           org-modern-keyword nil
           org-modern-checkbox '((?X . "☑") (?- . "◐") (?\s . "☐"))
@@ -219,36 +227,7 @@
               (unless (org-at-table-p)
                 (setq-local truncate-lines nil))))
 
-;; Load org-templates and org-contacts
-(let ((org-templates-file (expand-file-name "org-templates.el" user-emacs-directory))
-      (org-contacts-file (expand-file-name "org-contacts-simple.el" user-emacs-directory)))
-  (when (file-exists-p org-templates-file)
-    (message "Loading org-templates from: %s" org-templates-file)
-    (load org-templates-file nil t))
-  (when (file-exists-p org-contacts-file)
-    (message "Loading org-contacts from: %s" org-contacts-file) 
-    (load org-contacts-file nil t)
-    
-    (global-set-key (kbd "C-c o n") 'kdb/add-contact)
-    (global-set-key (kbd "C-c o m") 'kdb/add-meeting-note)
-    (global-set-key (kbd "C-c o 1") 'kdb/log-1on1)
-    (global-set-key (kbd "C-c o w") 'kdb/log-win)
-    (global-set-key (kbd "C-c o i") 'kdb/log-issue)
-    (global-set-key (kbd "C-c o F") 'kdb/log-feedback)
-    (global-set-key (kbd "C-c o u") 'kdb/log-followup)
-    (global-set-key (kbd "C-c o G") 'kdb/set-goals)
-    (global-set-key (kbd "C-c o v") 'kdb/view-person)
-    (global-set-key (kbd "C-c o V") 'kdb/view-person-all-years)
-    (global-set-key (kbd "C-c o r") 'kdb/review-prep)
-    (global-set-key (kbd "C-c o !") 'kdb/attention)
-    (global-set-key (kbd "C-c o D") 'kdb/daily-notes)
-    (global-set-key (kbd "C-c o W") 'kdb/weekly-review)
-    (global-set-key (kbd "C-c o f") 'kdb/search-all)
-    (global-set-key (kbd "C-c o j") 'kdb/find-contact)
-    (global-set-key (kbd "C-c o s") 'kdb/search-contacts)
-    (global-set-key (kbd "C-c o C") 'kdb/open-contacts)
-    (global-set-key (kbd "C-c o N") 'kdb/open-notes)
-    (global-set-key (kbd "C-c o p") 'kdb/open-people)))
+(load (expand-file-name "org-contacts-simple" user-emacs-directory) nil t)
 
 ;; Scratch notes — draft in a throwaway buffer, file into org when done
 (defun kdb/note-new (&optional with-template)
@@ -319,8 +298,26 @@ Kills the buffer afterwards unless KEEP (prefix arg) is non-nil."
   (let ((line (string-trim (car (split-string text "\n")))))
     (truncate-string-to-width line 60)))
 
-(global-set-key (kbd "C-c o o") #'kdb/note-new)
-(global-set-key (kbd "C-c o RET") #'kdb/note-capture)
+
+(defun kdb/md--convert (regexp rep &optional mark)
+  "Replace REGEXP with REP outside text marked `kdb-md'.
+Group 2 must be the construct's body; a match whose delimiters are
+marked is skipped.  REP is a string with backrefs or a function
+returning literal text.  MARK protects the result from later rules:
+`all' marks all of it, `ends' just its first and last char."
+  (goto-char (point-min))
+  (while (re-search-forward regexp nil t)
+    (if (or (get-text-property (max (point-min) (1- (match-beginning 2))) 'kdb-md)
+            (get-text-property (match-end 2) 'kdb-md))
+        (goto-char (1+ (match-beginning 0)))
+      (let ((beg (match-beginning 0)))
+        (if (functionp rep)
+            (replace-match (funcall rep) t t)
+          (replace-match rep t))
+        (pcase mark
+          ('all (put-text-property beg (point) 'kdb-md t))
+          ('ends (put-text-property beg (1+ beg) 'kdb-md t)
+                 (put-text-property (1- (point)) (point) 'kdb-md t)))))))
 
 (defun kdb/markdown-to-org ()
   "Convert markdown buffer or region to org-mode format."
@@ -330,51 +327,48 @@ Kills the buffer afterwards unless KEEP (prefix arg) is non-nil."
     (save-excursion
       (save-restriction
         (narrow-to-region start end)
-        (goto-char (point-min))
+        (with-syntax-table (standard-syntax-table)
+          ;; Fenced code blocks: convert fences, escape and protect contents
+          (goto-char (point-min))
+          (while (re-search-forward "^\\([ \t]*\\)\\(```\\|~~~\\)[ \t]*\\([^ \t\n`]*\\).*$" nil t)
+            (let ((beg (match-beginning 0))
+                  (fence (match-string 2))
+                  (lang (match-string 3)))
+              (replace-match (concat (match-string 1) "#+begin_src"
+                                     (unless (string-empty-p lang) (concat " " lang)))
+                             t t)
+              (let ((body (line-beginning-position 2)))
+                (if (re-search-forward (concat "^[ \t]*" (regexp-quote fence) "[ \t]*$") nil t)
+                    (replace-match "#+end_src" t t)
+                  (goto-char (point-max))
+                  (insert "\n#+end_src"))
+                (org-escape-code-in-region (min body (line-beginning-position)) (line-beginning-position)))
+              (put-text-property beg (point) 'kdb-md t)))
 
-        ;; First handle code blocks to avoid interfering with other replacements
-        (while (re-search-forward "^```\\(.*\\)$" nil t)
-          (let ((lang (match-string 1)))
-            (if (string-empty-p (string-trim lang))
-                (replace-match "#+BEGIN_SRC")
-              (replace-match (concat "#+BEGIN_SRC " (string-trim lang))))))
-        (goto-char (point-min))
-        (while (re-search-forward "^```$" nil t)
-          (replace-match "#+END_SRC"))
-
-        ;; Headers # -> *
-        (goto-char (point-min))
-        (while (re-search-forward "^\\(#+\\) \\(.+\\)$" nil t)
-          (let ((level (length (match-string 1)))
-                (title (match-string 2)))
-            (replace-match (concat (make-string level ?*) " " title))))
-
-        ;; Bold **text** -> *text* (do this before italic to avoid conflicts)
-        (goto-char (point-min))
-        (while (re-search-forward "\\*\\*\\([^*\n]+?\\)\\*\\*" nil t)
-          (replace-match "*\\1*"))
-
-        ;; Italic _text_ -> /text/ (use underscore version to avoid conflicts)
-        (goto-char (point-min))
-        (while (re-search-forward "_\\([^_\n]+?\\)_" nil t)
-          (replace-match "/\\1/"))
-
-        ;; Code `text` -> =text=
-        (goto-char (point-min))
-        (while (re-search-forward "`\\([^`\n]+?\\)`" nil t)
-          (replace-match "=\\1="))
-
-        ;; Links [text](url) -> [[url][text]]
-        (goto-char (point-min))
-        (while (re-search-forward "\\[\\([^]]+\\)\\](\\([^)]+\\))" nil t)
-          (let ((text (match-string 1))
-                (url (match-string 2)))
-            (replace-match (concat "[[" url "][" text "]]"))))
-
-        ;; Lists: convert - or + to - (org uses - or +)
-        (goto-char (point-min))
-        (while (re-search-forward "^\\( *\\)[+*] " nil t)
-          (replace-match "\\1- "))))))
+          (kdb/md--convert "\\(`\\)\\([^`\n]+\\)`" "=\\2=" 'all)
+          ;; Backslash escapes (\_ \* ...) become literal, protected chars
+          (kdb/md--convert "\\(\\\\\\)\\([][\\\\`*_{}()#+.!|~<>-]\\)" "\\2" 'all)
+          (kdb/md--convert "\\(!?\\)\\[\\([^]\n]*\\)\\](\\([^) \n]+\\)\\(?: \"[^\"\n]*\"\\)?)"
+                           (lambda ()
+                             (let ((text (match-string 2)) (url (match-string 3)))
+                               (if (or (string= (match-string 1) "!") (string-empty-p text))
+                                   (format "[[%s]]" url)
+                                 (format "[[%s][%s]]" url text))))
+                           'all)
+          (kdb/md--convert "\\(\\*\\*\\)\\([^ \n]\\(?:[^\n]*?[^ \n]\\)?\\)\\*\\*" "*\\2*" 'ends)
+          (kdb/md--convert "\\_<\\(__\\)\\([^ \n]\\(?:[^\n]*?[^ \n]\\)?\\)__\\_>" "*\\2*" 'ends)
+          (kdb/md--convert "\\(~~\\)\\([^ \n]\\(?:[^\n]*?[^ \n]\\)?\\)~~" "+\\2+")
+          (kdb/md--convert "\\(\\*\\)\\([^* \n]\\(?:[^*\n]*?[^* \n]\\)?\\)\\*" "/\\2/")
+          ;; Only whole-word _x_, so file_names.txt stay intact
+          (kdb/md--convert "\\_<\\(_\\)\\([^_ \n]\\(?:[^_\n]*?[^_ \n]\\)?\\)_\\_>" "/\\2/")
+          (kdb/md--convert "^\\(\\)\\([-*_]\\)\\(?:[ \t]*\\2\\)\\{2,\\}[ \t]*$" "-----")
+          (kdb/md--convert "^\\([ \t]*\\)\\([*+]\\)[ \t]" "\\1- ")
+          (kdb/md--convert "^\\([ \t]*\\)\\(|[-:| \t]*-[-:| \t]*|\\)[ \t]*$" "\\1|-")
+          (kdb/md--convert "^\\(#\\{1,6\\}\\)[ \t]+\\(.*?\\)[ \t]*#*[ \t]*$"
+                           (lambda ()
+                             (concat (make-string (length (match-string 1)) ?*) " "
+                                     (match-string 2)))))
+        (remove-text-properties (point-min) (point-max) '(kdb-md nil))))))
 
 
 ;; Org-mode specific keybinding for wrapping in source blocks
@@ -427,6 +421,7 @@ macOS: interactive region select. Linux: scrot/maim. Windows: snippingtool."
 
   (setq org-export-with-broken-links 'mark
         org-export-with-smart-quotes t
+        org-export-with-sub-superscripts '{}
         org-export-preserve-breaks nil
         org-export-with-section-numbers nil
         org-html-validation-link nil

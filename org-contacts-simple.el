@@ -78,6 +78,27 @@
   (let ((contacts (kdb/get-all-contacts)))
     (completing-read "Person: " contacts nil nil)))
 
+(defun kdb/ensure-person-section (name)
+  "Ensure NAME has a top-level heading in current buffer."
+  (goto-char (point-min))
+  (unless (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote name)) nil t)
+    (goto-char (point-max))
+    (insert (format "\n* %s\n" name))))
+
+(defun kdb/goto-person-subsection (name section)
+  "Move to a new line under SECTION of person NAME, creating it if needed."
+  (goto-char (point-min))
+  (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote name)) nil t)
+  (let ((person-end (save-excursion
+                      (if (re-search-forward "^\\* " nil t)
+                          (line-beginning-position)
+                        (point-max)))))
+    (if (re-search-forward (format "^\\*\\* %s\\s-*$" (regexp-quote section)) person-end t)
+        (if (eobp) (insert "\n") (forward-line 1))
+      (goto-char person-end)
+      (unless (bolp) (insert "\n"))
+      (insert (format "** %s\n" section)))))
+
 ;;; ============================================================
 ;;; Contact Management
 ;;; ============================================================
@@ -201,13 +222,13 @@
     (with-current-buffer (find-file-noselect file)
       (kdb/ensure-person-section name)
       (goto-char (point-min))
-      (re-search-forward (format "^\\* %s" (regexp-quote name)) nil t)
+      (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote name)) nil t)
       (let ((person-end (save-excursion
                           (if (re-search-forward "^\\* " nil t)
                               (line-beginning-position)
                             (point-max)))))
         (if (re-search-forward "^\\*\\* Goals" person-end t)
-            (progn (end-of-line) (insert "\n"))
+            (if (eobp) (insert "\n") (forward-line 1))
           ;; Insert Goals as first subsection
           (end-of-line)
           (insert "\n** Goals\n")))
@@ -226,8 +247,8 @@
          (file (kdb/ensure-people-file)))
     (find-file file)
     (goto-char (point-min))
-    (if (re-search-forward (format "^\\* %s" (regexp-quote name)) nil t)
-        (progn (org-show-subtree) (recenter-top-bottom))
+    (if (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote name)) nil t)
+        (progn (org-fold-show-subtree) (recenter-top-bottom))
       (message "No performance data for %s in %s" name (kdb/current-fiscal-year)))))
 
 (defun kdb/view-person-all-years ()
@@ -245,7 +266,7 @@
           (with-temp-buffer
             (insert-file-contents file)
             (goto-char (point-min))
-            (when (re-search-forward (format "^\\* %s" (regexp-quote name)) nil t)
+            (when (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote name)) nil t)
               (let* ((start (line-beginning-position))
                      (end (or (save-excursion
                                 (forward-line 1)
@@ -284,7 +305,7 @@ Gathers wins, issues, feedback, goals, and follow-ups from the current FY."
         (with-temp-buffer
           (insert-file-contents file)
           (goto-char (point-min))
-          (when (re-search-forward (format "^\\* %s" (regexp-quote name)) nil t)
+          (when (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote name)) nil t)
             (let* ((start (line-beginning-position))
                    (end (or (save-excursion
                               (forward-line 1)
@@ -415,8 +436,8 @@ Gathers wins, issues, feedback, goals, and follow-ups from the current FY."
          (contact (completing-read "Contact: " contacts nil t)))
     (find-file kdb/contacts-file)
     (goto-char (point-min))
-    (re-search-forward (format "^\\* %s" (regexp-quote contact)) nil t)
-    (org-show-subtree)
+    (re-search-forward (format "^\\* %s\\s-*$" (regexp-quote contact)) nil t)
+    (org-fold-show-subtree)
     (recenter-top-bottom)))
 
 (defun kdb/search-all ()
