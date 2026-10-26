@@ -1933,6 +1933,8 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
         ;; Keep conversation data out of projects and this repo: the private
         ;; archive already has every transcript, so agent-shell's copy is off.
         agent-shell-transcript-file-path-function nil
+        ;; ...and don't offer to save one when a session is killed.
+        shell-maker-prompt-before-killing-buffer nil
         agent-shell-dot-subdir-function #'kdb-claude-agent-shell-subdir
         shell-maker-root-path (kdb-claude-agent-shell-subdir "")
         ;; Queue permission requests so C-c ' can answer them from anywhere.
