@@ -1462,6 +1462,7 @@ and refresh it in the background."
 ;; Autoload from org, not init-org: loading org requires init-org, so
 ;; loading init-org directly would run it twice.
 (autoload 'kdb/pandoc-convert "org" nil t)
+(autoload 'kdb/markdown-export "org" nil t)
 (dolist (binding '(("M" . kdb/markdown-to-org) ("o" . kdb/note-new)
                    ("RET" . kdb/note-capture) ("n" . kdb/add-contact)
                    ("m" . kdb/add-meeting-note) ("1" . kdb/log-1on1)
@@ -1641,9 +1642,11 @@ and refresh it in the background."
 
 (use-package markdown-mode
   :mode ("README\\.md\\'" . gfm-mode)
-  :init (setq markdown-command "multimarkdown")
+  :init (setq markdown-command (if (executable-find "multimarkdown") "multimarkdown" "pandoc"))
   :bind (:map markdown-mode-map
-              ("C-c C-e" . markdown-do)))
+              ("C-c C-e" . markdown-do)
+              ;; Export through org (C-c C-c e); the native one needs multimarkdown
+              ([remap markdown-export] . kdb/markdown-export)))
 
 
 
@@ -1912,7 +1915,8 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
                  kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review
-                 kdb-claude-watch-pr kdb-claude-schedule kdb-claude-run-block)
+                 kdb-claude-watch-pr kdb-claude-schedule kdb-claude-run-block
+                 kdb-claude-reply-to-org)
                 ("init-claude-print" kdb-claude-print)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
                  kdb-claude-search kdb-claude-import-export

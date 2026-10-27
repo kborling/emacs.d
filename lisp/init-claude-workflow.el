@@ -327,6 +327,56 @@ the results land under it."
         (insert (org-escape-code-in-string code) "\n#+end_src\n")))
     (message "Edit if needed, then C-c C-c to run")))
 
+(defun kdb-claude--last-reply (jsonl)
+  "Markdown of the last reply in Claude Code transcript JSONL.
+That is the text of every assistant message after the last prompt;
+tool calls and results are left out."
+  ;; ponytail: reads the whole transcript; seek from the end if big ones lag
+  (let (texts)
+    (with-temp-buffer
+      (insert-file-contents jsonl)
+      (dolist (line (split-string (buffer-string) "\n" t))
+        (when-let* ((obj (ignore-errors
+                           (json-parse-string line :object-type 'alist :array-type 'list
+                                              :null-object nil :false-object nil)))
+                    ;; Not api-request-blob etc., which repeat messages
+                    ((member (alist-get 'type obj) '("user" "assistant")))
+                    ((not (or (alist-get 'isMeta obj) (alist-get 'isSidechain obj))))
+                    (msg (alist-get 'message obj))
+                    (content (alist-get 'content msg)))
+          (let ((text (if (stringp content)
+                          (list content)
+                        (delq nil (mapcar (lambda (b) (and (equal (alist-get 'type b) "text")
+                                                           (alist-get 'text b)))
+                                          content)))))
+            (pcase (alist-get 'role msg)
+              ;; A real prompt starts a new reply; tool results and
+              ;; <system-reminder>-style injections don't
+              ("user" (when (seq-some (lambda (s) (not (string-prefix-p "<" (string-trim-left s)))) text)
+                        (setq texts nil)))
+              ("assistant" (setq texts (append texts text))))))))
+    (string-join (seq-remove #'string-empty-p (mapcar #'string-trim texts)) "\n\n")))
+
+(declare-function kdb/md-to-org-buffer "init-org")
+(declare-function agent-shell-session-id "agent-shell")
+
+;;;###autoload
+(defun kdb-claude-reply-to-org ()
+  "Open this session's last reply as org, from its raw markdown.
+\\[org-export-dispatch] there exports it to HTML, markdown, ODT..."
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-mode)
+    (user-error "Run this in a Claude session buffer"))
+  (let* ((id (or (agent-shell-session-id) (user-error "No session yet")))
+         (jsonl (or (car (file-expand-wildcards
+                          (expand-file-name (format "*/%s.jsonl" id) (kdb-claude--projects-dir))))
+                    (user-error "No transcript for session %s" id)))
+         (md (kdb-claude--last-reply jsonl)))
+    (when (string-empty-p md) (user-error "No reply yet"))
+    (require 'org)                      ; loads init-org
+    (kdb/md-to-org-buffer md (format "*claude reply: %s*" (buffer-name)))
+    (message (substitute-command-keys "\\<org-mode-map>\\[org-export-dispatch] to export"))))
+
 ;;; ============================================================
 ;;; Sessions talking to sessions
 ;;; ============================================================
@@ -675,7 +725,8 @@ or the session ends.  Run again in a watched session to stop."
     ("s" "Region/note/files → session" kdb-claude-send)
     ("f" "File → session" agent-shell-send-file-to)
     ("v" "Review my changes" kdb-claude-review)
-    ("x" "Code block → org babel (C-c C-c runs)" kdb-claude-run-block)]
+    ("x" "Code block → org babel (C-c C-c runs)" kdb-claude-run-block)
+    ("o" "Last reply → org (C-c C-e exports)" kdb-claude-reply-to-org)]
    ["Sessions"
     ("'" "Answer / next waiting" kdb-claude-answer)
     ("d" "Dashboard" agent-shell-attention-dashboard)

@@ -427,6 +427,33 @@ returning literal text.  MARK protects the result from later rules:
                                      (match-string 2)))))
         (remove-text-properties (point-min) (point-max) '(kdb-md nil))))))
 
+(defun kdb/md-to-org-buffer (md name)
+  "Show markdown text MD converted to org in a new buffer NAME; return it.
+The buffer keeps the current `default-directory', so exports land there."
+  (let ((buf (generate-new-buffer name)))
+    (with-current-buffer buf
+      (insert md)
+      (kdb/markdown-to-org)
+      (org-mode)
+      (goto-char (point-min)))
+    (pop-to-buffer buf)
+    buf))
+
+(defun kdb/markdown-export ()
+  "Export the markdown buffer or region through org: HTML, markdown, ODT...
+Converts a copy to org in a new buffer and opens `org-export-dispatch'
+there; the markdown is untouched.  Exports are named after its file."
+  (interactive)
+  (let ((file buffer-file-name)
+        (md (if (use-region-p)
+                (buffer-substring-no-properties (region-beginning) (region-end))
+              (buffer-substring-no-properties (point-min) (point-max)))))
+    (with-current-buffer (kdb/md-to-org-buffer
+                          md (format "*%s.org*" (if file (file-name-base file) (buffer-name))))
+      (when file
+        (insert (format "#+EXPORT_FILE_NAME: %s\n" (file-name-base file))))
+      (org-export-dispatch))))
+
 
 ;; Org-mode specific keybinding for wrapping in source blocks
 (with-eval-after-load 'org

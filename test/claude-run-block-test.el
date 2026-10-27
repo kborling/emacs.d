@@ -149,6 +149,49 @@ Done.")
         (with-current-buffer "*claude blocks*"
           (should (equal (buffer-string) "#+begin_src sh :dir /sudo::\nid\n#+end_src\n")))))))
 
+;;; Last reply → org (kdb-claude-reply-to-org)
+
+(defconst test-transcript
+  (mapconcat
+   #'json-encode
+   '(((type . "user") (message (role . "user") (content . "first prompt")))
+     ((type . "assistant") (message (role . "assistant") (content . [((type . "text") (text . "old reply"))])))
+     ((type . "user") (message (role . "user") (content . [((type . "text") (text . "second prompt"))])))
+     ((type . "assistant") (message (role . "assistant")
+                                    (content . [((type . "text") (text . "Checking [x.el](https://g.com/x.el#L84)."))
+                                                ((type . "tool_use") (name . "Bash") (input (command . "ls")))])))
+     ((type . "user") (message (role . "user") (content . [((type . "tool_result") (content . "out"))])))
+     ((type . "user") (isMeta . t) (message (role . "user") (content . "meta prompt")))
+     ((type . "user") (message (role . "user") (content . "<system-reminder>x</system-reminder>")))
+     ((type . "api-request-blob") (message (role . "assistant") (content . [((type . "text") (text . "Checking"))])))
+     ((type . "assistant") (isSidechain . t) (message (role . "assistant") (content . [((type . "text") (text . "subagent"))])))
+     ((type . "assistant") (message (role . "assistant") (content . [((type . "text") (text . "## Done\n\n**All** good."))]))))
+   "\n"))
+
+(ert-deftest reply-last-reply-from-transcript ()
+  (let ((jsonl (make-temp-file "transcript" nil ".jsonl" (concat test-transcript "\nnot json\n"))))
+    (should (equal (kdb-claude--last-reply jsonl)
+                   "Checking [x.el](https://g.com/x.el#L84).\n\n## Done\n\n**All** good."))
+    (delete-file jsonl)))
+
+(ert-deftest reply-to-org-opens-converted-reply ()
+  (let* ((config (make-temp-file "claude-config" t))
+         (process-environment (cons (concat "CLAUDE_CONFIG_DIR=" config) process-environment)))
+    (make-directory (expand-file-name "projects/-proj" config) t)
+    (with-temp-file (expand-file-name "projects/-proj/sid.jsonl" config) (insert test-transcript))
+    (with-current-buffer (generate-new-buffer "*session*")
+      (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
+                ((symbol-function 'agent-shell-session-id) (lambda (&rest _) "sid")))
+        (kdb-claude-reply-to-org)))
+    (with-current-buffer "*claude reply: *session**"
+      (should (derived-mode-p 'org-mode))
+      (should (equal (buffer-string)
+                     "Checking [[https://g.com/x.el#L84][x.el]].\n\n** Done\n\n*All* good."))
+      (should (string-match-p "<a href=\"https://g.com/x.el#L84\">x.el</a>"
+                              (org-export-as 'html nil nil t)))
+      (should (string-match-p "\\[x.el\\](https://g.com/x.el#L84)" (org-export-as 'md nil nil t))))
+    (delete-directory config t)))
+
 (ert-deftest run-block-none-before-point ()
   (with-current-buffer (test-buffer)
     (goto-char (point-min))

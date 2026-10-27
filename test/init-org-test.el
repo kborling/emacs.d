@@ -55,6 +55,27 @@
   (let ((html (org-export-string-as (md "[x.el\nline 84][1]\n\n[1]: https://github.com/k/r/blob/main/x.el#L84-L90") 'html t)))
     (should (string-match-p "<a href=\"https://github.com/k/r/blob/main/x.el#L84-L90\">x.el line 84</a>" html))))
 
+(ert-deftest markdown-export-via-org ()
+  ;; A copy goes to org and the dispatcher opens on it; exports are named
+  ;; after the markdown file, next to it.  The markdown is untouched.
+  (let* ((dir (file-name-as-directory (make-temp-file "mdexport" t)))
+         (file (expand-file-name "notes.md" dir))
+         dispatched)
+    (with-temp-file file (insert "# Notes\n\nSee [x.el](https://g.com/x.el#L84).\n"))
+    (with-current-buffer (find-file-noselect file)
+      (cl-letf (((symbol-function 'org-export-dispatch) (lambda () (setq dispatched (current-buffer)))))
+        (kdb/markdown-export))
+      (should (equal (buffer-string) "# Notes\n\nSee [x.el](https://g.com/x.el#L84).\n"))
+      (kill-buffer))
+    (with-current-buffer dispatched
+      (should (derived-mode-p 'org-mode))
+      (should (equal (buffer-string) "#+EXPORT_FILE_NAME: notes\n* Notes\n\nSee [[https://g.com/x.el#L84][x.el]].\n"))
+      (let ((html (org-html-export-to-html)))
+        (should (equal (expand-file-name html dir) (expand-file-name "notes.html" dir)))
+        (should (file-exists-p (expand-file-name "notes.html" dir))))
+      (kill-buffer))
+    (delete-directory dir t)))
+
 (ert-deftest org-html-filenames ()
   (let ((html (org-export-string-as (md "Open test_test.txt and test\\_x.txt") 'html t)))
     (should (string-match-p "test_test\\.txt and test_x\\.txt" html))
