@@ -370,19 +370,46 @@ returning literal text.  MARK protects the result from later rules:
           (kdb/md--convert "\\(`\\)\\([^`\n]+\\)`" "=\\2=" 'all)
           ;; Backslash escapes (\_ \* ...) become literal, protected chars
           (kdb/md--convert "\\(\\\\\\)\\([][\\\\`*_{}()#+.!|~<>-]\\)" "\\2" 'all)
-          ;; URLs may contain one level of parens, e.g. Foo_(bar)
-          (kdb/md--convert "\\(!?\\)\\[\\([^]\n]*\\)\\](<?\\(\\(?:[^() \n<>]\\|([^() \n]*)\\)+\\)>?\\(?: \"[^\"\n]*\"\\)?)"
-                           (lambda ()
-                             (let* ((text (match-string 2))
-                                    (url (match-string 3))
-                                    (url (cond ((string-prefix-p "#" url)
-                                                (or (kdb/md--heading-link (substring url 1)) url))
-                                               ((string-match-p "\\`\\(?:[a-z]+:\\|[/~.]\\)" url) url)
-                                               (t (concat "file:" url)))))
-                               (if (or (string= (match-string 1) "!") (string-empty-p text))
-                                   (format "[[%s]]" url)
-                                 (format "[[%s][%s]]" url text))))
-                           'all)
+          ;; Link text: no brackets, may wrap onto the next line but not
+          ;; across a blank line (so a stray "[" can't swallow paragraphs)
+          (let ((txt "\\(?:[^][\n]\\|\n[ \t]*[^][\n \t]\\)"))
+            ;; Reference links ([text][label], [text][], [label] + "[label]: url"
+            ;; lines) become inline links for the rule below
+            (let ((norm (lambda (s) (downcase (replace-regexp-in-string "[ \t\n]+" " " s))))
+                  defs)
+              (goto-char (point-min))
+              (while (re-search-forward (concat "^ \\{0,3\\}\\[\\([^]^\n][^]\n]*\\)\\]:[ \t]*<?\\([^ \t\n<>]+\\)>?"
+                                                "\\(?:[ \t]+\\(?:\"[^\"\n]*\"\\|'[^'\n]*'\\|([^)\n]*)\\)\\)?"
+                                                "[ \t]*\\(?:\n\\|\\'\\)")
+                                        nil t)
+                (unless (get-text-property (match-beginning 0) 'kdb-md)
+                  (let ((label (funcall norm (match-string 1))))
+                    (unless (assoc label defs)  ; first definition wins
+                      (push (cons label (match-string 2)) defs)))
+                  (replace-match "" t t)))
+              (goto-char (point-min))
+              (while (and defs (re-search-forward (concat "\\[\\(" txt "+\\)\\]\\(?:\\[\\([^][\n]*\\)\\]\\)?") nil t))
+                (let* ((label (match-string 2))
+                       (url (cdr (assoc (funcall norm (if (member label '(nil "")) (match-string 1) label))
+                                        defs))))
+                  (when (and url
+                             (not (get-text-property (match-beginning 0) 'kdb-md))
+                             (not (and (null label) (eq (char-after) ?\())))
+                    (replace-match (format "[%s](%s)" (match-string 1) url) t t)))))
+            ;; URLs may contain one level of parens, e.g. Foo_(bar)
+            (kdb/md--convert (concat "\\(!?\\)\\[\\(" txt "*\\)\\](<?\\(\\(?:[^() \n<>]\\|([^() \n]*)\\)+\\)>?"
+                                     "\\(?: \"[^\"\n]*\"\\)?)")
+                             (lambda ()
+                               (let* ((text (replace-regexp-in-string "[ \t]*\n[ \t]*" " " (match-string 2)))
+                                      (url (match-string 3))
+                                      (url (cond ((string-prefix-p "#" url)
+                                                  (or (kdb/md--heading-link (substring url 1)) url))
+                                                 ((string-match-p "\\`\\(?:[a-z]+:\\|[/~.]\\)" url) url)
+                                                 (t (concat "file:" url)))))
+                                 (if (or (string= (match-string 1) "!") (string-empty-p text))
+                                     (format "[[%s]]" url)
+                                   (format "[[%s][%s]]" url text))))
+                             'all))
           ;; Bare URLs: leave as-is, but keep later rules out of them
           (kdb/md--convert "\\(<?\\)\\([a-z]+://[^ \t\n<>*]+\\)>?" "\\2" 'all)
           (kdb/md--convert "\\(\\*\\*\\)\\([^ \n]\\(?:[^\n]*?[^ \n]\\)?\\)\\*\\*" "*\\2*" 'ends)

@@ -300,12 +300,21 @@ the results land under it."
     (pop-to-buffer (get-buffer-create "*claude blocks*"))
     (unless (derived-mode-p 'org-mode) (org-mode))
     (goto-char (point-max))
-    (insert (if (bobp) "" "\n")
-            (let ((lang (alist-get lang kdb-claude--babel-langs lang nil #'equal)))
-              (format "#+begin_src %s :dir %S%s\n" lang (abbreviate-file-name dir)
-                      (if (equal lang "emacs-lisp") "" " :results output"))))
-    (save-excursion
-      (insert (org-escape-code-in-string code) "\n#+end_src\n"))
+    (insert (if (bobp) "" "\n"))
+    (if (and (equal lang "org") (string-match-p "\\`[ \t\n]*#\\+begin_src" code))
+        ;; Already a complete src block: insert it as-is (adding :dir if
+        ;; missing), don't nest it.
+        (progn
+          (save-excursion (insert (string-trim-left code) "\n"))
+          (unless (string-match-p ":dir\\_>" (buffer-substring (point) (pos-eol)))
+            (save-excursion
+              (end-of-line)
+              (insert (format " :dir %S" (abbreviate-file-name dir))))))
+      (insert (let ((lang (alist-get lang kdb-claude--babel-langs lang nil #'equal)))
+                (format "#+begin_src %s :dir %S%s\n" lang (abbreviate-file-name dir)
+                        (if (equal lang "emacs-lisp") "" " :results output"))))
+      (save-excursion
+        (insert (org-escape-code-in-string code) "\n#+end_src\n")))
     (message "Edit if needed, then C-c C-c to run")))
 
 ;;; ============================================================
