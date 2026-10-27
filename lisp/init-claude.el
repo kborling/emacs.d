@@ -172,7 +172,8 @@ appended while converting make the JSONL newer and are picked up next sync."
                          :object-type 'alist :array-type 'list :null-object nil))
                    (msg (alist-get 'message obj))
                    (role (alist-get 'role msg))
-                   (text (when (member role '("user" "assistant"))
+                   ;; By entry type: api-request-blob entries repeat messages
+                   (text (when (member (alist-get 'type obj) '("user" "assistant"))
                            (string-trim (kdb-claude--extract-text
                                          (alist-get 'content msg))))))
               (setq cwd (or cwd (alist-get 'cwd obj)))

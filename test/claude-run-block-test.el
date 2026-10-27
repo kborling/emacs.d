@@ -174,6 +174,19 @@ Done.")
                    "Checking [x.el](https://g.com/x.el#L84).\n\n## Done\n\n**All** good."))
     (delete-file jsonl)))
 
+(ert-deftest archive-skips-repeated-messages ()
+  ;; The archive converter, on the same transcript: api-request-blob
+  ;; copies don't become sections.
+  (let ((jsonl (make-temp-file "transcript" nil ".jsonl" test-transcript))
+        (org (make-temp-file "archive" nil ".org")))
+    (kdb-claude--jsonl-to-org jsonl org)
+    (with-temp-buffer
+      (insert-file-contents org)
+      (should (= 1 (how-many "^Checking" (point-min) (point-max))))
+      (should (= 8 (how-many "^\\* \\(You\\|Claude\\)$" (point-min) (point-max)))))
+    (delete-file jsonl)
+    (delete-file org)))
+
 (ert-deftest reply-to-org-opens-converted-reply ()
   (let* ((config (make-temp-file "claude-config" t))
          (process-environment (cons (concat "CLAUDE_CONFIG_DIR=" config) process-environment)))
