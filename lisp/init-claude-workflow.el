@@ -238,6 +238,77 @@ opens its worktree; a new name creates the branch in a new worktree."
     (kdb-claude--new-in (if branch (kdb-claude--worktree project branch) project))))
 
 ;;; ============================================================
+;;; Running code blocks from replies
+;;; ============================================================
+
+(defun kdb-claude--code-blocks ()
+  "Code blocks in the buffer, as (LANG BODY-BEG BODY-END).
+In agent-shell, the code blocks it rendered (fences replaced by a
+\"LANG ⧉\" label); stray fences in tool output or thinking don't count.
+Elsewhere, raw fenced blocks."
+  (let ((prop 'agent-shell-markdown-source-block-body)
+        (pos (point-min))
+        blocks)
+    (while-let ((beg (text-property-any pos (point-max) prop t)))
+      (let ((end (or (next-single-property-change beg prop) (point-max))))
+        (unless (invisible-p beg)               ; collapsed sections
+          (push (list (save-excursion
+                        (goto-char beg)
+                        (if (re-search-backward "^\\(\\S-+\\) ⧉" (line-beginning-position -3) t)
+                            (let ((l (downcase (match-string-no-properties 1))))
+                              (if (equal l "snippet") "" l))
+                          ""))
+                      beg end)
+                blocks))
+        (setq pos end)))
+    (unless blocks
+      (let (open)
+        (save-excursion
+          (goto-char (point-min))
+          (while (re-search-forward "^[ \t]*```\\([^`\n]*\\)$" nil t)
+            (if open
+                (progn (push (list (car open) (cdr open) (match-beginning 0)) blocks)
+                       (setq open nil))
+              (setq open (cons (downcase (or (car (split-string (match-string-no-properties 1))) ""))
+                               (1+ (line-end-position)))))))))
+    (nreverse blocks)))
+
+;; Markdown fence languages -> org babel languages.
+(defconst kdb-claude--babel-langs
+  '(("" . "bash") ("sh" . "bash") ("shell" . "bash") ("console" . "bash") ("zsh" . "bash")
+    ("elisp" . "emacs-lisp") ("pwsh" . "powershell") ("ps1" . "powershell") ("ps" . "powershell")))
+
+(declare-function org-escape-code-in-string "org-src")
+
+;;;###autoload
+(defun kdb-claude-run-block ()
+  "Copy the code block at point, or the last one before it, to org babel.
+It is appended to *claude blocks* as a source block that runs in this
+buffer's directory; edit it if needed, then \\[org-ctrl-c-ctrl-c] runs it and
+the results land under it."
+  (interactive)
+  (pcase-let* ((pos (point))
+               (blocks (kdb-claude--code-blocks))
+               (`(,lang ,beg ,end)
+                (or (seq-find (lambda (b) (<= (nth 1 b) pos (nth 2 b))) blocks)
+                    (car (last (seq-filter (lambda (b) (<= (nth 2 b) pos)) blocks)))
+                    (user-error "No code block at or before point")))
+               (code (string-trim-right (buffer-substring-no-properties beg end)))
+               (dir default-directory))
+    (pulse-momentary-highlight-region beg end)
+    (require 'org)
+    (pop-to-buffer (get-buffer-create "*claude blocks*"))
+    (unless (derived-mode-p 'org-mode) (org-mode))
+    (goto-char (point-max))
+    (insert (if (bobp) "" "\n")
+            (let ((lang (alist-get lang kdb-claude--babel-langs lang nil #'equal)))
+              (format "#+begin_src %s :dir %S%s\n" lang (abbreviate-file-name dir)
+                      (if (equal lang "emacs-lisp") "" " :results output"))))
+    (save-excursion
+      (insert (org-escape-code-in-string code) "\n#+end_src\n"))
+    (message "Edit if needed, then C-c C-c to run")))
+
+;;; ============================================================
 ;;; Sessions talking to sessions
 ;;; ============================================================
 
@@ -584,7 +655,8 @@ or the session ends.  Run again in a watched session to stop."
    ["Send"
     ("s" "Region/note/files → session" kdb-claude-send)
     ("f" "File → session" agent-shell-send-file-to)
-    ("v" "Review my changes" kdb-claude-review)]
+    ("v" "Review my changes" kdb-claude-review)
+    ("x" "Code block → org babel (C-c C-c runs)" kdb-claude-run-block)]
    ["Sessions"
     ("'" "Answer / next waiting" kdb-claude-answer)
     ("d" "Dashboard" agent-shell-attention-dashboard)

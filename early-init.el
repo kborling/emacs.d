@@ -44,7 +44,13 @@
   (let ((npm (expand-file-name "npm" (getenv "APPDATA"))))
     (when (and (file-directory-p npm) (not (member npm exec-path)))
       (add-to-list 'exec-path npm)
-      (setenv "PATH" (concat npm path-separator (getenv "PATH"))))))
+      (setenv "PATH" (concat npm path-separator (getenv "PATH")))))
+  ;; Git's bin first, so "bash" (org babel, Claude code blocks) is Git Bash,
+  ;; not WSL's System32\bash.exe.
+  (when-let* ((git (executable-find "git"))
+              (bin (expand-file-name "../bin" (file-name-directory git)))
+              ((file-executable-p (expand-file-name "bash.exe" bin))))
+    (add-to-list 'exec-path bin)))
 
 ;; UI chrome — disable before frame draws to avoid flicker
 ;; Keep macOS menu bar (integrates with system top bar)

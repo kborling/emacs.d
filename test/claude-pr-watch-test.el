@@ -50,7 +50,7 @@ esac
 (defvar test-sh
   (if (not (eq system-type 'windows-nt))
       "sh"
-    (seq-find #'file-executable-p
+    (seq-find (lambda (f) (and f (file-executable-p f)))
               (cons (executable-find "sh")
                     (when-let* ((git (executable-find "git")))
                       (list (expand-file-name "../bin/sh.exe" (file-name-directory git))

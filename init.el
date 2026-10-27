@@ -1912,7 +1912,7 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
                  kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review
-                 kdb-claude-watch-pr kdb-claude-schedule)
+                 kdb-claude-watch-pr kdb-claude-schedule kdb-claude-run-block)
                 ("init-claude-print" kdb-claude-print)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
                  kdb-claude-search kdb-claude-import-export

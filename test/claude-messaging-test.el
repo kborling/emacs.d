@@ -73,7 +73,7 @@
          (child (kdb-claude--session-buffer child-id)))
     (should child)
     (pcase-let ((`(,dir ,prompt ,env) (car test-started)))
-      (should (equal dir "/tmp/"))
+      (should (equal dir (expand-file-name "/tmp/")))
       (should (string-prefix-p "Fix the flaky test" prompt))
       (should (string-match-p (format "your session id is %s" child-id) prompt))
       ;; The child's process knows the same id the footer tells it.

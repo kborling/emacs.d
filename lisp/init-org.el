@@ -99,6 +99,12 @@
        (sql . t))))
   (advice-add 'org-babel-execute-src-block :before #'kdb/org-babel-load-languages)
 
+  (defun org-babel-execute:powershell (body _params)
+    "Run BODY with PowerShell (pwsh, else Windows PowerShell)."
+    (org-babel-eval (concat (shell-quote-argument (or (executable-find "pwsh") "powershell"))
+                            " -NoProfile -NonInteractive -Command -")
+                    body))
+
   ;; Capture templates
   (setq org-capture-templates
         '(("t" "Todo" entry (file "~/.org/inbox.org")
