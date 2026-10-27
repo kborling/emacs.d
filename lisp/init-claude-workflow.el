@@ -271,7 +271,17 @@ Elsewhere, raw fenced blocks."
                        (setq open nil))
               (setq open (cons (downcase (or (car (split-string (match-string-no-properties 1))) ""))
                                (1+ (line-end-position)))))))))
-    (nreverse blocks)))
+    ;; Bare org src blocks outside any fence, as ("org" BEG END) so the
+    ;; whole block, header included, is copied as-is.
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward "^[ \t]*#\\+begin_src\\_>" nil t)
+        (let ((beg (line-beginning-position)))
+          (when (and (not (invisible-p beg))
+                     (not (seq-find (lambda (b) (<= (nth 1 b) beg (nth 2 b))) blocks))
+                     (re-search-forward "^[ \t]*#\\+end_src[ \t]*$" nil t))
+            (push (list "org" beg (min (1+ (point)) (point-max))) blocks)))))
+    (sort blocks (lambda (a b) (< (nth 1 a) (nth 1 b))))))
 
 ;; Markdown fence languages -> org babel languages.
 (defconst kdb-claude--babel-langs

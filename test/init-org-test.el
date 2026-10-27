@@ -32,6 +32,29 @@
     (should (string-match "<h2 id=\"\\([^\"]+\\)\"" html))
     (should (string-match-p (format "<a href=\"#%s\">here</a>" (match-string 1 html)) html))))
 
+(ert-deftest md-to-org-links ()
+  ;; Link text wrapped onto the next line is joined
+  (should (equal (md "[the function that\n  handles lids](https://github.com/k/r/blob/main/x.el#L84)")
+                 "[[https://github.com/k/r/blob/main/x.el#L84][the function that handles lids]]"))
+  ;; ...but not across a blank line, so a stray [ can't swallow paragraphs
+  (should (equal (md "[a\n\nb](http://x)") "[a\n\nb](http://x)"))
+  (should (equal (md "range [0, 1) and\n\nsee [docs](http://x)") "range [0, 1) and\n\nsee [[http://x][docs]]"))
+  ;; Reference links: full, collapsed, shortcut; all title styles; case-insensitive
+  (should (equal (md "[init.el][1], [Ref][], [ref] and [nodef]\n\n[1]: https://g.com/init.el#L84\n[ref]: <https://g.com/x.el#L9> \"T\"")
+                 "[[https://g.com/init.el#L84][init.el]], [[https://g.com/x.el#L9][Ref]], [[https://g.com/x.el#L9][ref]] and [nodef]\n\n"))
+  (should (equal (md "[a][s] [b][p]\n[s]: http://s 'T'\n[p]: http://p (T)") "[[http://s][a]] [[http://p][b]]\n"))
+  ;; First definition wins
+  (should (equal (md "[d]\n[d]: http://first\n[d]: http://second") "[[http://first][d]]\n"))
+  ;; Not definitions: prose, footnotes, code blocks; checkboxes stay
+  (should (equal (md "[note]: this is important") "[note]: this is important"))
+  (should (equal (md "Text[^1].\n\n[^1]: The footnote here.") "Text[^1].\n\n[^1]: The footnote here."))
+  (should (equal (md "- [ ] [x]\n```\n[x]: http://no\n```\n[y]: http://y")
+                 "- [ ] [x]\n#+begin_src\n[x]: http://no\n#+end_src\n"))
+  (should (equal (md "`[a][y]` [y]\n[y]: http://y") "=[a][y]= [[http://y][y]]\n"))
+  ;; GitHub line links survive the HTML export
+  (let ((html (org-export-string-as (md "[x.el\nline 84][1]\n\n[1]: https://github.com/k/r/blob/main/x.el#L84-L90") 'html t)))
+    (should (string-match-p "<a href=\"https://github.com/k/r/blob/main/x.el#L84-L90\">x.el line 84</a>" html))))
+
 (ert-deftest org-html-filenames ()
   (let ((html (org-export-string-as (md "Open test_test.txt and test\\_x.txt") 'html t)))
     (should (string-match-p "test_test\\.txt and test_x\\.txt" html))

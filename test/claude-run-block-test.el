@@ -118,6 +118,37 @@ Done.")
     (test-open (current-buffer) #'point-max)     ; newest: the elisp block
     (should (string-match-p ": 3" (test-execute)))))
 
+(ert-deftest run-block-org-src-block-inserted-as-is ()
+  ;; An org fence holding a src block, with a leading blank line: not nested,
+  ;; and :dir is added to its header.
+  (with-current-buffer (generate-new-buffer "*org-fence*")
+    (setq default-directory (file-name-as-directory (make-temp-file "blockdir" t)))
+    (insert "```org\n\n#+begin_src sh\necho nested\n#+end_src\n```\n")
+    (let ((dir default-directory))
+      (test-open (current-buffer) #'point-max)
+      (with-current-buffer "*claude blocks*"
+        (should (equal (buffer-string)
+                       (format "#+begin_src sh :dir %S\necho nested\n#+end_src\n" (abbreviate-file-name dir))))
+        (should (string-match-p "nested" (test-execute))))))
+  ;; Its own :dir is kept.
+  (with-current-buffer (generate-new-buffer "*org-fence*")
+    (insert "```org\n#+begin_src sh :dir /sudo::\nid\n#+end_src\n```\n")
+    (test-open (current-buffer) #'point-max))
+  (with-current-buffer "*claude blocks*"
+    (should (equal (buffer-string) "#+begin_src sh :dir /sudo::\nid\n#+end_src\n"))))
+
+(ert-deftest run-block-bare-org-src-block ()
+  ;; A #+begin_src block with no fence, raw and as agent-shell renders it.
+  (require 'agent-shell-markdown)
+  (let ((md "Run:\n\n#+begin_src sh :dir /sudo::\nid\n#+end_src\n\nthen\n\n```elisp\n(+ 1 2)\n```\n"))
+    (dolist (text (list md (agent-shell-markdown-convert md)))
+      (with-current-buffer (generate-new-buffer "*bare*")
+        (insert text)
+        (should (equal (mapcar #'car (kdb-claude--code-blocks)) '("org" "elisp")))
+        (test-open (current-buffer) (lambda () (search-forward "id")))
+        (with-current-buffer "*claude blocks*"
+          (should (equal (buffer-string) "#+begin_src sh :dir /sudo::\nid\n#+end_src\n")))))))
+
 (ert-deftest run-block-none-before-point ()
   (with-current-buffer (test-buffer)
     (goto-char (point-min))
