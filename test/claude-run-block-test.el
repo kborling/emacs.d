@@ -97,25 +97,18 @@ Done.")
         (should (string-match-p "plain" out))
         (should (string-match-p "\\* not an org heading" out))))))
 
-(defvar test-ping nil)
-(defun test-ping (arg)
-  "Command the keystroke test runs through M-x."
-  (interactive "sArg: ")
-  (setq test-ping arg))
-
-(ert-deftest run-block-keystrokes-replay-as-keys ()
-  ;; A block of Emacs keys, unlabeled or labeled as shell, is replayed
-  ;; with `execute-kbd-macro' rather than run in bash.
+(ert-deftest run-block-keystrokes-are-typed ()
+  ;; A block of Emacs keys, unlabeled or labeled as shell, is queued as
+  ;; input (typed once the running command ends), not run in bash.
   (dolist (fence '("" "bash"))
-    (setq test-ping nil)
     (with-current-buffer (generate-new-buffer "*keys*")
-      (insert (format "```%s\nM-x test-ping RET hello RET\n```\n" fence))
+      (insert (format "```%s\nM-x emacs-version RET\n```\n" fence))
       (test-open (current-buffer) #'point-max))
     (with-current-buffer "*claude blocks*"
-      (should (string-match-p "\\`#\\+begin_src emacs-lisp .*\n(execute-kbd-macro (kbd \"M-x test-ping RET hello RET\"))\n"
-                              (buffer-string)))
-      (org-babel-execute-src-block))
-    (should (equal test-ping "hello")))
+      (should (string-prefix-p "#+begin_src emacs-lisp " (buffer-string)))
+      (let ((unread-command-events nil))
+        (should (equal (org-babel-execute-src-block) "Typed: M-x emacs-version RET"))
+        (should (equal unread-command-events (listify-key-sequence (kbd "M-x emacs-version RET")))))))
   ;; Shell commands that merely contain C- or M- stay shell
   (dolist (cmd '("make -C src" "git commit -m M-x" "echo C-c"))
     (with-current-buffer (generate-new-buffer "*keys*")
@@ -285,9 +278,13 @@ Done.")
     ;; result lands in *claude blocks*, and focus stays in the session
     (ignore-errors (kill-buffer "*claude blocks*"))
     (goto-char label)
-    (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) (error "Asked"))))
-      (let ((org-confirm-babel-evaluate nil))
-        (kdb-claude-run-block-at-label)))
+    (let (last)
+      (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) (error "Asked")))
+                ((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq last (and fmt (apply #'format fmt args))))))
+        (let ((org-confirm-babel-evaluate nil))
+          (kdb-claude-run-block-at-label)))
+      (should (equal last "42")))                 ; output echoed, not just "complete"
     (should (eq (selected-window) session))
     (should (= (point) label))
     (with-current-buffer "*claude blocks*"

@@ -309,11 +309,15 @@ the results land under it."
                (code (string-trim-right (buffer-substring-no-properties beg end)))
                (dir default-directory))
     ;; Emacs keystrokes ("M-x load-library RET foo RET"), not shell:
-    ;; replay them with `execute-kbd-macro'.
+    ;; queue them as input, typed once this command is done.  Not
+    ;; `execute-kbd-macro': under a macro, commands aren't interactive,
+    ;; so e.g. M-x emacs-version echoes nothing.
     (when (and (member lang '("" "console" "shell" "sh" "bash" "text"))
                (string-match-p "\\`[ \t]*[CMs]-[^ \t\n]+\\(?:[ \t]+[^ \t\n]+\\)*[ \t]*\\'" code))
-      (setq lang "elisp"
-            code (format "(execute-kbd-macro (kbd %S))" (string-trim code))))
+      (let ((keys (string-trim code)))
+        (setq lang "elisp"
+              code (format "(progn (setq unread-command-events\n             (append unread-command-events (listify-key-sequence (kbd %S))))\n       \"Typed: %s\")"
+                           keys keys))))
     (pulse-momentary-highlight-region beg end)
     (require 'org)
     (pop-to-buffer (get-buffer-create "*claude blocks*"))
@@ -351,15 +355,19 @@ Returns the window showing it, point in the new block."
   (select-window (kdb-claude--send-block-at-label)))
 
 (defun kdb-claude-run-block-at-label ()
-  "Run the code block under this label.
+  "Run the code block under this label, echoing its output.
 It runs in *claude blocks*, results under it, and focus stays here.
 Only `org-confirm-babel-evaluate' asks first (off in this config); e
 on the label opens it to edit first instead."
   (interactive)
-  (let ((from (selected-window)))
+  (let ((from (selected-window))
+        result)
     (select-window (kdb-claude--send-block-at-label))
-    (unwind-protect (org-babel-execute-src-block)
-      (select-window from))))
+    (unwind-protect (setq result (org-babel-execute-src-block))
+      (select-window from))
+    (message "%s" (if (and result (not (equal result "")))
+                      (string-trim-right (format "%s" result))
+                    "Ran it; no output (see *claude blocks*)"))))
 
 (declare-function agent-shell-markdown-replace-markup "agent-shell-markdown")
 (declare-function org-babel-execute-src-block "ob-core")
