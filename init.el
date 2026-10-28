@@ -1911,12 +1911,12 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (autoload 'kdb-claude-agent-shell-subdir "init-claude")
 (dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify
               kdb-claude--start-with kdb-claude-spawn kdb-claude-message
-              kdb-claude--tag-client))
+              kdb-claude--tag-client kdb-claude--render-markdown))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
                  kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review
                  kdb-claude-watch-pr kdb-claude-schedule kdb-claude-run-block
-                 kdb-claude-reply-to-org)
+                 kdb-claude-reply-to-org kdb-claude-usage)
                 ("init-claude-print" kdb-claude-print)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
                  kdb-claude-search kdb-claude-import-export
@@ -1932,6 +1932,11 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
   (setq agent-shell-anthropic-authentication
         (agent-shell-anthropic-make-authentication :login t)
         agent-shell-preferred-agent-config 'claude-code
+        ;; Auto-approve file edits; shell commands still ask.
+        agent-shell-anthropic-default-session-mode-id "acceptEdits"
+        ;; Code block labels: RET copies (built in), x runs the block in
+        ;; org babel, e opens it there to edit first.
+        agent-shell-markdown-render-function #'kdb-claude--render-markdown
         ;; Resume from the history list (C-c l h), not a picker on every start.
         agent-shell-session-strategy 'new
         ;; Keep conversation data out of projects and this repo: the private
@@ -1948,6 +1953,10 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
         agent-shell-anthropic-claude-environment
         (agent-shell-make-environment-variables
          "CLAUDE_AGENT_LOGS" (expand-file-name "claude-agent-logs" temporary-file-directory)))
+  ;; The default, ImageMagick's import, is often missing on Linux; maim
+  ;; (-s: drag a region) where installed.  macOS/Windows keep the default.
+  (when (and (eq system-type 'gnu/linux) (executable-find "maim"))
+    (setq agent-shell-screenshot-command '("maim" "-s")))
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions)
   ;; Each session knows its id (KDB_CLAUDE_SESSION) for kdb-claude-message.
   (advice-add 'agent-shell-anthropic-make-claude-client :around #'kdb-claude--tag-client))

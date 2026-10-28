@@ -84,15 +84,55 @@ Done.")
       (should (= 2 (how-many "^#\\+begin_src" (point-min) (point-max))))
       (should (string-match-p ": 42" (buffer-string))))))
 
-(ert-deftest run-block-plain-block-is-bash-and-escaped ()
+(ert-deftest run-block-plain-block-is-machine-shell-and-escaped ()
+  ;; A block naming no language runs in this machine's shell.
   (let ((org (test-open (test-buffer) (lambda () (point-max)))))   ; newest block
     (with-current-buffer org
-      (should (string-match-p "^#\\+begin_src bash " (buffer-string)))
+      (should (string-match-p (if (eq system-type 'windows-nt) "^#\\+begin_src powershell " "^#\\+begin_src bash ")
+                              (buffer-string)))
       (should (string-match-p "^,\\* not an org heading" (buffer-string)))
       (should (= 0 (how-many "^\\* " (point-min) (point-max)))))
-    (let ((out (test-execute)))
-      (should (string-match-p "plain" out))
-      (should (string-match-p "\\* not an org heading" out)))))
+    (unless (eq system-type 'windows-nt)          ; the body is a bash heredoc
+      (let ((out (test-execute)))
+        (should (string-match-p "plain" out))
+        (should (string-match-p "\\* not an org heading" out))))))
+
+(defvar test-ping nil)
+(defun test-ping (arg)
+  "Command the keystroke test runs through M-x."
+  (interactive "sArg: ")
+  (setq test-ping arg))
+
+(ert-deftest run-block-keystrokes-replay-as-keys ()
+  ;; A block of Emacs keys, unlabeled or labeled as shell, is replayed
+  ;; with `execute-kbd-macro' rather than run in bash.
+  (dolist (fence '("" "bash"))
+    (setq test-ping nil)
+    (with-current-buffer (generate-new-buffer "*keys*")
+      (insert (format "```%s\nM-x test-ping RET hello RET\n```\n" fence))
+      (test-open (current-buffer) #'point-max))
+    (with-current-buffer "*claude blocks*"
+      (should (string-match-p "\\`#\\+begin_src emacs-lisp .*\n(execute-kbd-macro (kbd \"M-x test-ping RET hello RET\"))\n"
+                              (buffer-string)))
+      (org-babel-execute-src-block))
+    (should (equal test-ping "hello")))
+  ;; Shell commands that merely contain C- or M- stay shell
+  (dolist (cmd '("make -C src" "git commit -m M-x" "echo C-c"))
+    (with-current-buffer (generate-new-buffer "*keys*")
+      (insert (format "```bash\n%s\n```\n" cmd))
+      (test-open (current-buffer) #'point-max))
+    (with-current-buffer "*claude blocks*"
+      (should (string-prefix-p "#+begin_src bash " (buffer-string))))))
+
+(ert-deftest run-block-shell-names-map-per-machine ()
+  (let ((sh (if (eq system-type 'windows-nt) "powershell" "bash")))
+    (dolist (case `(("" . ,sh) ("console" . ,sh) ("shell" . ,sh) ("sh" . "bash") ("bash" . "bash")
+                    ("zsh" . "bash") ("pwsh" . "powershell") ("powershell" . "powershell")))
+      (with-current-buffer (generate-new-buffer "*lang*")
+        (insert (format "```%s\necho hi\n```\n" (car case)))
+        (test-open (current-buffer) #'point-max))
+      (with-current-buffer "*claude blocks*"
+        (should (string-prefix-p (format "#+begin_src %s " (cdr case)) (buffer-string)))))))
 
 (ert-deftest run-block-powershell-language ()
   (with-current-buffer (generate-new-buffer "*ps*")
@@ -204,6 +244,63 @@ Done.")
                               (org-export-as 'html nil nil t)))
       (should (string-match-p "\\[x.el\\](https://g.com/x.el#L84)" (org-export-as 'md nil nil t))))
     (delete-directory config t)))
+
+(ert-deftest usage-shows-weekly-and-monthly-tables ()
+  ;; Real ccusage on this machine's transcripts; plain text, no escapes.
+  (skip-unless (executable-find "ccusage"))
+  (ignore-errors (kill-buffer "*claude usage*"))
+  (kdb-claude-usage)
+  (with-current-buffer "*claude usage*"
+    (let ((p (get-buffer-process (current-buffer))))
+      (while (process-live-p p) (accept-process-output p 1)))
+    (should truncate-lines)
+    (should (string-match-p "Usage Report - Weekly" (buffer-string)))
+    (should (string-match-p "Usage Report - Monthly" (buffer-string)))
+    (should-not (string-match-p "\e" (buffer-string)))))
+
+(ert-deftest run-block-from-code-block-label ()
+  ;; Rendered as agent-shell does: each block's "LANG ⧉" label keeps RET
+  ;; (copy) and gains x (run) and e (open to edit first); its hint
+  ;; names all three.
+  (require 'agent-shell-markdown)
+  (switch-to-buffer (generate-new-buffer "*labels*"))
+  (delete-other-windows)
+  (setq default-directory (file-name-as-directory (make-temp-file "blockdir" t)))
+  (insert "First:\n\n```bash\necho first\n```\n\nSecond:\n\n```elisp\n(+ 40 2)\n```\n")
+  (kdb-claude--render-markdown :complete t)
+  (kdb-claude--render-markdown :complete t)     ; streaming re-renders are harmless
+  (goto-char (point-min))
+  (search-forward "elisp ⧉")
+  (let* ((session (selected-window))
+         (label (match-beginning 0))
+         (map (get-text-property label 'keymap))
+         messages)
+    (should (eq (lookup-key map "x") #'kdb-claude-run-block-at-label))
+    (should (eq (lookup-key map "e") #'kdb-claude-edit-block-at-label))
+    (should (lookup-key map (kbd "RET")))
+    (cl-letf (((symbol-function 'message) (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+      (funcall (car (get-text-property label 'cursor-sensor-functions)) nil nil 'entered))
+    (should (equal messages '("Press RET to copy, x to run, e to edit first")))
+    ;; x: the second block (not the first) runs without asking, its
+    ;; result lands in *claude blocks*, and focus stays in the session
+    (ignore-errors (kill-buffer "*claude blocks*"))
+    (goto-char label)
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) (error "Asked"))))
+      (let ((org-confirm-babel-evaluate nil))
+        (kdb-claude-run-block-at-label)))
+    (should (eq (selected-window) session))
+    (should (= (point) label))
+    (with-current-buffer "*claude blocks*"
+      (should (string-match-p "\\`#\\+begin_src emacs-lisp " (buffer-string)))
+      (should (string-match-p "^#\\+RESULTS:\n: 42" (buffer-string))))
+    ;; e: opened in *claude blocks*, not run
+    (select-window session)
+    (ignore-errors (kill-buffer "*claude blocks*"))
+    (goto-char label)
+    (kdb-claude-edit-block-at-label)
+    (should (equal (buffer-name (window-buffer (selected-window))) "*claude blocks*"))
+    (should (org-in-src-block-p))
+    (should-not (string-match-p "RESULTS" (buffer-string)))))
 
 (ert-deftest run-block-none-before-point ()
   (with-current-buffer (test-buffer)

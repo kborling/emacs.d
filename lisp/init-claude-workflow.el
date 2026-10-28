@@ -283,10 +283,13 @@ Elsewhere, raw fenced blocks."
             (push (list "org" beg (min (1+ (point)) (point-max))) blocks)))))
     (sort blocks (lambda (a b) (< (nth 1 a) (nth 1 b))))))
 
-;; Markdown fence languages -> org babel languages.
+;; Markdown fence languages -> org babel languages.  Blocks that don't
+;; name a shell run in this machine's: pwsh on Windows, bash elsewhere.
 (defconst kdb-claude--babel-langs
-  '(("" . "bash") ("sh" . "bash") ("shell" . "bash") ("console" . "bash") ("zsh" . "bash")
-    ("elisp" . "emacs-lisp") ("pwsh" . "powershell") ("ps1" . "powershell") ("ps" . "powershell")))
+  (let ((sh (if (eq system-type 'windows-nt) "powershell" "bash")))
+    `(("" . ,sh) ("shell" . ,sh) ("console" . ,sh)
+      ("sh" . "bash") ("zsh" . "bash")
+      ("elisp" . "emacs-lisp") ("pwsh" . "powershell") ("ps1" . "powershell") ("ps" . "powershell"))))
 
 (declare-function org-escape-code-in-string "org-src")
 
@@ -305,6 +308,12 @@ the results land under it."
                     (user-error "No code block at or before point")))
                (code (string-trim-right (buffer-substring-no-properties beg end)))
                (dir default-directory))
+    ;; Emacs keystrokes ("M-x load-library RET foo RET"), not shell:
+    ;; replay them with `execute-kbd-macro'.
+    (when (and (member lang '("" "console" "shell" "sh" "bash" "text"))
+               (string-match-p "\\`[ \t]*[CMs]-[^ \t\n]+\\(?:[ \t]+[^ \t\n]+\\)*[ \t]*\\'" code))
+      (setq lang "elisp"
+            code (format "(execute-kbd-macro (kbd %S))" (string-trim code))))
     (pulse-momentary-highlight-region beg end)
     (require 'org)
     (pop-to-buffer (get-buffer-create "*claude blocks*"))
@@ -326,6 +335,57 @@ the results land under it."
       (save-excursion
         (insert (org-escape-code-in-string code) "\n#+end_src\n")))
     (message "Edit if needed, then C-c C-c to run")))
+
+(defun kdb-claude--send-block-at-label ()
+  "Send the code block under this \"LANG ⧉\" label to *claude blocks*.
+Returns the window showing it, point in the new block."
+  (save-excursion
+    (goto-char (or (next-single-property-change (point) 'agent-shell-markdown-source-block-body)
+                   (point)))
+    (kdb-claude-run-block))
+  (get-buffer-window "*claude blocks*"))
+
+(defun kdb-claude-edit-block-at-label ()
+  "Open the code block under this label in *claude blocks*, to edit and run."
+  (interactive)
+  (select-window (kdb-claude--send-block-at-label)))
+
+(defun kdb-claude-run-block-at-label ()
+  "Run the code block under this label.
+It runs in *claude blocks*, results under it, and focus stays here.
+Only `org-confirm-babel-evaluate' asks first (off in this config); e
+on the label opens it to edit first instead."
+  (interactive)
+  (let ((from (selected-window)))
+    (select-window (kdb-claude--send-block-at-label))
+    (unwind-protect (org-babel-execute-src-block)
+      (select-window from))))
+
+(declare-function agent-shell-markdown-replace-markup "agent-shell-markdown")
+(declare-function org-babel-execute-src-block "ob-core")
+
+;;;###autoload
+(defun kdb-claude--render-markdown (&rest args)
+  "Render like `agent-shell-markdown-replace-markup', taking its ARGS.
+Then code block labels also run their block, through org babel: x runs
+it, e opens it to edit first.  The label's hint names both next to
+RET's copy."
+  (apply #'agent-shell-markdown-replace-markup args)
+  ;; Labels carry their own keymap (RET copies) and a hint sensor; the
+  ;; ⧉ in each is tagged.  Streaming re-renders, so skip labels done.
+  (let ((pos (point-min)))
+    (while (setq pos (text-property-any pos (point-max) 'agent-shell-markdown-source-block-copy t))
+      (let ((map (get-text-property pos 'keymap))
+            (start (or (previous-single-property-change (1+ pos) 'keymap) (point-min)))
+            (end (or (next-single-property-change pos 'keymap) (point-max))))
+        (when (and (keymapp map) (not (eq (lookup-key map "x") #'kdb-claude-run-block-at-label)))
+          (define-key map "x" #'kdb-claude-run-block-at-label)
+          (define-key map "e" #'kdb-claude-edit-block-at-label)
+          (put-text-property start end 'cursor-sensor-functions
+                             (list (lambda (_window _old action)
+                                     (when (eq action 'entered)
+                                       (message "Press RET to copy, x to run, e to edit first"))))))
+        (setq pos end)))))
 
 (defun kdb-claude--last-reply (jsonl)
   "Markdown of the last reply in Claude Code transcript JSONL.
@@ -376,6 +436,21 @@ tool calls and results are left out."
     (require 'org)                      ; loads init-org
     (kdb/md-to-org-buffer md (format "*claude reply: %s*" (buffer-name)))
     (message (substitute-command-keys "\\<org-mode-map>\\[org-export-dispatch] to export"))))
+
+;;;###autoload
+(defun kdb-claude-usage ()
+  "Show token usage and cost for recent weeks and months, via ccusage.
+It reads the local transcripts, so it covers this machine only."
+  (interactive)
+  (unless (executable-find "ccusage")
+    (user-error "ccusage not found; install it with: npm i -g ccusage"))
+  ;; A pipe, not a pty, so the tables come out as plain text.  Through
+  ;; the shell, so Windows finds npm's ccusage.cmd.
+  (let ((process-connection-type nil))
+    (with-current-buffer
+        (compilation-start "ccusage weekly --last 4 --no-color && ccusage monthly --last 3 --no-color"
+                           nil (lambda (_) "*claude usage*"))
+      (setq truncate-lines t))))
 
 ;;; ============================================================
 ;;; Sessions talking to sessions
@@ -737,6 +812,7 @@ or the session ends.  Run again in a watched session to stop."
     ("h" "All sessions" kdb-claude-history)
     ("/" "Search text" kdb-claude-search)
     ("A" "Ask past sessions" kdb-claude-ask-archive)
+    ("u" "Usage stats (weeks/months)" kdb-claude-usage)
     ("S" "Sync & commit" kdb-claude-sync)
     ("i" "Import Desktop export" kdb-claude-import-export)
     ("!" "Set up this machine" kdb-claude-setup)]])
