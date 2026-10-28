@@ -711,7 +711,10 @@ and the emacs-skills plugin.  Installs run in a compilation buffer."
                          '("claude plugin marketplace add xenodium/emacs-skills"
                            "claude plugin install emacs-skills@xenodium-emacs-skills")))))
     (when cmds
-      (compile (mapconcat #'identity cmds " && ")))
+      ;; A pipe, not a pty: on a pty the claude CLI draws a TUI whose
+      ;; cursor codes show up raw in the compilation buffer
+      (let ((process-connection-type nil))
+        (compile (mapconcat #'identity cmds " && "))))
     (message "Claude setup: %s" (mapconcat #'identity (nreverse done) "; "))))
 
 ;;; ============================================================
