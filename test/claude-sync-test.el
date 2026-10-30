@@ -50,6 +50,7 @@
     (delete-directory root t)))
 
 (ert-deftest sync-skips-unlistable-project-dir ()
+  (skip-unless (not (eq system-type 'windows-nt)))
   (let* ((root (file-name-as-directory (make-temp-file "claude-sync" t)))
          (projects (expand-file-name "projects/" root))
          (archive (expand-file-name "archive/" root))
