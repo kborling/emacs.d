@@ -169,9 +169,6 @@
   :hook (org-mode . org-modern-mode)
   :config
   (when (eq system-type 'windows-nt)
-    (dolist (range '((#x25A0 . #x25FF) (#x2600 . #x26FF) (#x2700 . #x27BF)))
-      (set-fontset-font t range "Segoe UI Symbol"))
-    (set-fontset-font t 'unicode "Segoe UI Emoji" nil 'append)
     (setq org-modern-star 'replace
           org-modern-replace-stars '("◉" "○" "✸" "✿" "✤" "✜" "◆" "▶")
           org-modern-block-name '("▼" . "▶")

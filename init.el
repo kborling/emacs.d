@@ -396,12 +396,27 @@
 
 (setq-default line-spacing 0.20)        ; setopt would load cus-edit (~0.1s)
 
+(defun kdb-apply-symbol-fonts ()
+  "Draw the symbols agent-shell and org-modern use with Windows' own fonts.
+Coding fonts lack most of them, and Emacs's fallback can pick a font
+that shows boxes.  Box drawing falls back only where the font lacks it."
+  (dolist (spec '(((#x2190 . #x21FF) . "Segoe UI Symbol")
+                  ((#x2300 . #x23FF) . "Segoe UI Symbol")
+                  ((#x25A0 . #x27BF) . "Segoe UI Symbol")
+                  ((#x2980 . #x29FF) . "Cambria Math")
+                  ((#x2B00 . #x2BFF) . "Segoe UI Symbol")))
+    (set-fontset-font t (car spec) (cdr spec)))
+  (set-fontset-font t '(#x2500 . #x259F) "Consolas" nil 'append)
+  (set-fontset-font t 'emoji "Segoe UI Emoji" nil 'prepend))
+
 (defun kdb-apply-fonts ()
   "Set the default, fixed and variable-pitch fonts.
 Needs a graphical frame: a daemon has none at startup, so fonts can't
 be found until the first emacsclient frame opens."
   (when (display-graphic-p)
     (remove-hook 'server-after-make-frame-hook #'kdb-apply-fonts)
+    (when (eq system-type 'windows-nt)
+      (kdb-apply-symbol-fonts))
     (let* ((settings (cond
                       ((eq system-type 'windows-nt)    '(:size 110 :families ("Comic Code" "Rec Mono Semicasual" "Cascadia Code" "Consolas" "Courier New")))
                       ((eq system-type 'darwin)        '(:size 140 :families ("Overpass Mono" "Monaco" "Menlo" "monospace")))
@@ -1911,12 +1926,13 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (autoload 'kdb-claude-agent-shell-subdir "init-claude")
 (dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify
               kdb-claude--start-with kdb-claude-spawn kdb-claude-message
-              kdb-claude--tag-client kdb-claude--render-markdown))
+              kdb-claude--tag-client kdb-claude--render-markdown
+              kdb-claude--track-artifacts))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
                  kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review
                  kdb-claude-watch-pr kdb-claude-schedule kdb-claude-run-block
-                 kdb-claude-reply-to-org kdb-claude-usage)
+                 kdb-claude-reply-to-org kdb-claude-usage kdb-claude-open-artifact)
                 ("init-claude-print" kdb-claude-print)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
                  kdb-claude-search kdb-claude-import-export
@@ -1958,6 +1974,7 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
   (when (and (eq system-type 'gnu/linux) (executable-find "maim"))
     (setq agent-shell-screenshot-command '("maim" "-s")))
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions)
+  (add-hook 'agent-shell-mode-hook #'kdb-claude--track-artifacts)
   ;; Each session knows its id (KDB_CLAUDE_SESSION) for kdb-claude-message.
   (advice-add 'agent-shell-anthropic-make-claude-client :around #'kdb-claude--tag-client))
 

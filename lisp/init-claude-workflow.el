@@ -238,6 +238,111 @@ opens its worktree; a new name creates the branch in a new worktree."
     (kdb-claude--new-in (if branch (kdb-claude--worktree project branch) project))))
 
 ;;; ============================================================
+;;; Artifacts: files Claude writes
+;;; ============================================================
+
+(defvar kdb-claude-artifact-auto-show t
+  "Non-nil to show documents Claude writes in the artifact pane.")
+
+(defvar kdb-claude-artifact-extensions
+  '("md" "markdown" "org" "txt" "csv" "svg" "png" "jpg" "jpeg" "gif" "pdf")
+  "Extensions of files shown when Claude writes them; code is only listed.")
+
+(defvar-local kdb-claude--artifacts nil
+  "Files this session wrote, newest first.")
+(defvar-local kdb-claude--artifact-calls nil
+  "Tool calls already handled, since updates repeat.")
+(defvar kdb-claude--artifact-pane nil
+  "(WINDOW . BUFFER): the pane and the document last put in it.")
+
+(defun kdb-claude--tool-call-file (tool-call)
+  "The file a Write/Edit TOOL-CALL wrote, or nil."
+  (let ((input (map-elt tool-call :raw-input)))
+    (when-let* ((file (or (map-elt input 'file_path)
+                          (map-elt input 'notebook_path)
+                          (map-elt (car (map-elt tool-call :locations)) 'path))))
+      (expand-file-name file))))
+
+(defun kdb-claude--show-artifact (file &optional select near)
+  "Show FILE in the artifact pane beside window NEAR; with SELECT, go there.
+The pane is reused only while it still shows the last document, so a
+window you have since used for something else is left alone."
+  (let* ((buf (find-file-noselect file t))
+         (near (or near (selected-window)))
+         (pane (car kdb-claude--artifact-pane)))
+    (with-current-buffer buf
+      (unless (or (buffer-modified-p) (verify-visited-file-modtime))
+        (revert-buffer t t t))
+      (auto-revert-mode 1))
+    (let ((win (or (get-buffer-window buf (window-frame near))
+                   (and (window-live-p pane)
+                        (not (eq pane near))
+                        (eq (window-frame pane) (window-frame near))
+                        (eq (window-buffer pane) (cdr kdb-claude--artifact-pane))
+                        (progn (set-window-buffer pane buf) pane))
+                   (display-buffer buf `((display-buffer-in-direction)
+                                         (direction . right)
+                                         (window . ,near)
+                                         (window-width . 0.45)
+                                         (inhibit-same-window . t))))))
+      (setq kdb-claude--artifact-pane (cons win buf))
+      (when (and select win) (select-window win))
+      win)))
+
+(defun kdb-claude--note-artifact (buf id tool-call)
+  "Record the file of tool call ID in session BUF, showing it if a document."
+  (when (and (buffer-live-p buf)
+             (equal (map-elt tool-call :status) "completed")
+             (equal (map-elt tool-call :kind) "edit"))
+    (with-current-buffer buf
+      (unless (member id kdb-claude--artifact-calls)
+        (push id kdb-claude--artifact-calls)
+        (when-let* ((file (kdb-claude--tool-call-file tool-call)))
+          (setq kdb-claude--artifacts (cons file (delete file kdb-claude--artifacts)))
+          (when (and kdb-claude-artifact-auto-show
+                     (member (downcase (or (file-name-extension file) ""))
+                             kdb-claude-artifact-extensions)
+                     (file-exists-p file))
+            ;; Only beside a session you're looking at: a session in
+            ;; another tab mustn't open panes over your work.
+            (if-let* ((win (get-buffer-window buf)))
+                (kdb-claude--show-artifact file nil win)
+              (message "%s wrote %s (C-c l a to open)"
+                       (buffer-name buf) (file-name-nondirectory file)))))))))
+
+;;;###autoload
+(defun kdb-claude--track-artifacts ()
+  "Note the files this shell's session writes; show documents as they land."
+  (let ((buf (current-buffer)))
+    (agent-shell-subscribe-to
+     :shell-buffer buf :event 'tool-call-update
+     :on-event (lambda (event)
+                 (let ((data (map-elt event :data)))
+                   (kdb-claude--note-artifact buf (map-elt data :tool-call-id)
+                                              (map-elt data :tool-call)))))))
+
+;;;###autoload
+(defun kdb-claude-open-artifact ()
+  "Open a file this session wrote, newest first, in the artifact pane."
+  (interactive)
+  (let* ((buf (if (derived-mode-p 'agent-shell-mode)
+                  (current-buffer)
+                (or (seq-find (lambda (b) (buffer-local-value 'kdb-claude--artifacts b))
+                              (buffer-list))
+                    (user-error "No Claude session has written files yet"))))
+         (files (seq-filter #'file-exists-p (buffer-local-value 'kdb-claude--artifacts buf)))
+         (names (mapcar #'abbreviate-file-name files)))
+    (unless files (user-error "This session hasn't written any files yet"))
+    (kdb-claude--show-artifact
+     (expand-file-name
+      (completing-read "File Claude wrote: "
+                       (lambda (s p a)
+                         (if (eq a 'metadata) '(metadata (display-sort-function . identity))
+                           (complete-with-action a names s p)))
+                       nil t))
+     t)))
+
+;;; ============================================================
 ;;; Running code blocks from replies
 ;;; ============================================================
 
@@ -815,6 +920,7 @@ or the session ends.  Run again in a watched session to stop."
     ("d" "Dashboard" agent-shell-attention-dashboard)
     ("l" "Peek / switch (by project)" agent-shell-hq-peek)
     ("r" "Name this session" agent-shell-hq-label)
+    ("a" "Artifacts: open a file Claude wrote" kdb-claude-open-artifact)
     ("w" "Watch PR CI, auto-fix (toggle)" kdb-claude-watch-pr)]
    ["History"
     ("h" "All sessions" kdb-claude-history)

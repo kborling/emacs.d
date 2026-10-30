@@ -67,6 +67,55 @@ Windows Emacs often sets HOME to AppData, but Claude uses USERPROFILE."
   "Return Claude Code's session directory."
   (expand-file-name "projects" (kdb-claude--config-dir)))
 
+(defvar kdb-claude--max-path (and (eq system-type 'windows-nt) 259)
+  "Longest file name Emacs can open, or nil for no limit.
+Windows Emacs is limited to MAX_PATH; Claude Code isn't.")
+
+(defun kdb-claude--path-too-long-p (file)
+  "Non-nil if Emacs can't open FILE because its name is too long."
+  (and kdb-claude--max-path (> (length (expand-file-name file)) kdb-claude--max-path)))
+
+(defun kdb-claude--copy-long-files (files dir)
+  "Copy FILES, too long for Emacs to open, into DIR.
+Return (FILE . COPY) for each one copied; copies keep their mtime.
+One PowerShell copies them all, since .NET opens \\\\?\\ paths.  Names
+are passed base64-encoded, so the script is ASCII whatever the console
+code page."
+  (let ((pairs (seq-map-indexed
+                (lambda (f i)
+                  (let ((sub (expand-file-name (number-to-string i) dir)))
+                    (make-directory sub)
+                    (cons f (expand-file-name (file-name-nondirectory f) sub))))
+                files))
+        (b64 (lambda (s) (base64-encode-string (encode-coding-string s 'utf-8) t))))
+    (when pairs
+      (with-temp-buffer
+        (insert "function d($s) { [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($s)) }\n")
+        (dolist (p pairs)
+          (insert (format "try { [IO.File]::Copy((d '%s'), (d '%s'), $true) } catch {}\n"
+                          (funcall b64 (concat "\\\\?\\" (subst-char-in-string
+                                                        ?/ ?\\ (expand-file-name (car p)))))
+                          (funcall b64 (cdr p)))))
+        (ignore-errors
+          (call-process-region (point-min) (point-max) "powershell" nil nil nil
+                               "-NoProfile" "-NonInteractive" "-Command" "-"))))
+    (seq-filter (lambda (p) (file-exists-p (cdr p))) pairs)))
+
+(defun kdb-claude--archive-file (dest project-name session-id)
+  "Org file for SESSION-ID of PROJECT-NAME under DEST, short enough to open.
+A long project name is cut down and given a hash, so it stays unique.
+Windows also limits directories to 12 characters below files."
+  (let ((file (expand-file-name (format "%s/%s.org" project-name session-id) dest)))
+    (if (not (and kdb-claude--max-path
+                  (or (kdb-claude--path-too-long-p file)
+                      (> (length (file-name-directory file)) (- kdb-claude--max-path 12)))))
+        file
+      (expand-file-name (format "%s-%s/%s.org"
+                                (substring project-name 0 (min 40 (length project-name)))
+                                (substring (md5 project-name) 0 8)
+                                session-id)
+                        dest))))
+
 (defun kdb-claude-sync-code-sessions (&optional force)
   "Sync Claude Code sessions to the archive.
 Converts JSONL sessions to readable org files.  With prefix arg FORCE,
@@ -79,30 +128,41 @@ reconvert every session."
          (skipped 0))
     (make-directory dest t)
     (when (file-directory-p source)
-      (dolist (jsonl (seq-remove (lambda (f) (string-match-p "/subagents/" f))
-                                 (directory-files-recursively source "\\.jsonl$" nil t)))
-        (let* ((session-id (file-name-base jsonl))
-               (project-dir (file-name-directory jsonl))
-               (project-name (file-name-nondirectory
-                              (directory-file-name project-dir)))
-               (org-file (expand-file-name
-                          (format "%s/%s.org" project-name session-id) dest))
-               (org-dir (file-name-directory org-file)))
-          ;; Only convert if org file doesn't exist or jsonl is newer
-          (when (or force
-                    (not (file-exists-p org-file))
-                    (time-less-p (file-attribute-modification-time
-                                  (file-attributes org-file))
-                                 (file-attribute-modification-time
-                                  (file-attributes jsonl))))
-            (condition-case err
-                (progn
-                  (make-directory org-dir t)
-                  (kdb-claude--jsonl-to-org jsonl org-file)
-                  (cl-incf count))
-              (file-error
-               (cl-incf skipped)
-               (message "Skipped %s: %s" jsonl (error-message-string err))))))))
+      (let* ((files (seq-remove (lambda (f) (string-match-p "/subagents/" f))
+                                (directory-files-recursively source "\\.jsonl$" nil t)))
+             (long (seq-filter #'kdb-claude--path-too-long-p files))
+             (tmp (and long (make-temp-file "claude-long" t)))
+             (copies (and long (kdb-claude--copy-long-files long tmp))))
+        (unwind-protect
+            (dolist (jsonl files)
+              (let* ((readable (if (kdb-claude--path-too-long-p jsonl)
+                                   (cdr (assoc jsonl copies))
+                                 jsonl))
+                     (session-id (file-name-base jsonl))
+                     (project-name (file-name-nondirectory
+                                    (directory-file-name (file-name-directory jsonl))))
+                     (org-file (kdb-claude--archive-file dest project-name session-id)))
+                (cond
+                 ((null readable)
+                  (cl-incf skipped)
+                  (message "Skipped %s: path too long, and copying it failed" jsonl))
+                 ;; Only convert if org file doesn't exist or jsonl is newer
+                 ((or force
+                      (not (file-exists-p org-file))
+                      (not (kdb-claude--org-keyword org-file "PROJECT"))
+                      (time-less-p (file-attribute-modification-time
+                                    (file-attributes org-file))
+                                   (file-attribute-modification-time
+                                    (file-attributes readable))))
+                  (condition-case err
+                      (progn
+                        (make-directory (file-name-directory org-file) t)
+                        (kdb-claude--jsonl-to-org readable org-file jsonl)
+                        (cl-incf count))
+                    (file-error
+                     (cl-incf skipped)
+                     (message "Skipped %s: %s" jsonl (error-message-string err))))))))
+          (when tmp (delete-directory tmp t)))))
     (message "Synced %d Claude Code sessions%s" count
              (if (> skipped 0) (format " (%d unreadable, skipped)" skipped) ""))))
 
@@ -163,12 +223,28 @@ is served by a fresh run right after it."
                                   80 nil nil "…")
       "Claude Code Session")))
 
-(defun kdb-claude--jsonl-to-org (jsonl-file org-file)
-  "Convert JSONL-FILE to a readable ORG-FILE.
-ORG-FILE gets the JSONL's mtime from before it was read, so turns
-appended while converting make the JSONL newer and are picked up next sync."
+(defun kdb-claude--project-name (cwd)
+  "The project CWD belongs to: for a git worktree, its main repository."
+  (let* ((dir (directory-file-name (subst-char-in-string ?\\ ?/ cwd)))
+         (git (expand-file-name ".git" dir)))
+    (file-name-nondirectory
+     (directory-file-name
+      (or (and (file-regular-p git)
+               (with-temp-buffer
+                 (insert-file-contents git)
+                 (when (re-search-forward "^gitdir: \\(.*\\)/\\.git/worktrees/" nil t)
+                   (expand-file-name (match-string 1) dir))))
+          (and (string-match "\\([^/]+\\)/\\.claude/worktrees/" dir) (match-string 1 dir))
+          (and (string-match "worktrees/\\([^/]+\\)/[^/]+\\'" dir) (match-string 1 dir))
+          dir)))))
+
+(defun kdb-claude--jsonl-to-org (jsonl-file org-file &optional source)
+  "Convert JSONL-FILE to a readable ORG-FILE, naming SOURCE as its origin.
+SOURCE defaults to JSONL-FILE; it differs when that is a copy.  ORG-FILE
+gets the JSONL's mtime from before it was read, so turns appended while
+converting make the JSONL newer and are picked up next sync."
   (let ((mtime (file-attribute-modification-time (file-attributes jsonl-file)))
-        messages cwd)
+        messages cwd ai-title custom-title branch)
     (with-temp-buffer
       (insert-file-contents jsonl-file)
       (goto-char (point-min))
@@ -184,6 +260,11 @@ appended while converting make the JSONL newer and are picked up next sync."
                            (string-trim (kdb-claude--extract-text
                                          (alist-get 'content msg))))))
               (setq cwd (or cwd (alist-get 'cwd obj)))
+              (pcase (alist-get 'type obj)
+                ("ai-title" (setq ai-title (alist-get 'aiTitle obj)))
+                ("custom-title" (setq custom-title (alist-get 'customTitle obj))))
+              (let ((b (alist-get 'gitBranch obj)))
+                (when (and b (not (member b '("" "HEAD")))) (setq branch b)))
               (unless (or (null text) (string-empty-p text))
                 (push (cons role text) messages)))
           (error nil))
@@ -191,10 +272,15 @@ appended while converting make the JSONL newer and are picked up next sync."
     (setq messages (nreverse messages))
     (let ((coding-system-for-write 'utf-8-unix))  ; no CRLF churn from Windows
       (with-temp-file org-file
-        (insert (format "#+TITLE: %s\n" (kdb-claude--session-title messages)))
+        (insert (format "#+TITLE: %s\n" (string-trim
+                                         (replace-regexp-in-string
+                                          "[\n\r]+" " " (or custom-title ai-title
+                                                             (kdb-claude--session-title messages))))))
         (insert (format "#+DATE: %s\n" (format-time-string "%Y-%m-%d %H:%M" mtime)))
-        (insert (format "#+SOURCE: %s\n" jsonl-file))
+        (insert (format "#+SOURCE: %s\n" (or source jsonl-file)))
         (when cwd (insert (format "#+CWD: %s\n" cwd)))
+        (insert (format "#+PROJECT: %s\n" (if cwd (kdb-claude--project-name cwd) "")))
+        (when branch (insert (format "#+BRANCH: %s\n" branch)))
         (insert "\n")
         (dolist (msg messages)
           (insert (format "* %s\n\n%s\n\n"
@@ -330,7 +416,9 @@ as a directory name."
                (cwd (cdr (assoc "CWD" h))))
           (list f (vector (if (member (file-name-base f) live) "●" "")
                           (or (cdr (assoc "UPDATED" h)) (cdr (assoc "DATE" h)) "")
-                          (cond (cwd (file-name-nondirectory (directory-file-name cwd)))
+                          (cond ((let ((p (cdr (assoc "PROJECT" h))))
+                                   (and p (not (string-empty-p p)) p)))
+                                (cwd (file-name-nondirectory (directory-file-name cwd)))
                                 ((string-match-p "/desktop/" f) "desktop")
                                 (t ""))
                           (or (cdr (assoc "TITLE" h)) (file-name-base f))))))
@@ -373,6 +461,8 @@ Shows the archive as it is, then redraws once a background sync is done."
   (let ((buf (current-buffer)))
     (kdb-claude-sync-code-sessions-async
      (lambda ()
+       ;; Reconverting keeps a file's mtime, so cached headers can be stale.
+       (clrhash kdb-claude--header-cache)
        (when (buffer-live-p buf)
          (with-current-buffer buf (tabulated-list-print t)))))))
 
