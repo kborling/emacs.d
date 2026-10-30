@@ -75,11 +75,12 @@ reconvert every session."
   (let* ((archive (kdb-claude--ensure-archive))
          (dest (expand-file-name "code-sessions/" archive))
          (source (kdb-claude--projects-dir))
-         (count 0))
+         (count 0)
+         (skipped 0))
     (make-directory dest t)
     (when (file-directory-p source)
       (dolist (jsonl (seq-remove (lambda (f) (string-match-p "/subagents/" f))
-                                 (directory-files-recursively source "\\.jsonl$")))
+                                 (directory-files-recursively source "\\.jsonl$" nil t)))
         (let* ((session-id (file-name-base jsonl))
                (project-dir (file-name-directory jsonl))
                (project-name (file-name-nondirectory
@@ -94,10 +95,16 @@ reconvert every session."
                                   (file-attributes org-file))
                                  (file-attribute-modification-time
                                   (file-attributes jsonl))))
-            (make-directory org-dir t)
-            (kdb-claude--jsonl-to-org jsonl org-file)
-            (cl-incf count)))))
-    (message "Synced %d Claude Code sessions" count)))
+            (condition-case err
+                (progn
+                  (make-directory org-dir t)
+                  (kdb-claude--jsonl-to-org jsonl org-file)
+                  (cl-incf count))
+              (file-error
+               (cl-incf skipped)
+               (message "Skipped %s: %s" jsonl (error-message-string err))))))))
+    (message "Synced %d Claude Code sessions%s" count
+             (if (> skipped 0) (format " (%d unreadable, skipped)" skipped) ""))))
 
 (defvar kdb-claude--sync-process nil
   "The background Emacs converting sessions, while one runs.")
