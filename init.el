@@ -2056,9 +2056,14 @@ Safe to re-run; only missing models are downloaded."
   :ensure t
   :commands (agent-shell-anthropic-start-claude-code agent-shell-send-file-to)
   :config
+  ;; opencode's installer puts it in the user profile, not on PATH.
+  (let ((opencode (expand-file-name ".opencode/bin" (or (getenv "USERPROFILE") "~"))))
+    (when (file-directory-p opencode)
+      (add-to-list 'exec-path opencode)))
   (setq agent-shell-anthropic-authentication
         (agent-shell-anthropic-make-authentication :login t)
-        agent-shell-preferred-agent-config 'claude-code
+        ;; M-x agent-shell asks which agent; C-c l starts Claude directly.
+        agent-shell-preferred-agent-config nil
         ;; Auto-approve file edits; shell commands still ask.
         agent-shell-anthropic-default-session-mode-id "acceptEdits"
         ;; Code block labels: RET copies (built in), x runs the block in
