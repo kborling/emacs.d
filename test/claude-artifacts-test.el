@@ -201,28 +201,31 @@
     (cl-letf (((symbol-function 'agent-shell--fetch-agent-icon)
                (lambda (name) (setq fetched name) (and (equal name "claude-color.png") icon))))
       ;; A frame embeds the icon itself, moved for its step of the hop.
-      (let ((file (kdb-claude--logo-icon "kdb-logo-3|claude-color.png")))
+      (let ((file (kdb-claude--logo-icon "kdb-logo-4|claude-color.png")))
         (should (equal fetched "claude-color.png"))
         (should (eq (image-supported-file-p file) 'svg))
         (let ((svg (with-temp-buffer (insert-file-contents file) (buffer-string))))
           (should (string-match-p (regexp-quote (base64-encode-string "PNGDATA" t)) svg))
-          (should (string-match-p "translate(50 92) scale(1.0 1.0)" svg))   ; near the top
-          (should-not (string-match-p "rotate" svg))
           (should (with-temp-buffer (insert svg) (libxml-parse-xml-region (point-min) (point-max))))))
-      ;; It squashes on the ground, rises to its peak and comes back down.
-      (should (string-match-p "translate(50 100) scale(1.08 0.92)" (kdb-claude--logo-svg icon 0)))
-      (should (string-match-p "translate(50 91) " (kdb-claude--logo-svg icon 4)))
-      (should (string-match-p "translate(50 100) " (kdb-claude--logo-svg icon 9)))
+      (let ((svg (lambda (k) (kdb-claude--logo-svg icon k))))
+        ;; Squashed on the ground, a fifth of its height up at the peak,
+        ;; leaning left on the first hop and right on the second.
+        (should (string-match-p "translate(50 100) rotate(0) scale(0.93[0-9]* 0.68" (funcall svg 0)))
+        (should (string-match-p "translate(50 79) rotate(-6) " (funcall svg 4)))
+        (should (string-match-p "translate(50 79) rotate(6) " (funcall svg 16)))
+        (should (string-match-p "translate(50 100) rotate(0) scale(0.82 0.82)" (funcall svg 11)))
+        ;; Most steps differ, so it visibly moves every tick.
+        (should (< 15 (length (seq-uniq (mapcar svg (number-sequence 0 23)))))))
       ;; Other icons are agent-shell's business.
       (should-not (kdb-claude--logo-icon "claude-color.png")))
     (delete-file icon))
   (let ((model '((:icon-name . "claude-color.png") (:busy-indicator-frame . " ░   "))))
     (cl-letf (((symbol-function 'agent-shell--state)
                (lambda () '((:heartbeat . ((:status . busy) (:value . 7)))))))
-      ;; Busy: tick 7 is step 3 of the hop.
+      ;; Busy: a step every tick; tick 7 is step 7.
       (let ((kdb-claude-busy-indicator 'claude))
         (should (equal (map-elt (kdb-claude--logo-header model) :icon-name)
-                       "kdb-logo-3|claude-color.png")))
+                       "kdb-logo-7|claude-color.png")))
       ;; Another animation style leaves the icon alone.
       (let ((kdb-claude-busy-indicator 'wave))
         (should (eq (kdb-claude--logo-header model) model))))

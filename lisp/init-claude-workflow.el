@@ -265,16 +265,23 @@ hopping beside a sliding bar), or any value
 Listed here, not agent-shell's `wide', so its width can be held when idle.")
 
 (defconst kdb-claude--logo-hop
-  '((0 1.08 0.92) (-3 0.97 1.04) (-6 1.0 1.0) (-8 1.0 1.0) (-9 1.0 1.0)
-    (-8 1.0 1.0) (-6 1.0 1.0) (-3 0.98 1.02) (0 1.05 0.95) (0 1.0 1.0))
-  "Icon (DY SX SY) per step of a hop: squash, spring up, hang, land.
-DY is in hundredths of the icon's height.")
+  (let ((hop '((0 1.14 0.84 0) (-6 0.92 1.12 3) (-14 0.96 1.06 5) (-19 1.0 1.0 6)
+               (-21 1.0 1.0 6) (-19 1.0 1.0 5) (-14 0.98 1.03 3) (-6 0.95 1.07 1)
+               (0 1.14 0.84 0) (0 1.05 0.95 0) (0 1.0 1.0 0) (0 1.0 1.0 0))))
+    (append (mapcar (lambda (f) (append (butlast f) (list (- (car (last f)))))) hop)
+            hop))
+  "Icon (DY SX SY ANGLE) per tick: two hops, leaning left then right.
+Each squashes, stretches up, hangs, lands and settles.  DY is in
+hundredths of the icon's height; it tilts about its feet.")
+
+(defconst kdb-claude--logo-size 0.82
+  "Icon size within its slot, leaving room to hop.")
 
 (declare-function agent-shell--image-type-to-mime "agent-shell")
 (declare-function agent-shell--fetch-agent-icon "agent-shell")
 
 (defun kdb-claude--logo-svg (icon step)
-  "SVG of image file ICON moved for STEP (0-9) of a hop.
+  "SVG of image file ICON moved for STEP of `kdb-claude--logo-hop'.
 The whole icon moves; its artwork is never altered."
   (let* ((hop (nth step kdb-claude--logo-hop))
          (mime (or (agent-shell--image-type-to-mime icon) "image/png"))
@@ -289,9 +296,10 @@ The whole icon moves; its artwork is never altered."
                     "xmlns:xlink=\"http://www.w3.org/1999/xlink\" "
                     "viewBox=\"0 0 100 100\" width=\"100\" height=\"100\">"
                     "<image width=\"100\" height=\"100\" href=\"%s\" xlink:href=\"%s\" "
-                    "transform=\"translate(50 %d) scale(%s %s) translate(-50 -100)\"/>"
+                    "transform=\"translate(50 %d) rotate(%d) scale(%s %s) translate(-50 -100)\"/>"
                     "</svg>")
-            href href (+ 100 (nth 0 hop)) (nth 1 hop) (nth 2 hop))))
+            href href (+ 100 (nth 0 hop)) (nth 3 hop)
+            (* kdb-claude--logo-size (nth 1 hop)) (* kdb-claude--logo-size (nth 2 hop)))))
 
 ;;;###autoload
 (defun kdb-claude--logo-icon (name)
@@ -299,8 +307,8 @@ The whole icon moves; its artwork is never altered."
 Before-until advice on `agent-shell--fetch-agent-icon'.  NAME is
 kdb-logo-STEP|ICON, ICON being the name agent-shell would fetch."
   (when (and (stringp name)
-             (string-match "\\`kdb-logo-\\([0-9]\\)|\\(.+\\)" name))
-    (let ((step (string-to-number (match-string 1 name))))
+             (string-match "\\`kdb-logo-\\([0-9]+\\)|\\(.+\\)" name))
+    (let ((step (min (string-to-number (match-string 1 name)) (1- (length kdb-claude--logo-hop)))))
       (when-let* ((icon (agent-shell--fetch-agent-icon (match-string 2 name))))
         (let* ((svg (kdb-claude--logo-svg icon step))
                ;; Named by content, so a new icon never shows a stale copy.
@@ -313,16 +321,16 @@ kdb-logo-STEP|ICON, ICON being the name agent-shell would fetch."
 
 ;;;###autoload
 (defun kdb-claude--logo-header (model)
-  "While busy in `claude' style, move MODEL's icon a hop step every 2 ticks.
+  "While busy in `claude' style, move MODEL's icon a hop step every tick.
 Filter on agent-shell's header model, run in the shell buffer.  The bar
-changes every tick, so each new step is drawn: agent-shell only redraws
+changes every tick too, so each step is drawn: agent-shell only redraws
 when the busy text changes."
   (if-let* (((eq kdb-claude-busy-indicator 'claude))
             ((eq (map-nested-elt (agent-shell--state) '(:heartbeat :status)) 'busy))
             (tick (map-nested-elt (agent-shell--state) '(:heartbeat :value)))
             (icon (map-elt model :icon-name))
             ((not (string-prefix-p "kdb-logo-" icon))))
-      (cons (cons :icon-name (format "kdb-logo-%d|%s" (mod (/ tick 2) 10) icon))
+      (cons (cons :icon-name (format "kdb-logo-%d|%s" (mod tick (length kdb-claude--logo-hop)) icon))
             (assq-delete-all :icon-name (copy-alist model)))
     model))
 
