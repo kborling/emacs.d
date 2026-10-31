@@ -176,10 +176,12 @@
 
 (ert-deftest busy-animations ()
   (require 'agent-shell)
-  ;; Claude: · ✢ ✳ ✶ ✻ ✽ and back, each shown twice.
-  (should (equal (seq-uniq kdb-claude--busy-claude) '("·" "✢" "✳" "✶" "✻" "✽")))
-  (should (equal (seq-take kdb-claude--busy-claude 4) '("·" "·" "✢" "✢")))
-  (should (equal (last kdb-claude--busy-claude 2) '("✢" "✢")))
+  ;; The bar slides out and back; every frame differs from the next, so
+  ;; each tick redraws and the hopping icon never skips a step.
+  (should (seq-every-p (lambda (f) (= (string-width f) 8)) kdb-claude--busy-bar))
+  (should (member "░░░░░░░░" kdb-claude--busy-bar))
+  (should (cl-loop for (a b) on (append kdb-claude--busy-bar (list (car kdb-claude--busy-bar)))
+                   while b always (not (equal a b))))
   ;; Through agent-shell's own frame picker, as the header uses it.
   (let ((agent-shell-busy-indicator-frames #'kdb-claude--busy-frames)
         (agent-shell-show-busy-indicator t)
@@ -187,59 +189,46 @@
     (cl-letf (((symbol-function 'agent-shell--state)
                (lambda () `((:heartbeat . ((:status . busy) (:value . ,tick)))))))
       (let ((kdb-claude-busy-indicator 'claude))
-        (should (equal (agent-shell--busy-indicator-frame) " ✻")))
-      (let ((kdb-claude-busy-indicator 'mr-robot))
-        (should (equal (agent-shell--busy-indicator-frame)
-                       (concat " " (cdr (nth 8 kdb-claude--mask-steps))))))
+        (should (equal (agent-shell--busy-indicator-frame) (concat " " (nth 8 kdb-claude--busy-bar)))))
       (let ((kdb-claude-busy-indicator 'wave))
         (should (equal (agent-shell--busy-indicator-frame) " ▇"))))))
 
 
-(ert-deftest mask-frames ()
-  (should (= 20 (length kdb-claude--mask)))
-  (should (seq-every-p (lambda (r) (= (length r) 20)) kdb-claude--mask))
-  (let ((frames (append '(idle blink blink1 twitch1 twitch glow1 glow)
-                        (mapcar (lambda (k) (intern (format "scan%d" k))) (number-sequence 1 10)))))
-    ;; Every frame is valid SVG, and no two look the same.
-    (dolist (f frames)
-      (should (with-temp-buffer (insert (kdb-claude--mask-svg f))
-                                (libxml-parse-xml-region (point-min) (point-max)))))
-    (should (= (length frames) (length (seq-uniq (mapcar #'kdb-claude--mask-svg frames))))))
-  ;; agent-shell redraws only when the caption changes: a new frame must
-  ;; always come with a new caption.
-  (let ((steps kdb-claude--mask-steps))
-    (cl-loop for (a b) on (append steps (list (car steps)))
-             while b
-             unless (eq (car a) (car b)) do (should-not (equal (cdr a) (cdr b))))
-    ;; Fixed-width ASCII: no font fallback needed, the header doesn't jump.
-    (should (seq-every-p (lambda (st) (string-match-p "\\`[[:ascii:]]\\{10\\}\\'" (cdr st))) steps))
-    (should (member "SCAN 10/10" (mapcar #'cdr steps)))
-    (should (member "DECRYPTED " (mapcar #'cdr steps)))
-    (should (member "DECRYPTING" (mapcar #'cdr steps)))
-    (should-not (seq-find (lambda (st) (string-match-p "root\\|fsociety" (cdr st))) steps))))
-
-(ert-deftest mask-icon-and-header ()
+(ert-deftest logo-hops ()
   (require 'agent-shell)
-  (let ((file (kdb-claude--mask-icon "kdb-mask-scan2")))
-    (should (file-exists-p file))
-    (should (eq (image-supported-file-p file) 'svg)))
-  (should-not (kdb-claude--mask-icon "claude-color.png"))
-  ;; Different art, different file: no stale cached frames.
-  (let ((before (kdb-claude--mask-icon "kdb-mask-idle")))
-    (cl-letf (((symbol-function 'kdb-claude--mask-svg) (lambda (_) "<svg xmlns=\"http://www.w3.org/2000/svg\"/>")))
-      (should-not (equal (kdb-claude--mask-icon "kdb-mask-idle") before))))
-  (let ((model '((:icon-name . "claude-color.png") (:busy-indicator-frame . " 0110100111"))))
+  (let* ((icon (make-temp-file "claude-icon" nil ".png" "PNGDATA"))
+         (fetched nil))
+    (cl-letf (((symbol-function 'agent-shell--fetch-agent-icon)
+               (lambda (name) (setq fetched name) (and (equal name "claude-color.png") icon))))
+      ;; A frame embeds the icon itself, moved for its step of the hop.
+      (let ((file (kdb-claude--logo-icon "kdb-logo-3|claude-color.png")))
+        (should (equal fetched "claude-color.png"))
+        (should (eq (image-supported-file-p file) 'svg))
+        (let ((svg (with-temp-buffer (insert-file-contents file) (buffer-string))))
+          (should (string-match-p (regexp-quote (base64-encode-string "PNGDATA" t)) svg))
+          (should (string-match-p "translate(50 92) scale(1.0 1.0)" svg))   ; near the top
+          (should-not (string-match-p "rotate" svg))
+          (should (with-temp-buffer (insert svg) (libxml-parse-xml-region (point-min) (point-max))))))
+      ;; It squashes on the ground, rises to its peak and comes back down.
+      (should (string-match-p "translate(50 100) scale(1.08 0.92)" (kdb-claude--logo-svg icon 0)))
+      (should (string-match-p "translate(50 91) " (kdb-claude--logo-svg icon 4)))
+      (should (string-match-p "translate(50 100) " (kdb-claude--logo-svg icon 9)))
+      ;; Other icons are agent-shell's business.
+      (should-not (kdb-claude--logo-icon "claude-color.png")))
+    (delete-file icon))
+  (let ((model '((:icon-name . "claude-color.png") (:busy-indicator-frame . " ░   "))))
     (cl-letf (((symbol-function 'agent-shell--state)
-               (lambda () '((:heartbeat . ((:status . busy) (:value . 23)))))))
-      ;; Busy in mr-robot style: tick 23 is the blink.
-      (let ((kdb-claude-busy-indicator 'mr-robot))
-        (should (equal (map-elt (kdb-claude--mask-header model) :icon-name) "kdb-mask-blink"))
-        ;; Idle (blank frame held for width): the usual icon.
-        (cl-letf (((symbol-function 'agent-shell--state) (lambda () '((:heartbeat . ((:status . ended)))))))
-          (should (equal (map-elt (kdb-claude--mask-header model) :icon-name) "claude-color.png"))))
+               (lambda () '((:heartbeat . ((:status . busy) (:value . 7)))))))
+      ;; Busy: tick 7 is step 3 of the hop.
       (let ((kdb-claude-busy-indicator 'claude))
-        (should (eq (kdb-claude--mask-header model) model))))))
-
+        (should (equal (map-elt (kdb-claude--logo-header model) :icon-name)
+                       "kdb-logo-3|claude-color.png")))
+      ;; Another animation style leaves the icon alone.
+      (let ((kdb-claude-busy-indicator 'wave))
+        (should (eq (kdb-claude--logo-header model) model))))
+    (cl-letf (((symbol-function 'agent-shell--state) (lambda () '((:heartbeat . ((:status . ended)))))))
+      (let ((kdb-claude-busy-indicator 'claude))
+        (should (eq (kdb-claude--logo-header model) model))))))
 
 (ert-deftest busy-frame-keeps-its-width-when-idle ()
   (require 'agent-shell)
@@ -248,10 +237,8 @@
     (dolist (status '(busy ended))
       (cl-letf (((symbol-function 'agent-shell--state)
                  (lambda () `((:heartbeat . ((:status . ,status) (:value . ,(and (eq status 'busy) 5))))))))
-        (let ((kdb-claude-busy-indicator 'mr-robot))
-          (should (= 11 (string-width (agent-shell--busy-indicator-frame)))))
         (let ((kdb-claude-busy-indicator 'claude))
-          (should (= 2 (string-width (agent-shell--busy-indicator-frame)))))))
+          (should (= 9 (string-width (agent-shell--busy-indicator-frame)))))))
     ;; Idle is blank.
     (cl-letf (((symbol-function 'agent-shell--state) (lambda () '((:heartbeat . ((:status . ended)))))))
       (should (string-blank-p (agent-shell--busy-indicator-frame)))))

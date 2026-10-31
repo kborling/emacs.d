@@ -254,145 +254,75 @@ fontsets, so symbols the main font lacks need fallbacks named here."
 ;;; ============================================================
 
 (defvar kdb-claude-busy-indicator 'claude
-  "Busy animation in Claude sessions: `claude' (the ✻ spinner), `mr-robot'
-(an animated fsociety mask in the header), or any value
-`agent-shell-busy-indicator-frames' takes, e.g. `wide'.")
+  "Busy animation in Claude sessions: `claude' (the header's Claude icon
+hopping beside a sliding bar), or any value
+`agent-shell-busy-indicator-frames' takes, e.g. `wave'.")
 
-(defconst kdb-claude--busy-claude
-  (let ((glyphs '("·" "✢" "✳" "✶" "✻" "✽")))
-    (mapcan (lambda (g) (list g g))
-            (append glyphs (cdr (reverse (cdr glyphs))))))
-  "Claude Code's spinner: the ✻ grows and shrinks.  10 frames a second.")
+(defconst kdb-claude--busy-bar
+  (let ((cells (mapcar (lambda (n) (string-pad (make-string n ?░) 8)) (number-sequence 1 8))))
+    (append cells (cdr (reverse (cdr cells))) (list (make-string 8 ?\s))))
+  "An 8-cell bar that grows and shrinks, 10 frames a second.
+Listed here, not agent-shell's `wide', so its width can be held when idle.")
 
-(defconst kdb-claude--mask
-  ["......LAAAAAAA......"
-   "......LAAAAAAA......"
-   "......LAAAAAAA......"
-   "......BBBBBBBB......"
-   "..AAAAAAAAAAAAAAAA.."
-   "....OSSSSSSSSSSO...."
-   "...OSKKKSSSSKKKSO..."
-   "..OSSSSSSSSSSSSSSO.."
-   "..OSSSTKSSSSTKSSSO.."
-   "..OSSSKKSSSSKKSSSO.."
-   "..OSPPSSSHHSSSPPSO.."
-   "..OSSSSSSHHSSSSSSO.."
-   "..OSSSSKKKKKKSSSSO.."
-   "..OSKSKKKKKKKKSKSO.."
-   "..OSSKKKSSSSKKKSSO.."
-   "..OSSSSSSSSSSSSSSO.."
-   "...OSSSMSSSSMSSSO..."
-   "....OSSSMMMMSSSO...."
-   ".....OSSSSSSSSO....."
-   "......OOOOOOOO......"]
-  "A friendly fsociety-style gentleman, 20x20: a grey top hat with a red
-band over a round, outlined face (a quarter hat, three quarters face),
-brows, eyes with a glint, rosy cheeks, a handlebar mustache (thick under
-the nose, drooping to tips that curl up) and a closed smile.")
+(defconst kdb-claude--logo-hop
+  '((0 1.08 0.92) (-3 0.97 1.04) (-6 1.0 1.0) (-8 1.0 1.0) (-9 1.0 1.0)
+    (-8 1.0 1.0) (-6 1.0 1.0) (-3 0.98 1.02) (0 1.05 0.95) (0 1.0 1.0))
+  "Icon (DY SX SY) per step of a hop: squash, spring up, hang, land.
+DY is in hundredths of the icon's height.")
 
-(defconst kdb-claude--mask-colors
-  '((?K . "#111111") (?A . "#4a4a4a") (?L . "#8c8c8c") (?B . "#b33a3a")
-    (?S . "#efd9c7") (?H . "#cdb3a2") (?O . "#8a6656") (?M . "#a8434a")
-    (?P . "#e59a9a") (?T . "#ffffff")
-    (?N . "#00ff41") (?D . "#00661a")))
+(declare-function agent-shell--image-type-to-mime "agent-shell")
+(declare-function agent-shell--fetch-agent-icon "agent-shell")
 
-(defun kdb-claude--mask-frame (name)
-  "Rows of mask frame NAME.
-idle; blink1 and blink (a two-step blink, the glints fading before the
-eyes close); twitch1 and twitch (the mustache tips flick out, then up);
-scan1-10 (a green line sweeps down from brow to chin); glow1 and glow
-(the pupils fade to dark green, then bright green)."
-  (let ((rows (copy-sequence kdb-claude--mask))
-        (put (lambda (rows y x c) (let ((r (copy-sequence (aref rows y)))) (aset r x c) (aset rows y r))))
-        (green (lambda (row) (concat (mapcar (lambda (c) (pcase c
-                                                           ((or ?S ?H ?P ?T) ?N)
-                                                           ((or ?K ?O ?M) ?D)
-                                                           (_ c)))
-                                             row)))))
-    (pcase (symbol-name name)
-      ("blink" (aset rows 8 (replace-regexp-in-string "[TK]" "S" (aref rows 8))))
-      ("blink1" (aset rows 8 (string-replace "T" "H" (aref rows 8))))
-      ((or "twitch1" "twitch")
-       (dolist (x '(4 15))
-         (funcall put rows 12 x ?K)
-         (when (equal (symbol-name name) "twitch") (funcall put rows 11 x ?K))))
-      ((rx "scan" (let n (+ digit)))
-       (let ((row (+ 5 (/ (+ 4 (* 14 (1- (string-to-number n)))) 9))))
-         (aset rows row (funcall green (aref rows row)))))
-      ("glow1" (dolist (y '(8 9)) (aset rows y (string-replace "K" "D" (aref rows y)))))
-      ("glow" (dolist (y '(8 9)) (aset rows y (string-replace "K" "N" (aref rows y))))))
-    rows))
-
-(defun kdb-claude--mask-svg (name)
-  "SVG of mask frame NAME."
-  (let* ((rows (kdb-claude--mask-frame name))
-         (n (length rows))
-         rects)
-    (dotimes (y n)
-      (dotimes (x n)
-        (when-let* ((c (alist-get (aref (aref rows y) x) kdb-claude--mask-colors)))
-          (push (format "<rect x=\"%d\" y=\"%d\" width=\"1\" height=\"1\" fill=\"%s\"/>" x y c)
-                rects))))
-    (concat (format "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 %d %d\" " n n)
-            "width=\"64\" height=\"64\" shape-rendering=\"crispEdges\">"
-            (apply #'concat (nreverse rects)) "</svg>")))
-
-(defconst kdb-claude--mask-steps
-  (let* ((frames (append
-                  (make-list 20 'idle)
-                  (make-list 2 'blink1) (make-list 3 'blink) (make-list 2 'blink1)
-                  (make-list 16 'idle)
-                  (make-list 2 'twitch1) (make-list 5 'twitch) (make-list 2 'twitch1)
-                  (make-list 12 'idle)
-                  (mapcan (lambda (k) (make-list 3 (intern (format "scan%d" k))))
-                          (number-sequence 1 10))
-                  (make-list 3 'glow1) (make-list 10 'glow)
-                  (make-list 3 'glow1)
-                  (make-list 14 'idle)))
-         (bits "01101001110100101101000111010011")
-         (rain (lambda (i) (let ((j (mod i (length bits))))
-                             (substring (concat bits bits) j (+ j 10)))))
-         (glowed nil))
-    (seq-map-indexed
-     (lambda (frame i)
-       (cons frame
-             (pcase (symbol-name frame)
-               ((rx "scan" (let k (+ digit)))
-                (format "SCAN %2d/10" (string-to-number k)))
-               ("glow1" (if glowed (funcall rain i) "DECRYPTING"))
-               ("glow" (setq glowed t) "DECRYPTED ")
-               (_ (funcall rain i)))))
-     frames))
-  "(FRAME . CAPTION) per tick, 10 a second, about 12 seconds a loop.
-Each move eases in and out over several ticks.  The caption is binary
-rain, a SCAN n/10 loader during the scan, and DECRYPTING then DECRYPTED
-as the pupils glow.  agent-shell only redraws when the caption
-changes, so a new frame always brings a new caption.")
+(defun kdb-claude--logo-svg (icon step)
+  "SVG of image file ICON moved for STEP (0-9) of a hop.
+The whole icon moves; its artwork is never altered."
+  (let* ((hop (nth step kdb-claude--logo-hop))
+         (mime (or (agent-shell--image-type-to-mime icon) "image/png"))
+         (href (concat "data:" mime ";base64,"
+                       (base64-encode-string
+                        (with-temp-buffer
+                          (set-buffer-multibyte nil)
+                          (insert-file-contents-literally icon)
+                          (buffer-string))
+                        t))))
+    (format (concat "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+                    "xmlns:xlink=\"http://www.w3.org/1999/xlink\" "
+                    "viewBox=\"0 0 100 100\" width=\"100\" height=\"100\">"
+                    "<image width=\"100\" height=\"100\" href=\"%s\" xlink:href=\"%s\" "
+                    "transform=\"translate(50 %d) scale(%s %s) translate(-50 -100)\"/>"
+                    "</svg>")
+            href href (+ 100 (nth 0 hop)) (nth 1 hop) (nth 2 hop))))
 
 ;;;###autoload
-(defun kdb-claude--mask-icon (name)
-  "Icon file for header icon NAME if it is a mask frame, else nil.
-Before-until advice on `agent-shell--fetch-agent-icon'."
-  (when (and (stringp name) (string-prefix-p "kdb-mask-" name))
-    (let* ((svg (kdb-claude--mask-svg (intern (string-remove-prefix "kdb-mask-" name))))
-           ;; Named by content, so changed art never shows a stale copy.
-           (file (expand-file-name (format "%s-%x.svg" name (sxhash-equal svg))
-                                   (expand-file-name "kdb-claude-mask" temporary-file-directory))))
-      (unless (file-exists-p file)
-        (make-directory (file-name-directory file) t)
-        (with-temp-file file (insert svg)))
-      file)))
+(defun kdb-claude--logo-icon (name)
+  "Icon file for header icon NAME if it is a hopping-logo frame, else nil.
+Before-until advice on `agent-shell--fetch-agent-icon'.  NAME is
+kdb-logo-STEP|ICON, ICON being the name agent-shell would fetch."
+  (when (and (stringp name)
+             (string-match "\\`kdb-logo-\\([0-9]\\)|\\(.+\\)" name))
+    (let ((step (string-to-number (match-string 1 name))))
+      (when-let* ((icon (agent-shell--fetch-agent-icon (match-string 2 name))))
+        (let* ((svg (kdb-claude--logo-svg icon step))
+               ;; Named by content, so a new icon never shows a stale copy.
+               (file (expand-file-name (format "kdb-logo-%d-%x.svg" step (sxhash-equal svg))
+                                       (expand-file-name "kdb-claude-logo" temporary-file-directory))))
+          (unless (file-exists-p file)
+            (make-directory (file-name-directory file) t)
+            (with-temp-file file (insert svg)))
+          file)))))
 
 ;;;###autoload
-(defun kdb-claude--mask-header (model)
-  "While busy in `mr-robot' style, put the current mask frame in MODEL's icon.
-Filter on agent-shell's header model, run in the shell buffer."
-  (if-let* (((eq kdb-claude-busy-indicator 'mr-robot))
+(defun kdb-claude--logo-header (model)
+  "While busy in `claude' style, move MODEL's icon a hop step every 2 ticks.
+Filter on agent-shell's header model, run in the shell buffer.  The bar
+changes every tick, so each new step is drawn: agent-shell only redraws
+when the busy text changes."
+  (if-let* (((eq kdb-claude-busy-indicator 'claude))
             ((eq (map-nested-elt (agent-shell--state) '(:heartbeat :status)) 'busy))
-            (tick (map-nested-elt (agent-shell--state) '(:heartbeat :value))))
-      (cons (cons :icon-name
-                  (format "kdb-mask-%s" (car (nth (mod tick (length kdb-claude--mask-steps))
-                                                  kdb-claude--mask-steps))))
+            (tick (map-nested-elt (agent-shell--state) '(:heartbeat :value)))
+            (icon (map-elt model :icon-name))
+            ((not (string-prefix-p "kdb-logo-" icon))))
+      (cons (cons :icon-name (format "kdb-logo-%d|%s" (mod (/ tick 2) 10) icon))
             (assq-delete-all :icon-name (copy-alist model)))
     model))
 
@@ -400,8 +330,7 @@ Filter on agent-shell's header model, run in the shell buffer."
 (defun kdb-claude--busy-frames ()
   "Frames for `agent-shell-busy-indicator-frames', per `kdb-claude-busy-indicator'."
   (pcase kdb-claude-busy-indicator
-    ('claude kdb-claude--busy-claude)
-    ('mr-robot (mapcar #'cdr kdb-claude--mask-steps))
+    ('claude kdb-claude--busy-bar)
     (other other)))
 
 ;;;###autoload
@@ -422,7 +351,7 @@ each time a turn starts or ends."
   "Switch the busy animation of Claude sessions to STYLE."
   (interactive
    (list (intern (completing-read "Busy animation: "
-                                  '("claude" "mr-robot" "wide" "wave" "dots-block" "circle")
+                                  '("claude" "wide" "wave" "dots-block" "circle")
                                   nil t))))
   (setq kdb-claude-busy-indicator style))
 

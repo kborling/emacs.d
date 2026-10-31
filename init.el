@@ -2036,7 +2036,7 @@ Safe to re-run; only missing models are downloaded."
               kdb-claude--start-with kdb-claude-spawn kdb-claude-message
               kdb-claude--tag-client kdb-claude--render-markdown
               kdb-claude--track-artifacts kdb-claude--header-symbol-fonts
-              kdb-claude--busy-frames kdb-claude--mask-icon kdb-claude--mask-header
+              kdb-claude--busy-frames kdb-claude--logo-icon kdb-claude--logo-header
               kdb-claude--steady-busy-frame))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
@@ -2093,9 +2093,9 @@ Safe to re-run; only missing models are downloaded."
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-artifacts)
   (setq agent-shell-busy-indicator-frames #'kdb-claude--busy-frames)
   (advice-add 'agent-shell--busy-indicator-frame :filter-return #'kdb-claude--steady-busy-frame)
-  (advice-add 'agent-shell--fetch-agent-icon :before-until #'kdb-claude--mask-icon)
+  (advice-add 'agent-shell--fetch-agent-icon :before-until #'kdb-claude--logo-icon)
   (dolist (fn '(agent-shell--make-header-model agent-shell--header-model-refresh-frame))
-    (advice-add fn :filter-return #'kdb-claude--mask-header))
+    (advice-add fn :filter-return #'kdb-claude--logo-header))
   (when (eq system-type 'windows-nt)
     (advice-add 'agent-shell--make-header-model :filter-return #'kdb-claude--header-symbol-fonts))
   ;; Each session knows its id (KDB_CLAUDE_SESSION) for kdb-claude-message.
