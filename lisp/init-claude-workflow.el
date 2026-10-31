@@ -26,6 +26,7 @@
 (declare-function org-back-to-heading "org")
 (declare-function org-mark-subtree "org")
 (defvar agent-shell-cwd-function)
+(defvar agent-shell-busy-indicator-frames)
 
 ;;; ============================================================
 ;;; Attention
@@ -377,7 +378,7 @@ Before-until advice on `agent-shell--fetch-agent-icon'."
   "While busy in `mr-robot' style, put the current mask frame in MODEL's icon.
 Filter on agent-shell's header model, run in the shell buffer."
   (if-let* (((eq kdb-claude-busy-indicator 'mr-robot))
-            ((map-elt model :busy-indicator-frame))
+            ((eq (map-nested-elt (agent-shell--state) '(:heartbeat :status)) 'busy))
             (tick (map-nested-elt (agent-shell--state) '(:heartbeat :value))))
       (cons (cons :icon-name
                   (format "kdb-mask-%s" (car (nth (mod tick (length kdb-claude--mask-steps))
@@ -392,6 +393,19 @@ Filter on agent-shell's header model, run in the shell buffer."
     ('claude kdb-claude--busy-claude)
     ('mr-robot (mapcar #'cdr kdb-claude--mask-steps))
     (other other)))
+
+;;;###autoload
+(defun kdb-claude--steady-busy-frame (frame)
+  "FRAME, or when idle, blanks as wide as the animation.
+Filter on `agent-shell--busy-indicator-frame': the frame ends the mode
+line's agent-shell part, so without this everything after it shifts
+each time a turn starts or ends."
+  (or frame
+      (and (bound-and-true-p agent-shell-show-busy-indicator)
+           (eq agent-shell-busy-indicator-frames #'kdb-claude--busy-frames)
+           (let ((frames (kdb-claude--busy-frames)))
+             (and (consp frames) (stringp (car frames))
+                  (make-string (1+ (string-width (car frames))) ?\s))))))
 
 ;;;###autoload
 (defun kdb-claude-set-busy-indicator (style)

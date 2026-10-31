@@ -232,10 +232,31 @@
       ;; Busy in mr-robot style: tick 21 is the blink.
       (let ((kdb-claude-busy-indicator 'mr-robot))
         (should (equal (map-elt (kdb-claude--mask-header model) :icon-name) "kdb-mask-blink"))
-        ;; Idle: the usual icon.
-        (should (equal (map-elt (kdb-claude--mask-header (cons '(:busy-indicator-frame) model)) :icon-name)
-                       "claude-color.png")))
+        ;; Idle (blank frame held for width): the usual icon.
+        (cl-letf (((symbol-function 'agent-shell--state) (lambda () '((:heartbeat . ((:status . ended)))))))
+          (should (equal (map-elt (kdb-claude--mask-header model) :icon-name) "claude-color.png"))))
       (let ((kdb-claude-busy-indicator 'claude))
         (should (eq (kdb-claude--mask-header model) model))))))
+
+
+(ert-deftest busy-frame-keeps-its-width-when-idle ()
+  (require 'agent-shell)
+  (let ((agent-shell-busy-indicator-frames #'kdb-claude--busy-frames)
+        (agent-shell-show-busy-indicator t))
+    (dolist (status '(busy ended))
+      (cl-letf (((symbol-function 'agent-shell--state)
+                 (lambda () `((:heartbeat . ((:status . ,status) (:value . ,(and (eq status 'busy) 5))))))))
+        (let ((kdb-claude-busy-indicator 'mr-robot))
+          (should (= 11 (string-width (agent-shell--busy-indicator-frame)))))
+        (let ((kdb-claude-busy-indicator 'claude))
+          (should (= 2 (string-width (agent-shell--busy-indicator-frame)))))))
+    ;; Idle is blank.
+    (cl-letf (((symbol-function 'agent-shell--state) (lambda () '((:heartbeat . ((:status . ended)))))))
+      (should (string-blank-p (agent-shell--busy-indicator-frame)))))
+  ;; Someone else's animation is left alone.
+  (let ((agent-shell-busy-indicator-frames 'wide)
+        (agent-shell-show-busy-indicator t))
+    (cl-letf (((symbol-function 'agent-shell--state) (lambda () '((:heartbeat . ((:status . ended)))))))
+      (should-not (agent-shell--busy-indicator-frame)))))
 
 ;;; claude-artifacts-test.el ends here

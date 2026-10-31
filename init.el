@@ -1928,7 +1928,8 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
               kdb-claude--start-with kdb-claude-spawn kdb-claude-message
               kdb-claude--tag-client kdb-claude--render-markdown
               kdb-claude--track-artifacts kdb-claude--header-symbol-fonts
-              kdb-claude--busy-frames kdb-claude--mask-icon kdb-claude--mask-header))
+              kdb-claude--busy-frames kdb-claude--mask-icon kdb-claude--mask-header
+              kdb-claude--steady-busy-frame))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
                  kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review
@@ -1978,6 +1979,7 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-artifacts)
   (setq agent-shell-busy-indicator-frames #'kdb-claude--busy-frames)
+  (advice-add 'agent-shell--busy-indicator-frame :filter-return #'kdb-claude--steady-busy-frame)
   (advice-add 'agent-shell--fetch-agent-icon :before-until #'kdb-claude--mask-icon)
   (dolist (fn '(agent-shell--make-header-model agent-shell--header-model-refresh-frame))
     (advice-add fn :filter-return #'kdb-claude--mask-header))
