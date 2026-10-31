@@ -196,8 +196,8 @@
 
 
 (ert-deftest mask-frames ()
-  (should (= 16 (length kdb-claude--mask)))
-  (should (seq-every-p (lambda (r) (= (length r) 16)) kdb-claude--mask))
+  (should (= 20 (length kdb-claude--mask)))
+  (should (seq-every-p (lambda (r) (= (length r) 20)) kdb-claude--mask))
   (let ((frames (append '(idle blink blink1 twitch1 twitch glow1 glow)
                         (mapcar (lambda (k) (intern (format "scan%d" k))) (number-sequence 1 10)))))
     ;; Every frame is valid SVG, and no two look the same.

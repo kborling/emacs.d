@@ -265,67 +265,75 @@ fontsets, so symbols the main font lacks need fallbacks named here."
   "Claude Code's spinner: the ✻ grows and shrinks.  10 frames a second.")
 
 (defconst kdb-claude--mask
-  ["....KKKKKKKK...."
-   "....KKKKKKKK...."
-   "....KKKKKKKK...."
-   "....KGGGGGGK...."
-   ".KKKKKKKKKKKKKK."
-   "...SSSSSSSSSSH.."
-   "..SSKKSSSSKKSSH."
-   ".SSTKSSSSSSTKSS."
-   ".SSSSSSHHSSSSSS."
-   "..SPSSSHHSSSPSS."
-   ".K.SSKKKKKKSS.K."
-   "..KKKKKKKKKKKK.."
-   "..SSSSSSSSSSSS.."
-   "...SSKSSSSKSS..."
-   "....SSKKKKSS...."
-   ".....SSSSSS....."]
-  "A friendly fsociety-style gentleman, 16x16: top hat, brows, eyes with a
-glint, ears, rosy cheeks, handlebar mustache and a closed smile.")
+  ["......LAAAAAAA......"
+   "......LAAAAAAA......"
+   "......LAAAAAAA......"
+   "......BBBBBBBB......"
+   "..AAAAAAAAAAAAAAAA.."
+   "....OSSSSSSSSSSO...."
+   "...OSKKKSSSSKKKSO..."
+   "..OSSSSSSSSSSSSSSO.."
+   "..OSSSTKSSSSTKSSSO.."
+   "..OSSSKKSSSSKKSSSO.."
+   "..OSPPSSSHHSSSPPSO.."
+   "..OSSSSSSHHSSSSSSO.."
+   "..OSSSSKKKKKKSSSSO.."
+   "..OSKSKKKKKKKKSKSO.."
+   "..OSSKKKSSSSKKKSSO.."
+   "..OSSSSSSSSSSSSSSO.."
+   "...OSSSMSSSSMSSSO..."
+   "....OSSSMMMMSSSO...."
+   ".....OSSSSSSSSO....."
+   "......OOOOOOOO......"]
+  "A friendly fsociety-style gentleman, 20x20: a grey top hat with a red
+band over a round, outlined face (a quarter hat, three quarters face),
+brows, eyes with a glint, rosy cheeks, a handlebar mustache (thick under
+the nose, drooping to tips that curl up) and a closed smile.")
 
 (defconst kdb-claude--mask-colors
-  '((?K . "#111111") (?G . "#8a8a8a") (?S . "#efd9c7") (?H . "#cdb3a2")
-    (?P . "#e59a9a") (?E . "#050505") (?T . "#ffffff")
+  '((?K . "#111111") (?A . "#4a4a4a") (?L . "#8c8c8c") (?B . "#b33a3a")
+    (?S . "#efd9c7") (?H . "#cdb3a2") (?O . "#8a6656") (?M . "#a8434a")
+    (?P . "#e59a9a") (?T . "#ffffff")
     (?N . "#00ff41") (?D . "#00661a")))
 
 (defun kdb-claude--mask-frame (name)
   "Rows of mask frame NAME.
 idle; blink1 and blink (a two-step blink, the glints fading before the
-eyes close); twitch1 and twitch (the mustache tips rise in two steps);
-scan1-10 (a green line sweeps down row by row); glow1 and glow (the
-pupils fade to dark green, then bright green)."
+eyes close); twitch1 and twitch (the mustache tips flick out, then up);
+scan1-10 (a green line sweeps down from brow to chin); glow1 and glow
+(the pupils fade to dark green, then bright green)."
   (let ((rows (copy-sequence kdb-claude--mask))
         (put (lambda (rows y x c) (let ((r (copy-sequence (aref rows y)))) (aset r x c) (aset rows y r))))
         (green (lambda (row) (concat (mapcar (lambda (c) (pcase c
                                                            ((or ?S ?H ?P ?T) ?N)
-                                                           ((or ?K ?E ?G) ?D)
+                                                           ((or ?K ?O ?M) ?D)
                                                            (_ c)))
                                              row)))))
     (pcase (symbol-name name)
-      ("blink" (aset rows 7 ".SSHHSSSSSSHHSS."))
-      ("blink1" (aset rows 7 ".SSHKSSSSSSHKSS."))
-      ("twitch1" (funcall put rows 10 1 ?.) (funcall put rows 10 14 ?.)
-                 (funcall put rows 9 1 ?K) (funcall put rows 9 14 ?K))
-      ("twitch" (funcall put rows 10 1 ?.) (funcall put rows 10 14 ?.)
-                (dolist (y '(8 9)) (funcall put rows y 1 ?K) (funcall put rows y 14 ?K)))
+      ("blink" (aset rows 8 (replace-regexp-in-string "[TK]" "S" (aref rows 8))))
+      ("blink1" (aset rows 8 (string-replace "T" "H" (aref rows 8))))
+      ((or "twitch1" "twitch")
+       (dolist (x '(4 15))
+         (funcall put rows 12 x ?K)
+         (when (equal (symbol-name name) "twitch") (funcall put rows 11 x ?K))))
       ((rx "scan" (let n (+ digit)))
-       (let ((row (+ 4 (string-to-number n))))
+       (let ((row (+ 5 (/ (+ 4 (* 14 (1- (string-to-number n)))) 9))))
          (aset rows row (funcall green (aref rows row)))))
-      ("glow1" (aset rows 7 (string-replace "K" "D" (aref rows 7))))
-      ("glow" (aset rows 7 (string-replace "K" "N" (aref rows 7)))))
+      ("glow1" (dolist (y '(8 9)) (aset rows y (string-replace "K" "D" (aref rows y)))))
+      ("glow" (dolist (y '(8 9)) (aset rows y (string-replace "K" "N" (aref rows y))))))
     rows))
 
 (defun kdb-claude--mask-svg (name)
   "SVG of mask frame NAME."
-  (let ((rows (kdb-claude--mask-frame name))
-        rects)
-    (dotimes (y 16)
-      (dotimes (x 16)
+  (let* ((rows (kdb-claude--mask-frame name))
+         (n (length rows))
+         rects)
+    (dotimes (y n)
+      (dotimes (x n)
         (when-let* ((c (alist-get (aref (aref rows y) x) kdb-claude--mask-colors)))
           (push (format "<rect x=\"%d\" y=\"%d\" width=\"1\" height=\"1\" fill=\"%s\"/>" x y c)
                 rects))))
-    (concat "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\" "
+    (concat (format "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 %d %d\" " n n)
             "width=\"64\" height=\"64\" shape-rendering=\"crispEdges\">"
             (apply #'concat (nreverse rects)) "</svg>")))
 
