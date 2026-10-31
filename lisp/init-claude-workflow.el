@@ -290,74 +290,76 @@ glint, ears, rosy cheeks, handlebar mustache and a closed smile.")
     (?N . "#00ff41") (?D . "#00661a")))
 
 (defun kdb-claude--mask-frame (name)
-  "Rows of mask frame NAME: idle, blink, scan1-4, root, glitch1 or glitch2.
-Scans sweep a terminal-green line down the mask; root ends with the
-pupils glowing green."
+  "Rows of mask frame NAME.
+idle; blink1 and blink (a two-step blink, the glints fading before the
+eyes close); twitch1 and twitch (the mustache tips rise in two steps);
+scan1-10 (a green line sweeps down row by row); glow1 and glow (the
+pupils fade to dark green, then bright green)."
   (let ((rows (copy-sequence kdb-claude--mask))
+        (put (lambda (rows y x c) (let ((r (copy-sequence (aref rows y)))) (aset r x c) (aset rows y r))))
         (green (lambda (row) (concat (mapcar (lambda (c) (pcase c
                                                            ((or ?S ?H ?P ?T) ?N)
                                                            ((or ?K ?E ?G) ?D)
                                                            (_ c)))
                                              row)))))
-    (pcase name
-      ('blink (aset rows 7 ".SSSSSSSSSSSSSS."))
-      ('scan1 (aset rows 5 (funcall green (aref rows 5))))
-      ('scan2 (aset rows 8 (funcall green (aref rows 8))))
-      ('scan3 (aset rows 11 (funcall green (aref rows 11))))
-      ('scan4 (aset rows 14 (funcall green (aref rows 14))))
-      ('root (aset rows 7 (string-replace "K" "N" (aref rows 7)))))
+    (pcase (symbol-name name)
+      ("blink" (aset rows 7 ".SSHHSSSSSSHHSS."))
+      ("blink1" (aset rows 7 ".SSHKSSSSSSHKSS."))
+      ("twitch1" (funcall put rows 10 1 ?.) (funcall put rows 10 14 ?.)
+                 (funcall put rows 9 1 ?K) (funcall put rows 9 14 ?K))
+      ("twitch" (funcall put rows 10 1 ?.) (funcall put rows 10 14 ?.)
+                (dolist (y '(8 9)) (funcall put rows y 1 ?K) (funcall put rows y 14 ?K)))
+      ((rx "scan" (let n (+ digit)))
+       (let ((row (+ 4 (string-to-number n))))
+         (aset rows row (funcall green (aref rows row)))))
+      ("glow1" (aset rows 7 (string-replace "K" "D" (aref rows 7))))
+      ("glow" (aset rows 7 (string-replace "K" "N" (aref rows 7)))))
     rows))
 
 (defun kdb-claude--mask-svg (name)
-  "SVG of mask frame NAME.  Glitch frames fringe a band of rows with a red
-and a cyan ghost, one pixel either side; the face itself stays put."
+  "SVG of mask frame NAME."
   (let ((rows (kdb-claude--mask-frame name))
-        (band (pcase name ('glitch1 '(5 9)) ('glitch2 '(9 13))))
         rects)
-    (cl-flet ((draw (dx color-of from to)
-                (dotimes (y 16)
-                  (let ((shift dx))
-                    (when (or (null from) (<= from y to))
-                      (dotimes (x 16)
-                        (when-let* ((c (funcall color-of (aref (aref rows y) x))))
-                          (push (format "<rect x=\"%d\" y=\"%d\" width=\"1\" height=\"1\" fill=\"%s\"/>"
-                                        (+ x shift) y c)
-                                rects))))))))
-      (when band
-        (draw -1 (lambda (ch) (and (memq ch '(?S ?H ?P ?T ?K ?E)) "#e63946")) (nth 0 band) (nth 1 band))
-        (draw 1 (lambda (ch) (and (memq ch '(?S ?H ?P ?T ?K ?E)) "#2ec4b6")) (nth 0 band) (nth 1 band)))
-      (draw 0 (lambda (ch) (alist-get ch kdb-claude--mask-colors)) nil nil))
+    (dotimes (y 16)
+      (dotimes (x 16)
+        (when-let* ((c (alist-get (aref (aref rows y) x) kdb-claude--mask-colors)))
+          (push (format "<rect x=\"%d\" y=\"%d\" width=\"1\" height=\"1\" fill=\"%s\"/>" x y c)
+                rects))))
     (concat "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\" "
             "width=\"64\" height=\"64\" shape-rendering=\"crispEdges\">"
             (apply #'concat (nreverse rects)) "</svg>")))
 
 (defconst kdb-claude--mask-steps
-  (let* ((frames (append (make-list 20 'idle) (make-list 2 'blink) (make-list 14 'idle)
-                         (make-list 2 'scan1) (make-list 2 'scan2) (make-list 2 'scan3)
-                         (make-list 2 'scan4) (make-list 5 'root) (make-list 10 'idle)
-                         (make-list 2 'glitch1) (make-list 2 'glitch2) (make-list 6 'idle)))
+  (let* ((frames (append
+                  (make-list 20 'idle)
+                  (make-list 2 'blink1) (make-list 3 'blink) (make-list 2 'blink1)
+                  (make-list 16 'idle)
+                  (make-list 2 'twitch1) (make-list 5 'twitch) (make-list 2 'twitch1)
+                  (make-list 12 'idle)
+                  (mapcan (lambda (k) (make-list 3 (intern (format "scan%d" k))))
+                          (number-sequence 1 10))
+                  (make-list 3 'glow1) (make-list 10 'glow)
+                  (make-list 3 'glow1)
+                  (make-list 14 'idle)))
          (bits "01101001110100101101000111010011")
          (rain (lambda (i) (let ((j (mod i (length bits))))
                              (substring (concat bits bits) j (+ j 10)))))
-         (scan 0))
+         (glowed nil))
     (seq-map-indexed
      (lambda (frame i)
        (cons frame
-             (pcase frame
-               ((or 'scan1 'scan2 'scan3 'scan4)
-                (cl-incf scan)
-                (format "[%s%s]" (make-string scan ?#) (make-string (- 8 scan) ?.)))
-               ('root "DECRYPTED ")
-               ((or 'glitch1 'glitch2)
-                (let ((noise "#$@!?%&*"))
-                  (concat (seq-map-indexed (lambda (c k) (if (= (% (+ k i) 2) 0) c (aref noise (% (+ k i) 8))))
-                                           (funcall rain i)))))
+             (pcase (symbol-name frame)
+               ((rx "scan" (let k (+ digit)))
+                (format "SCAN %2d/10" (string-to-number k)))
+               ("glow1" (if glowed (funcall rain i) "DECRYPTING"))
+               ("glow" (setq glowed t) "DECRYPTED ")
                (_ (funcall rain i)))))
      frames))
-  "(FRAME . CAPTION) per tick, 10 a second.  The caption animates on its
-own: binary rain while idle, a loader during the scan, a corrupted stream
-when glitching.  agent-shell only redraws when the caption changes, so it
-changes on every tick.")
+  "(FRAME . CAPTION) per tick, 10 a second, about 12 seconds a loop.
+Each move eases in and out over several ticks.  The caption is binary
+rain, a SCAN n/10 loader during the scan, and DECRYPTING then DECRYPTED
+as the pupils glow.  agent-shell only redraws when the caption
+changes, so a new frame always brings a new caption.")
 
 ;;;###autoload
 (defun kdb-claude--mask-icon (name)

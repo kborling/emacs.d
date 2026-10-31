@@ -198,7 +198,8 @@
 (ert-deftest mask-frames ()
   (should (= 16 (length kdb-claude--mask)))
   (should (seq-every-p (lambda (r) (= (length r) 16)) kdb-claude--mask))
-  (let ((frames '(idle blink scan1 scan2 scan3 scan4 root glitch1 glitch2)))
+  (let ((frames (append '(idle blink blink1 twitch1 twitch glow1 glow)
+                        (mapcar (lambda (k) (intern (format "scan%d" k))) (number-sequence 1 10)))))
     ;; Every frame is valid SVG, and no two look the same.
     (dolist (f frames)
       (should (with-temp-buffer (insert (kdb-claude--mask-svg f))
@@ -212,8 +213,9 @@
              unless (eq (car a) (car b)) do (should-not (equal (cdr a) (cdr b))))
     ;; Fixed-width ASCII: no font fallback needed, the header doesn't jump.
     (should (seq-every-p (lambda (st) (string-match-p "\\`[[:ascii:]]\\{10\\}\\'" (cdr st))) steps))
-    (should (member "[########]" (mapcar #'cdr steps)))
+    (should (member "SCAN 10/10" (mapcar #'cdr steps)))
     (should (member "DECRYPTED " (mapcar #'cdr steps)))
+    (should (member "DECRYPTING" (mapcar #'cdr steps)))
     (should-not (seq-find (lambda (st) (string-match-p "root\\|fsociety" (cdr st))) steps))))
 
 (ert-deftest mask-icon-and-header ()
@@ -228,8 +230,8 @@
       (should-not (equal (kdb-claude--mask-icon "kdb-mask-idle") before))))
   (let ((model '((:icon-name . "claude-color.png") (:busy-indicator-frame . " 0110100111"))))
     (cl-letf (((symbol-function 'agent-shell--state)
-               (lambda () '((:heartbeat . ((:status . busy) (:value . 21)))))))
-      ;; Busy in mr-robot style: tick 21 is the blink.
+               (lambda () '((:heartbeat . ((:status . busy) (:value . 23)))))))
+      ;; Busy in mr-robot style: tick 23 is the blink.
       (let ((kdb-claude-busy-indicator 'mr-robot))
         (should (equal (map-elt (kdb-claude--mask-header model) :icon-name) "kdb-mask-blink"))
         ;; Idle (blank frame held for width): the usual icon.
