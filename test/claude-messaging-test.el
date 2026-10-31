@@ -131,4 +131,52 @@
       (delete-directory dir t))
     (delete-directory repo t)))
 
+;;; Other models
+
+(defun test-env-value (env name)
+  (when-let* ((e (seq-find (lambda (e) (string-prefix-p (concat name "=") e)) env)))
+    (substring e (1+ (length name)))))
+
+(ert-deftest start-model-points-claude-code-at-provider ()
+  (test-reset)
+  (let ((process-environment (cons "ZAI_API_KEY=test-key" process-environment)))
+    (let* ((buf (kdb-claude-start-model "GLM (Z.ai)" "glm-4.6" "/tmp/"))
+           (env (nth 2 (car test-started))))
+      (should (equal (test-env-value env "ANTHROPIC_BASE_URL") "https://api.z.ai/api/anthropic"))
+      (should (equal (test-env-value env "ANTHROPIC_AUTH_TOKEN") "test-key"))
+      (dolist (v '("ANTHROPIC_MODEL" "ANTHROPIC_SMALL_FAST_MODEL" "ANTHROPIC_DEFAULT_OPUS_MODEL"
+                   "ANTHROPIC_DEFAULT_SONNET_MODEL" "ANTHROPIC_DEFAULT_HAIKU_MODEL"))
+        (should (equal (test-env-value env v) "glm-4.6")))
+      (should (test-env-value env "KDB_CLAUDE_SESSION"))       ; messaging still works
+      ;; agent-shell rebuilds the client later (reconnects): same provider.
+      (let ((later (map-elt (agent-shell-anthropic-make-claude-client :buffer buf) :environment-variables)))
+        (should (equal (test-env-value later "ANTHROPIC_BASE_URL") "https://api.z.ai/api/anthropic")))
+      (kill-buffer buf)))
+  ;; A normal session afterwards is untouched.
+  (let* ((id (kdb-claude-spawn "/tmp/" "plain"))
+         (env (nth 2 (car test-started))))
+    (should-not (test-env-value env "ANTHROPIC_BASE_URL"))
+    (kill-buffer (kdb-claude--session-buffer id))))
+
+(ert-deftest start-model-keys-and-local ()
+  (test-reset)
+  ;; Key from ~/.authinfo.gpg when the variable isn't set.
+  (let ((process-environment (cons "OPENROUTER_API_KEY" process-environment)))
+    (cl-letf (((symbol-function 'auth-source-pick-first-password)
+               (lambda (&rest spec) (and (equal (plist-get spec :host) "openrouter.ai") "from-authinfo"))))
+      (let ((buf (kdb-claude-start-model "OpenRouter (fastest host per model)" "qwen/qwen3-coder:nitro" "/tmp/")))
+        (should (equal (test-env-value (nth 2 (car test-started)) "ANTHROPIC_AUTH_TOKEN") "from-authinfo"))
+        (kill-buffer buf)))
+    ;; No key anywhere: a clear error naming both places.
+    (cl-letf (((symbol-function 'auth-source-pick-first-password) #'ignore))
+      (should (string-match-p "OPENROUTER_API_KEY.*machine openrouter.ai"
+                              (cadr (should-error (kdb-claude-start-model "OpenRouter (fastest host per model)" "x" "/tmp/")
+                                                  :type 'user-error))))))
+  ;; Ollama needs no key.
+  (let ((buf (kdb-claude-start-model "Ollama (local)" "qwen3:4b" "/tmp/"))
+        (env (nth 2 (car test-started))))
+    (should (equal (test-env-value env "ANTHROPIC_BASE_URL") "http://localhost:11434"))
+    (should (equal (test-env-value env "ANTHROPIC_AUTH_TOKEN") "ollama"))
+    (kill-buffer buf)))
+
 ;;; claude-messaging-test.el ends here

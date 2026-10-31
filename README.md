@@ -65,6 +65,20 @@ Conversation data stays out of this repo and out of your projects: transcripts, 
 
 Every session can read the archive (`~/.claude-archive`, via `permissions.additionalDirectories` and `~/.claude/CLAUDE.md`), so Claude can look up earlier work itself.
 
+### Local models (`C-c a`)
+
+Small coding models via [Ollama](https://ollama.com), sized for a 4 GB GPU; nothing leaves the machine. Completion as you type in code buffers ([minuet](https://github.com/milanglacier/minuet-ai.el), `qwen2.5-coder:3b`; `TAB` accepts, `M-n`/`M-p` cycle) and chat or rewrite ([gptel](https://github.com/karthink/gptel), `qwen2.5-coder:7b`).
+
+**Setup:** `C-c a s` (`M-x kdb-local-models-setup`). Without Ollama it opens the download page; with it, it starts the server and pulls whichever models are missing. Re-run any time. Models are in `kdb-local-models`.
+
+| Key | Action |
+|-----|--------|
+| `C-c a a` | Chat buffer |
+| `C-c a RET` | Send the buffer or region |
+| `C-c a r` | Rewrite the region |
+| `C-c a m` | gptel menu (switch model, options) |
+| `C-c a c` / `C-c a C` | Ask for a completion / toggle completion as you type |
+
 ### Org Mode
 - org-modern styling, org-appear
 - Capture templates: todo, notes, journal, meetings, 1:1s, projects, decisions, specs, Ask Claude

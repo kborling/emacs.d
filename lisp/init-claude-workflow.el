@@ -773,15 +773,94 @@ It reads the local transcripts, so it covers this machine only."
                           (file-name-nondirectory (directory-file-name default-directory))
                           (random #x10000)))))))
 
+(defvar-local kdb-claude--provider-env nil
+  "Environment pointing this session's Claude Code at another provider.")
+(put 'kdb-claude--provider-env 'permanent-local t)
+
+(defvar kdb-claude--next-env nil
+  "Provider environment for the session being started.")
+
 ;;;###autoload
 (defun kdb-claude--tag-client (make-client &rest args)
-  "Around MAKE-CLIENT: give the session's process KDB_CLAUDE_SESSION.
+  "Around MAKE-CLIENT: give the session's process KDB_CLAUDE_SESSION, and
+the environment of the model provider it was started with, if any.
 ARGS has the session buffer under :buffer."
-  (let ((agent-shell-anthropic-claude-environment
-         (cons (concat "KDB_CLAUDE_SESSION="
-                       (kdb-claude--session-id (plist-get args :buffer)))
-               agent-shell-anthropic-claude-environment)))
+  (let* ((buf (plist-get args :buffer))
+         (agent-shell-anthropic-claude-environment
+          (append (list (concat "KDB_CLAUDE_SESSION=" (kdb-claude--session-id buf)))
+                  (with-current-buffer buf
+                    (or kdb-claude--provider-env
+                        (setq kdb-claude--provider-env kdb-claude--next-env)))
+                  agent-shell-anthropic-claude-environment)))
     (apply make-client args)))
+
+;;; ============================================================
+;;; Other models: Claude Code against any Anthropic-compatible API
+;;; ============================================================
+
+(defvar kdb-claude-model-providers
+  '(("OpenRouter (fastest host per model)"
+     :base "https://openrouter.ai/api" :key "OPENROUTER_API_KEY" :host "openrouter.ai"
+     :models ("moonshotai/kimi-k2.6:nitro" "z-ai/glm-4.6:nitro"
+              "qwen/qwen3-coder:nitro" "openai/gpt-oss-120b:nitro"))
+    ("GLM (Z.ai)"
+     :base "https://api.z.ai/api/anthropic" :key "ZAI_API_KEY" :host "api.z.ai"
+     :models ("glm-4.6" "glm-5.1"))
+    ("Kimi (Moonshot)"
+     :base "https://api.moonshot.ai/anthropic" :key "MOONSHOT_API_KEY" :host "api.moonshot.ai"
+     :models ("kimi-k2.6" "kimi-k3"))
+    ("DeepSeek"
+     :base "https://api.deepseek.com/anthropic" :key "DEEPSEEK_API_KEY" :host "api.deepseek.com"
+     :models ("deepseek-chat" "deepseek-v4-pro"))
+    ("Ollama (local)" :base "http://localhost:11434" :token "ollama" :models ollama))
+  "Providers with an Anthropic-compatible API, for `kdb-claude-start-model'.
+Each: NAME :base URL, then :token, or :key (an environment variable)
+and :host (for ~/.authinfo.gpg: machine HOST password KEY); :models
+lists suggestions (any name can be typed), or `ollama' for the
+models pulled locally.  Model names change often; check the provider.")
+
+(defun kdb-claude--provider-environment (base token model)
+  "Environment running Claude Code on MODEL at BASE with TOKEN."
+  (append (list (concat "ANTHROPIC_BASE_URL=" base)
+                (concat "ANTHROPIC_AUTH_TOKEN=" token)
+                (concat "ANTHROPIC_MODEL=" model)
+                (concat "ANTHROPIC_SMALL_FAST_MODEL=" model)
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1")
+          (mapcar (lambda (tier) (format "ANTHROPIC_DEFAULT_%s_MODEL=%s" tier model))
+                  '("OPUS" "SONNET" "HAIKU"))))
+
+;;;###autoload
+(defun kdb-claude-start-model (provider model &optional dir)
+  "Start a Claude Code session running on MODEL from PROVIDER, in DIR.
+Same tools, prompts and Emacs integration as any session; only the
+model differs.  Interactively, DIR is the project root; with a prefix
+argument, or outside a project, pick it."
+  (interactive
+   (let* ((provider (completing-read "Provider: " kdb-claude-model-providers nil t))
+          (models (plist-get (cdr (assoc provider kdb-claude-model-providers)) :models))
+          (models (if (eq models 'ollama)
+                      (or (mapcar (lambda (l) (car (split-string l)))
+                                  (cdr (ignore-errors (process-lines "ollama" "list"))))
+                          (user-error "No local models; try: ollama pull qwen3:4b"))
+                    models)))
+     (list provider
+           (completing-read "Model: " models nil nil nil nil (car models))
+           (when (or current-prefix-arg (not (project-current)))
+             (kdb-claude-read-directory "Project: ")))))
+  (let* ((spec (cdr (or (assoc provider kdb-claude-model-providers)
+                        (user-error "Unknown provider %s" provider))))
+         (token (or (plist-get spec :token)
+                    (getenv (plist-get spec :key))
+                    (progn (require 'auth-source)
+                           (auth-source-pick-first-password :host (plist-get spec :host)))
+                    (user-error "Set %s, or add to ~/.authinfo.gpg: machine %s password YOUR-KEY"
+                                (plist-get spec :key) (plist-get spec :host))))
+         (dir (or dir (if (project-current)
+                          (project-root (project-current))
+                        default-directory)))
+         (kdb-claude--next-env (kdb-claude--provider-environment (plist-get spec :base) token model)))
+    (prog1 (kdb-claude--start-with (file-name-as-directory (expand-file-name dir)))
+      (message "Claude Code on %s (%s)" model provider))))
 
 (defun kdb-claude--session-buffer (id)
   "The live Claude session with ID (or buffer name ID), or nil."
@@ -1090,7 +1169,8 @@ or the session ends.  Run again in a watched session to stop."
   [["Start"
     ("n" "New here (C-u pick project)" kdb-claude-new)
     ("N" "New on project + branch" kdb-claude-start)
-    ("t" "Schedule a session" kdb-claude-schedule)]
+    ("t" "Schedule a session" kdb-claude-schedule)
+    ("m" "New with another model" kdb-claude-start-model)]
    ["Send"
     ("s" "Region/note/files → session" kdb-claude-send)
     ("f" "File → session" agent-shell-send-file-to)
