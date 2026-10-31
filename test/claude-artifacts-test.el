@@ -161,6 +161,8 @@
     (should (equal (window-buffer (window-in-direction 'right (get-buffer-window buf)))
                    (get-file-buffer (expand-file-name "report.md" test-dir))))))
 
+
+
 (ert-deftest header-gets-symbol-font-fallbacks ()
   (let* ((model (list (cons :buffer-name "x") (cons :font-family "Comic Code") (cons :width 800)))
          (out (kdb-claude--header-symbol-fonts model)))
@@ -170,5 +172,70 @@
     (should (equal (map-elt model :font-family) "Comic Code")))  ; original untouched
   (let ((model (list (cons :font-family 'unspecified))))
     (should (eq (kdb-claude--header-symbol-fonts model) model))))
+
+
+(ert-deftest busy-animations ()
+  (require 'agent-shell)
+  ;; Claude: · ✢ ✳ ✶ ✻ ✽ and back, each shown twice.
+  (should (equal (seq-uniq kdb-claude--busy-claude) '("·" "✢" "✳" "✶" "✻" "✽")))
+  (should (equal (seq-take kdb-claude--busy-claude 4) '("·" "·" "✢" "✢")))
+  (should (equal (last kdb-claude--busy-claude 2) '("✢" "✢")))
+  ;; Through agent-shell's own frame picker, as the header uses it.
+  (let ((agent-shell-busy-indicator-frames #'kdb-claude--busy-frames)
+        (agent-shell-show-busy-indicator t)
+        (tick 8))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () `((:heartbeat . ((:status . busy) (:value . ,tick)))))))
+      (let ((kdb-claude-busy-indicator 'claude))
+        (should (equal (agent-shell--busy-indicator-frame) " ✻")))
+      (let ((kdb-claude-busy-indicator 'mr-robot))
+        (should (equal (agent-shell--busy-indicator-frame)
+                       (concat " " (cdr (nth 8 kdb-claude--mask-steps))))))
+      (let ((kdb-claude-busy-indicator 'wave))
+        (should (equal (agent-shell--busy-indicator-frame) " ▇"))))))
+
+
+(ert-deftest mask-frames ()
+  (should (= 16 (length kdb-claude--mask)))
+  (should (seq-every-p (lambda (r) (= (length r) 16)) kdb-claude--mask))
+  (let ((frames '(idle blink scan1 scan2 scan3 scan4 root glitch1 glitch2)))
+    ;; Every frame is valid SVG, and no two look the same.
+    (dolist (f frames)
+      (should (with-temp-buffer (insert (kdb-claude--mask-svg f))
+                                (libxml-parse-xml-region (point-min) (point-max)))))
+    (should (= (length frames) (length (seq-uniq (mapcar #'kdb-claude--mask-svg frames))))))
+  ;; agent-shell redraws only when the caption changes: a new frame must
+  ;; always come with a new caption.
+  (let ((steps kdb-claude--mask-steps))
+    (cl-loop for (a b) on (append steps (list (car steps)))
+             while b
+             unless (eq (car a) (car b)) do (should-not (equal (cdr a) (cdr b))))
+    ;; Fixed-width ASCII: no font fallback needed, the header doesn't jump.
+    (should (seq-every-p (lambda (st) (string-match-p "\\`[[:ascii:]]\\{10\\}\\'" (cdr st))) steps))
+    (should (member "[########]" (mapcar #'cdr steps)))
+    (should (member "DECRYPTED " (mapcar #'cdr steps)))
+    (should-not (seq-find (lambda (st) (string-match-p "root\\|fsociety" (cdr st))) steps))))
+
+(ert-deftest mask-icon-and-header ()
+  (require 'agent-shell)
+  (let ((file (kdb-claude--mask-icon "kdb-mask-scan2")))
+    (should (file-exists-p file))
+    (should (eq (image-supported-file-p file) 'svg)))
+  (should-not (kdb-claude--mask-icon "claude-color.png"))
+  ;; Different art, different file: no stale cached frames.
+  (let ((before (kdb-claude--mask-icon "kdb-mask-idle")))
+    (cl-letf (((symbol-function 'kdb-claude--mask-svg) (lambda (_) "<svg xmlns=\"http://www.w3.org/2000/svg\"/>")))
+      (should-not (equal (kdb-claude--mask-icon "kdb-mask-idle") before))))
+  (let ((model '((:icon-name . "claude-color.png") (:busy-indicator-frame . " 0110100111"))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () '((:heartbeat . ((:status . busy) (:value . 21)))))))
+      ;; Busy in mr-robot style: tick 21 is the blink.
+      (let ((kdb-claude-busy-indicator 'mr-robot))
+        (should (equal (map-elt (kdb-claude--mask-header model) :icon-name) "kdb-mask-blink"))
+        ;; Idle: the usual icon.
+        (should (equal (map-elt (kdb-claude--mask-header (cons '(:busy-indicator-frame) model)) :icon-name)
+                       "claude-color.png")))
+      (let ((kdb-claude-busy-indicator 'claude))
+        (should (eq (kdb-claude--mask-header model) model))))))
 
 ;;; claude-artifacts-test.el ends here

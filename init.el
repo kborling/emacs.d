@@ -1927,12 +1927,14 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify
               kdb-claude--start-with kdb-claude-spawn kdb-claude-message
               kdb-claude--tag-client kdb-claude--render-markdown
-              kdb-claude--track-artifacts kdb-claude--header-symbol-fonts))
+              kdb-claude--track-artifacts kdb-claude--header-symbol-fonts
+              kdb-claude--busy-frames kdb-claude--mask-icon kdb-claude--mask-header))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
                  kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review
                  kdb-claude-watch-pr kdb-claude-schedule kdb-claude-run-block
-                 kdb-claude-reply-to-org kdb-claude-usage kdb-claude-open-artifact)
+                 kdb-claude-reply-to-org kdb-claude-usage kdb-claude-open-artifact
+                 kdb-claude-set-busy-indicator)
                 ("init-claude-print" kdb-claude-print)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
                  kdb-claude-search kdb-claude-import-export
@@ -1975,6 +1977,10 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
     (setq agent-shell-screenshot-command '("maim" "-s")))
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-artifacts)
+  (setq agent-shell-busy-indicator-frames #'kdb-claude--busy-frames)
+  (advice-add 'agent-shell--fetch-agent-icon :before-until #'kdb-claude--mask-icon)
+  (dolist (fn '(agent-shell--make-header-model agent-shell--header-model-refresh-frame))
+    (advice-add fn :filter-return #'kdb-claude--mask-header))
   (when (eq system-type 'windows-nt)
     (advice-add 'agent-shell--make-header-model :filter-return #'kdb-claude--header-symbol-fonts))
   ;; Each session knows its id (KDB_CLAUDE_SESSION) for kdb-claude-message.
