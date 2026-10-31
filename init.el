@@ -1927,7 +1927,7 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify
               kdb-claude--start-with kdb-claude-spawn kdb-claude-message
               kdb-claude--tag-client kdb-claude--render-markdown
-              kdb-claude--track-artifacts))
+              kdb-claude--track-artifacts kdb-claude--header-symbol-fonts))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
                  kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review
@@ -1975,6 +1975,8 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
     (setq agent-shell-screenshot-command '("maim" "-s")))
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-artifacts)
+  (when (eq system-type 'windows-nt)
+    (advice-add 'agent-shell--make-header-model :filter-return #'kdb-claude--header-symbol-fonts))
   ;; Each session knows its id (KDB_CLAUDE_SESSION) for kdb-claude-message.
   (advice-add 'agent-shell-anthropic-make-claude-client :around #'kdb-claude--tag-client))
 

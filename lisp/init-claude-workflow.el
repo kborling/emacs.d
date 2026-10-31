@@ -237,6 +237,17 @@ opens its worktree; a new name creates the branch in a new worktree."
                      (unless (string-empty-p b) b)))))
     (kdb-claude--new-in (if branch (kdb-claude--worktree project branch) project))))
 
+;;;###autoload
+(defun kdb-claude--header-symbol-fonts (model)
+  "Give agent-shell's graphical header MODEL fallback fonts for symbols.
+The header is an SVG image drawn by librsvg, which ignores Emacs's
+fontsets, so symbols the main font lacks need fallbacks named here."
+  (let ((family (map-elt model :font-family)))
+    (if (stringp family)
+        (cons (cons :font-family (concat family ", Segoe UI Symbol, Segoe UI Emoji"))
+              (assq-delete-all :font-family (copy-alist model)))
+      model)))
+
 ;;; ============================================================
 ;;; Artifacts: files Claude writes
 ;;; ============================================================

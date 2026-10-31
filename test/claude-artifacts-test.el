@@ -161,4 +161,14 @@
     (should (equal (window-buffer (window-in-direction 'right (get-buffer-window buf)))
                    (get-file-buffer (expand-file-name "report.md" test-dir))))))
 
+(ert-deftest header-gets-symbol-font-fallbacks ()
+  (let* ((model (list (cons :buffer-name "x") (cons :font-family "Comic Code") (cons :width 800)))
+         (out (kdb-claude--header-symbol-fonts model)))
+    (should (equal (map-elt out :font-family) "Comic Code, Segoe UI Symbol, Segoe UI Emoji"))
+    (should (equal (map-elt out :width) 800))
+    (should (= 1 (seq-count (lambda (c) (eq (car c) :font-family)) out)))
+    (should (equal (map-elt model :font-family) "Comic Code")))  ; original untouched
+  (let ((model (list (cons :font-family 'unspecified))))
+    (should (eq (kdb-claude--header-symbol-fonts model) model))))
+
 ;;; claude-artifacts-test.el ends here
