@@ -395,6 +395,8 @@
 ;; Fonts ================================================ ;;
 
 (setq-default line-spacing 0.20)        ; setopt would load cus-edit (~0.1s)
+(setq-default word-wrap t)              ; wrap long lines between words, not inside them
+(setq truncate-partial-width-windows nil) ; wrap side-by-side windows too, don't cut lines off
 
 (defun kdb-apply-symbol-fonts ()
   "Draw the symbols agent-shell and org-modern use with Windows' own fonts.
@@ -1286,7 +1288,7 @@ and refresh it in the background."
                                        :documentHighlightProvider)
    ;; Windows-specific optimization
    eglot-events-buffer-size (if (eq system-type 'windows-nt) 0 2000000))
-
+  
   ;; Language Servers
   (add-to-list 'eglot-server-programs '((csharp-mode csharp-ts-mode) . ("csharp-ls")))
   (add-to-list 'eglot-server-programs '(typescript-ts-mode . ("typescript-language-server" "--stdio")))
@@ -2057,10 +2059,12 @@ Safe to re-run; only missing models are downloaded."
   :ensure t
   :commands (agent-shell-anthropic-start-claude-code agent-shell-send-file-to)
   :config
-  ;; opencode's installer puts it in the user profile, not on PATH.
-  (let ((opencode (expand-file-name ".opencode/bin" (or (getenv "USERPROFILE") "~"))))
-    (when (file-directory-p opencode)
-      (add-to-list 'exec-path opencode)))
+  ;; Agents installed in the user profile (opencode's installer, npm's
+  ;; global prefix) aren't always on PATH.
+  (dolist (dir '(".opencode/bin" ".npm-global/bin"))
+    (let ((dir (expand-file-name dir (or (getenv "USERPROFILE") "~"))))
+      (when (file-directory-p dir)
+        (add-to-list 'exec-path dir))))
   (setq agent-shell-anthropic-authentication
         (agent-shell-anthropic-make-authentication :login t)
         ;; M-x agent-shell asks which agent; C-c l starts Claude directly.
