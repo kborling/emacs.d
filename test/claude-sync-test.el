@@ -76,8 +76,6 @@
       (should-error (kdb-claude-sync-code-sessions)))
     (delete-directory root t)))
 
-;;; claude-sync-test.el ends here
-
 ;;; Paths too long for Windows Emacs
 
 (defvar test-ps-sources nil "Source paths the fake PowerShell was asked to copy.")
@@ -192,9 +190,10 @@ under a path limit that makes LONG's transcripts too long to open."
     (prog1 (kdb-claude--read-org-header org)
       (delete-directory dir t))))
 
-(defun test-user (text &optional cwd branch)
+(defun test-user (text &optional cwd branch client)
   `((type . "user") (message . ((role . "user") (content . ,text)))
-    ,@(when cwd `((cwd . ,cwd))) ,@(when branch `((gitBranch . ,branch)))))
+    ,@(when cwd `((cwd . ,cwd))) ,@(when branch `((gitBranch . ,branch)))
+    ,@(when client `((entrypoint . ,client)))))
 
 (ert-deftest convert-uses-desktop-session-name ()
   ;; Claude Code rewrites the AI title as the session goes; the last wins.
@@ -269,10 +268,98 @@ under a path limit that makes LONG's transcripts too long to open."
       (should (equal (kdb-claude--org-keyword org "PROJECT") "sns-technology"))
       (should (equal (kdb-claude-sync-code-sessions) "Synced 0 Claude Code sessions"))
       (let ((entry (car (kdb-claude--history-entries))))
-        (should (equal (aref (cadr entry) 2) "sns-technology"))
-        (should (equal (aref (cadr entry) 3) "Fix login redirect loop"))))
+        (should (equal (aref (cadr entry) 3) "sns-technology"))
+        (should (equal (aref (cadr entry) 4) "Fix login redirect loop"))))
     (delete-directory root t)))
 
 (ert-deftest symbol-fonts-apply ()
   (kdb-apply-symbol-fonts))
 
+;;; Telling sessions apart in history
+
+(ert-deftest convert-records-client-and-size ()
+  (let ((h (test-convert (test-user "first" "/tmp/x" nil "cli")
+                         (test-user "second" "/tmp/x" nil "cli"))))
+    (should (equal (cdr (assoc "CLIENT" h)) "cli"))
+    (should (equal (cdr (assoc "MESSAGES" h)) "2")))
+  (should (equal (cdr (assoc "CLIENT" (test-convert (test-user "no client")))) "")))
+
+(ert-deftest history-shows-where-sessions-came-from ()
+  (let* ((archive (file-name-as-directory (make-temp-file "archive" t)))
+         (write (lambda (rel text)
+                  (let ((f (expand-file-name rel archive)))
+                    (make-directory (file-name-directory f) t)
+                    (with-temp-file f (insert text))
+                    f))))
+    (funcall write "code-sessions/-p/a.org" "#+TITLE: In the terminal\n#+CLIENT: cli\n#+PROJECT: app\n\n")
+    (funcall write "code-sessions/-p/b.org" "#+TITLE: In Emacs\n#+CLIENT: emacs\n#+PROJECT: app\n\n")
+    (funcall write "code-sessions/-p/f.org" "#+TITLE: A script\n#+CLIENT: sdk-ts\n#+PROJECT: app\n\n")
+    (funcall write "code-sessions/-p/c.org" "#+TITLE: In Desktop\n#+CLIENT: claude-desktop\n#+PROJECT: app\n\n")
+    (funcall write "code-sessions/-p/d.org" "#+TITLE: Something new\n#+CLIENT: future-client\n#+PROJECT: app\n\n")
+    (funcall write "desktop/e.org" "#+TITLE: A chat\n#+DATE: 2026-04-19 02:32\n\n* You\n\nhi\n")
+    (cl-letf (((symbol-function 'kdb-claude--ensure-archive) (lambda () archive))
+              ((symbol-function 'kdb-claude--live-sessions) #'ignore))
+      (let ((kdb-claude--history-filter nil)
+            (rows (lambda () (mapcar (lambda (e) (list (aref (cadr e) 2) (aref (cadr e) 3) (aref (cadr e) 4)))
+                                     (kdb-claude--history-entries)))))
+        (should (seq-set-equal-p (funcall rows)
+                                 '(("terminal" "app" "In the terminal") ("emacs" "app" "In Emacs")
+                                   ("sdk" "app" "A script")
+                                   ("desktop" "app" "In Desktop") ("future-client" "app" "Something new")
+                                   ("chat" "" "A chat"))))
+        ;; / narrows by source too.
+        (let ((kdb-claude--history-filter "chat"))
+          (should (equal (funcall rows) '(("chat" "" "A chat")))))
+        (let ((kdb-claude--history-filter "desktop"))
+          (should (equal (mapcar #'car (funcall rows)) '("desktop"))))))
+    (delete-directory archive t)))
+
+(ert-deftest history-preview-says-how-a-session-ended ()
+  (let* ((header "#+TITLE: t\n#+CWD: /home/k/src/app\n#+BRANCH: fix/login\n#+MESSAGES: 14\n\n")
+         (f (make-temp-file "session" nil ".org"
+                            (concat header
+                                    "* You\n\nWhy does the login page redirect forever?\n\n"
+                                    "* Claude\n\nFixed it:   the reset token\nwasn't cleared.\n")))
+         (asked (make-temp-file "session" nil ".org"
+                                (concat header "* Claude\n\nDone.\n\n* You\n\nNow add a test for it\n")))
+         (long (make-temp-file "session" nil ".org"
+                               (concat "#+TITLE: t\n\n* You\n\nhi\n\n* Claude\n\n" (make-string 300 ?x) "\n")))
+         ;; The last message is longer than the tail read first.
+         (huge (make-temp-file "session" nil ".org"
+                               (concat "#+TITLE: t\n\n* You\n\nwrite it all\n\n* Claude\n\nAll of it: "
+                                       (make-string 30000 ?y) "\n"))))
+    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () f)))
+      (should (equal (kdb-claude--history-preview)
+                     "Claude: Fixed it: the reset token wasn't cleared.  ·  14 messages  ·  fix/login  ·  /home/k/src/app")))
+    ;; Ending on your prompt shows that.
+    (should (equal (kdb-claude--last-message asked) "You: Now add a test for it"))
+    ;; A long last message is cut to one short line.
+    (should (= 140 (string-width (kdb-claude--last-message long))))
+    (should (string-suffix-p "…" (kdb-claude--last-message long)))
+    (should (string-prefix-p "Claude: All of it: yyy" (kdb-claude--last-message huge)))
+    (mapc #'delete-file (list f asked long huge))))
+
+(ert-deftest sync-labels-sessions-run-in-emacs ()
+  (let* ((root (file-name-as-directory (make-temp-file "claude-sync" t)))
+         (projects (expand-file-name "projects/" root))
+         (kdb-claude-archive-dir (expand-file-name "archive/" root))
+         (archive kdb-claude-archive-dir)
+         (org (lambda (id) (expand-file-name (format "code-sessions/-p/%s.org" id) archive))))
+    (test-jsonl-lines (expand-file-name "-p/e1.jsonl" projects) (test-user "from emacs" "/tmp/x" nil "sdk-ts"))
+    (test-jsonl-lines (expand-file-name "-p/s1.jsonl" projects) (test-user "a script" "/tmp/x" nil "sdk-ts"))
+    (cl-letf (((symbol-function 'kdb-claude--projects-dir) (lambda () projects))
+              ((symbol-function 'kdb-claude--ensure-archive) (lambda () archive)))
+      ;; Synced before Emacs noted e1: both look like any SDK program.
+      (kdb-claude-sync-code-sessions)
+      (should (equal (kdb-claude--org-keyword (funcall org "e1") "CLIENT") "sdk-ts"))
+      ;; Noted once, however often its prompt comes back.
+      (dotimes (_ 3) (kdb-claude--note-emacs-session "e1"))
+      (should (equal (kdb-claude--emacs-session-ids) '("e1")))
+      ;; The next sync relabels it, though its transcript didn't change.
+      (should (equal (kdb-claude-sync-code-sessions) "Synced 1 Claude Code sessions"))
+      (should (equal (kdb-claude--org-keyword (funcall org "e1") "CLIENT") "emacs"))
+      (should (equal (kdb-claude--org-keyword (funcall org "s1") "CLIENT") "sdk-ts"))
+      (should (equal (kdb-claude-sync-code-sessions) "Synced 0 Claude Code sessions")))
+    (delete-directory root t)))
+
+;;; claude-sync-test.el ends here

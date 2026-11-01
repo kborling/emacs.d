@@ -2035,7 +2035,8 @@ Safe to re-run; only missing models are downloaded."
 (dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify
               kdb-claude--start-with kdb-claude-spawn kdb-claude-message
               kdb-claude--tag-client kdb-claude--render-markdown
-              kdb-claude--track-artifacts kdb-claude--header-symbol-fonts
+              kdb-claude--track-artifacts kdb-claude--track-emacs-session
+              kdb-claude--header-symbol-fonts
               kdb-claude--busy-frames kdb-claude--logo-icon kdb-claude--logo-header
               kdb-claude--steady-busy-frame))
   (autoload fn "init-claude-workflow"))
@@ -2091,6 +2092,7 @@ Safe to re-run; only missing models are downloaded."
     (setq agent-shell-screenshot-command '("maim" "-s")))
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-artifacts)
+  (add-hook 'agent-shell-mode-hook #'kdb-claude--track-emacs-session)
   (setq agent-shell-busy-indicator-frames #'kdb-claude--busy-frames)
   (advice-add 'agent-shell--busy-indicator-frame :filter-return #'kdb-claude--steady-busy-frame)
   (advice-add 'agent-shell--fetch-agent-icon :before-until #'kdb-claude--logo-icon)

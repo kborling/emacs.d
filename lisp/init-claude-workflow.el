@@ -325,12 +325,17 @@ kdb-logo-STEP|ICON, ICON being the name agent-shell would fetch."
 Filter on agent-shell's header model, run in the shell buffer.  The bar
 changes every tick too, so each step is drawn: agent-shell only redraws
 when the busy text changes."
-  (if-let* (((eq kdb-claude-busy-indicator 'claude))
-            ((eq (map-nested-elt (agent-shell--state) '(:heartbeat :status)) 'busy))
-            (tick (map-nested-elt (agent-shell--state) '(:heartbeat :value)))
-            (icon (map-elt model :icon-name))
-            ((not (string-prefix-p "kdb-logo-" icon))))
-      (cons (cons :icon-name (format "kdb-logo-%d|%s" (mod tick (length kdb-claude--logo-hop)) icon))
+  (if-let* ((icon (map-elt model :icon-name))
+            (base (if (string-match "\\`kdb-logo-[0-9]+|\\(.+\\)" icon) (match-string 1 icon) icon))
+            (name (if-let* (((eq kdb-claude-busy-indicator 'claude))
+                            ((eq (map-nested-elt (agent-shell--state) '(:heartbeat :status)) 'busy))
+                            (tick (map-nested-elt (agent-shell--state) '(:heartbeat :value))))
+                      (format "kdb-logo-%d|%s" (mod tick (length kdb-claude--logo-hop)) base)
+                    base))
+            ((not (equal name icon))))
+      ;; Busy ticks reuse the last full header, whose icon may already be
+      ;; a frame: step on from its base icon, or it freezes there.
+      (cons (cons :icon-name name)
             (assq-delete-all :icon-name (copy-alist model)))
     model))
 
@@ -435,6 +440,17 @@ window you have since used for something else is left alone."
                 (kdb-claude--show-artifact file nil win)
               (message "%s wrote %s (C-c l a to open)"
                        (buffer-name buf) (file-name-nondirectory file)))))))))
+
+;;;###autoload
+(defun kdb-claude--track-emacs-session ()
+  "Remember this shell's session as an Emacs one, for the history's Source."
+  (let ((buf (current-buffer)))
+    (agent-shell-subscribe-to
+     :shell-buffer buf :event 'prompt-ready
+     :on-event (lambda (_)
+                 (when-let* (((buffer-live-p buf))
+                             (id (agent-shell-session-id :shell-buffer buf)))
+                   (kdb-claude--note-emacs-session id))))))
 
 ;;;###autoload
 (defun kdb-claude--track-artifacts ()

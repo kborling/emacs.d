@@ -130,6 +130,7 @@ reconvert every session."
     (when (file-directory-p source)
       (let* ((files (seq-remove (lambda (f) (string-match-p "/subagents/" f))
                                 (directory-files-recursively source "\\.jsonl$" nil t)))
+             (emacs-ids (kdb-claude--emacs-session-ids))
              (long (seq-filter #'kdb-claude--path-too-long-p files))
              (tmp (and long (make-temp-file "claude-long" t)))
              (copies (and long (kdb-claude--copy-long-files long tmp))))
@@ -141,7 +142,8 @@ reconvert every session."
                      (session-id (file-name-base jsonl))
                      (project-name (file-name-nondirectory
                                     (directory-file-name (file-name-directory jsonl))))
-                     (org-file (kdb-claude--archive-file dest project-name session-id)))
+                     (org-file (kdb-claude--archive-file dest project-name session-id))
+                     (emacs (member session-id emacs-ids)))
                 (cond
                  ((null readable)
                   (cl-incf skipped)
@@ -149,7 +151,8 @@ reconvert every session."
                  ;; Only convert if org file doesn't exist or jsonl is newer
                  ((or force
                       (not (file-exists-p org-file))
-                      (not (kdb-claude--org-keyword org-file "PROJECT"))
+                      (let ((client (kdb-claude--org-keyword org-file "CLIENT")))
+                        (or (null client) (and emacs (not (equal client "emacs")))))
                       (time-less-p (file-attribute-modification-time
                                     (file-attributes org-file))
                                    (file-attribute-modification-time
@@ -157,7 +160,7 @@ reconvert every session."
                   (condition-case err
                       (progn
                         (make-directory (file-name-directory org-file) t)
-                        (kdb-claude--jsonl-to-org readable org-file jsonl)
+                        (kdb-claude--jsonl-to-org readable org-file jsonl emacs)
                         (cl-incf count))
                     (file-error
                      (cl-incf skipped)
@@ -238,13 +241,14 @@ is served by a fresh run right after it."
           (and (string-match "worktrees/\\([^/]+\\)/[^/]+\\'" dir) (match-string 1 dir))
           dir)))))
 
-(defun kdb-claude--jsonl-to-org (jsonl-file org-file &optional source)
+(defun kdb-claude--jsonl-to-org (jsonl-file org-file &optional source emacs)
   "Convert JSONL-FILE to a readable ORG-FILE, naming SOURCE as its origin.
-SOURCE defaults to JSONL-FILE; it differs when that is a copy.  ORG-FILE
+SOURCE defaults to JSONL-FILE; it differs when that is a copy.  With
+EMACS, the session ran in Emacs, whatever client it recorded.  ORG-FILE
 gets the JSONL's mtime from before it was read, so turns appended while
 converting make the JSONL newer and are picked up next sync."
   (let ((mtime (file-attribute-modification-time (file-attributes jsonl-file)))
-        messages cwd ai-title custom-title branch)
+        messages cwd ai-title custom-title branch client)
     (with-temp-buffer
       (insert-file-contents jsonl-file)
       (goto-char (point-min))
@@ -259,7 +263,8 @@ converting make the JSONL newer and are picked up next sync."
                    (text (when (member (alist-get 'type obj) '("user" "assistant"))
                            (string-trim (kdb-claude--extract-text
                                          (alist-get 'content msg))))))
-              (setq cwd (or cwd (alist-get 'cwd obj)))
+              (setq cwd (or cwd (alist-get 'cwd obj))
+                    client (or client (alist-get 'entrypoint obj)))
               (pcase (alist-get 'type obj)
                 ("ai-title" (setq ai-title (alist-get 'aiTitle obj)))
                 ("custom-title" (setq custom-title (alist-get 'customTitle obj))))
@@ -281,6 +286,8 @@ converting make the JSONL newer and are picked up next sync."
         (when cwd (insert (format "#+CWD: %s\n" cwd)))
         (insert (format "#+PROJECT: %s\n" (if cwd (kdb-claude--project-name cwd) "")))
         (when branch (insert (format "#+BRANCH: %s\n" branch)))
+        (insert (format "#+CLIENT: %s\n" (if emacs "emacs" (or client ""))))
+        (insert (format "#+MESSAGES: %d\n" (length messages)))
         (insert "\n")
         (dolist (msg messages)
           (insert (format "* %s\n\n%s\n\n"
@@ -402,6 +409,22 @@ as a directory name."
              for id = (agent-shell-session-id :shell-buffer b)
              when id collect (cons id b))))
 
+(defconst kdb-claude--client-names
+  '(("emacs" . "emacs") ("cli" . "terminal") ("sdk-cli" . "claude -p")
+    ("sdk-ts" . "sdk") ("claude-desktop" . "desktop") ("claude-vscode" . "vscode"))
+  "History's Source for each recorded client; others show as-is.
+Emacs sessions are known from `kdb-claude--emacs-sessions-file'; sdk-ts
+is any other program on Claude's SDK, such as claude -p with JSON output.")
+
+(defun kdb-claude--history-source (file header)
+  "Where archived FILE with HEADER came from, for the history list."
+  (if (string-match-p "/desktop/" file)
+      "chat"
+    (let ((client (cdr (assoc "CLIENT" header))))
+      (if (or (null client) (string-empty-p client))
+          ""
+        (or (cdr (assoc client kdb-claude--client-names)) client)))))
+
 (defun kdb-claude--history-entries ()
   "Return `tabulated-list-entries' for every archived session."
   (let ((live (mapcar #'car (kdb-claude--live-sessions))))
@@ -409,20 +432,48 @@ as a directory name."
      (lambda (e)
        (or (null kdb-claude--history-filter)
            (string-match-p kdb-claude--history-filter
-                           (concat (aref (cadr e) 2) " " (aref (cadr e) 3)))))
+                           (mapconcat #'identity (seq-subseq (cadr e) 2) " "))))
      (mapcar
       (lambda (f)
         (let* ((h (kdb-claude--org-header f))
                (cwd (cdr (assoc "CWD" h))))
           (list f (vector (if (member (file-name-base f) live) "●" "")
                           (or (cdr (assoc "UPDATED" h)) (cdr (assoc "DATE" h)) "")
+                          (kdb-claude--history-source f h)
                           (cond ((let ((p (cdr (assoc "PROJECT" h))))
                                    (and p (not (string-empty-p p)) p)))
                                 (cwd (file-name-nondirectory (directory-file-name cwd)))
-                                ((string-match-p "/desktop/" f) "desktop")
                                 (t ""))
                           (or (cdr (assoc "TITLE" h)) (file-name-base f))))))
       (directory-files-recursively (kdb-claude--ensure-archive) "\\.org$")))))
+
+(defun kdb-claude--last-message (file)
+  "The last message in archived FILE as \"WHO: text\" on one line, or nil.
+Reads only the end of the file, unless the last message is longer."
+  (let ((size (file-attribute-size (file-attributes file))))
+    (catch 'found
+      (dolist (tail (list 20000 size))
+        (with-temp-buffer
+          (insert-file-contents file nil (max 0 (- size tail)) size)
+          (goto-char (point-max))
+          (when (re-search-backward "^\\* \\(You\\|Claude\\)\n" nil t)
+            (let ((who (match-string 1))
+                  (text (buffer-substring-no-properties (match-end 0) (point-max))))
+              (throw 'found
+                     (truncate-string-to-width
+                      (concat who ": " (string-trim (replace-regexp-in-string "[ \t\n]+" " " text)))
+                      140 nil nil "…")))))))))
+
+(defun kdb-claude--history-preview (&rest _)
+  "Eldoc for the session at point: how it ended, size, branch, directory."
+  (when-let* ((file (tabulated-list-get-id)))
+    (let ((h (kdb-claude--org-header file)))
+      (string-join
+       (delq nil (list (kdb-claude--last-message file)
+                       (when-let* ((n (cdr (assoc "MESSAGES" h)))) (concat n " messages"))
+                       (cdr (assoc "BRANCH" h))
+                       (when-let* ((cwd (cdr (assoc "CWD" h)))) (abbreviate-file-name cwd))))
+       "  ·  "))))
 
 (defvar kdb-claude-history-mode-map
   (let ((map (make-sparse-keymap)))
@@ -436,10 +487,17 @@ as a directory name."
 
 (define-derived-mode kdb-claude-history-mode tabulated-list-mode "Claude-History"
   "Past Claude sessions, newest first.  ● marks sessions open in Emacs.
+Source says where each happened: emacs, terminal, desktop, claude -p,
+sdk (other programs on Claude's SDK), or chat (imported claude.ai/Desktop
+chats); / filters on it too.  Moving
+onto a session shows its last message, size, branch and directory.
 \\{kdb-claude-history-mode-map}"
-  (setq tabulated-list-format [("" 1 t) ("Last active" 16 t) ("Project" 20 t) ("Title" 0 t)]
+  (setq tabulated-list-format [("" 1 t) ("Last active" 16 t) ("Source" 9 t)
+                                ("Project" 18 t) ("Title" 0 t)]
         tabulated-list-sort-key '("Last active" . t)
         tabulated-list-entries #'kdb-claude--history-entries)
+  (setq-local eldoc-documentation-functions (list #'kdb-claude--history-preview))
+  (eldoc-mode 1)
   (add-hook 'tabulated-list-revert-hook #'kdb-claude--history-refresh nil t)
   (setq-local header-line-format
               (substitute-command-keys
@@ -467,9 +525,9 @@ Shows the archive as it is, then redraws once a background sync is done."
          (with-current-buffer buf (tabulated-list-print t)))))))
 
 (defun kdb-claude-history-filter (regexp)
-  "Narrow the history to sessions whose project or title match REGEXP.
+  "Narrow the history to sessions whose source, project or title match REGEXP.
 Empty input shows everything."
-  (interactive (list (kdb-claude--read "Filter (project/title, empty = all): ")))
+  (interactive (list (kdb-claude--read "Filter (source/project/title, empty = all): ")))
   (setq kdb-claude--history-filter (unless (string-empty-p regexp) regexp))
   (tabulated-list-print))
 
@@ -692,6 +750,26 @@ Windows' own tar.exe is preferred: Git's GNU tar misreads C:/ paths."
   (file-name-as-directory
    (expand-file-name (file-name-concat "agent-shell" subdir)
                      (expand-file-name kdb-claude-archive-dir))))
+
+(defun kdb-claude--emacs-sessions-file ()
+  "File listing the ids of sessions run in Emacs, one per line.
+Transcripts can't tell: Emacs, Desktop and claude -p all record sdk-ts."
+  (expand-file-name "emacs-sessions" (kdb-claude-agent-shell-subdir "")))
+
+(defun kdb-claude--emacs-session-ids ()
+  "Ids of the sessions run in Emacs."
+  (let ((file (kdb-claude--emacs-sessions-file)))
+    (when (file-exists-p file)
+      (with-temp-buffer
+        (insert-file-contents file)
+        (split-string (buffer-string) "\n" t)))))
+
+(defun kdb-claude--note-emacs-session (id)
+  "Remember that session ID ran in Emacs."
+  (unless (member id (kdb-claude--emacs-session-ids))
+    (let ((file (kdb-claude--emacs-sessions-file)))
+      (make-directory (file-name-directory file) t)
+      (write-region (concat id "\n") nil file t 'silent))))
 
 ;;; ============================================================
 ;;; Machine setup

@@ -226,12 +226,22 @@
       (let ((kdb-claude-busy-indicator 'claude))
         (should (equal (map-elt (kdb-claude--logo-header model) :icon-name)
                        "kdb-logo-7|claude-color.png")))
+      ;; Busy ticks reuse the last full header, which may hold a frame
+      ;; already: the hop carries on from it rather than freezing.
+      (let ((kdb-claude-busy-indicator 'claude)
+            (cached '((:icon-name . "kdb-logo-5|claude-color.png") (:busy-indicator-frame . " ░"))))
+        (should (equal (map-elt (kdb-claude--logo-header cached) :icon-name)
+                       "kdb-logo-7|claude-color.png")))
       ;; Another animation style leaves the icon alone.
       (let ((kdb-claude-busy-indicator 'wave))
         (should (eq (kdb-claude--logo-header model) model))))
     (cl-letf (((symbol-function 'agent-shell--state) (lambda () '((:heartbeat . ((:status . ended)))))))
       (let ((kdb-claude-busy-indicator 'claude))
-        (should (eq (kdb-claude--logo-header model) model))))))
+        (should (eq (kdb-claude--logo-header model) model))
+        ;; Done: a left-over frame goes back to the still icon.
+        (should (equal (map-elt (kdb-claude--logo-header '((:icon-name . "kdb-logo-5|claude-color.png")))
+                                :icon-name)
+                       "claude-color.png"))))))
 
 (ert-deftest busy-frame-keeps-its-width-when-idle ()
   (require 'agent-shell)
@@ -250,5 +260,16 @@
         (agent-shell-show-busy-indicator t))
     (cl-letf (((symbol-function 'agent-shell--state) (lambda () '((:heartbeat . ((:status . ended)))))))
       (should-not (agent-shell--busy-indicator-frame)))))
+
+(ert-deftest emacs-sessions-are-noted-when-ready ()
+  (let ((buf (generate-new-buffer "*claude test*")) sub noted)
+    (cl-letf (((symbol-function 'agent-shell-subscribe-to) (lambda (&rest args) (setq sub args) 'token))
+              ((symbol-function 'agent-shell-session-id) (lambda (&rest _) "sess-42"))
+              ((symbol-function 'kdb-claude--note-emacs-session) (lambda (id) (push id noted))))
+      (with-current-buffer buf (kdb-claude--track-emacs-session))
+      (should (eq (plist-get sub :event) 'prompt-ready))
+      (funcall (plist-get sub :on-event) '((:event . prompt-ready)))
+      (should (equal noted '("sess-42"))))
+    (kill-buffer buf)))
 
 ;;; claude-artifacts-test.el ends here
