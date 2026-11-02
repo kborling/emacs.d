@@ -36,3 +36,4 @@ chatgpt/
 session.*
 personal.el
 init.el.backup
+tabsession.el

@@ -403,6 +403,21 @@ For `tab-bar-tab-name-format-functions'."
   "Redraw the tab bar: which session waits can change with the count unchanged."
   (force-mode-line-update t))
 
+;;;###autoload
+(defun kdb-claude--tab-save (buf)
+  "Session record for Claude shell BUF, for tabspaces to restore, or nil."
+  (with-current-buffer buf
+    (when-let* (((derived-mode-p 'agent-shell-mode))
+                (id (agent-shell-session-id :shell-buffer buf)))
+      (list :kind 'claude :dir default-directory :name (buffer-name) :session id))))
+
+;;;###autoload
+(defun kdb-claude--tab-restore (record)
+  "Resume the Claude session in RECORD, as `kdb-claude--tab-save' made it."
+  (let ((dir (plist-get record :dir)))
+    (when (file-directory-p dir)
+      (kdb-claude--start-with (file-name-as-directory dir) nil (plist-get record :session)))))
+
 ;;; ============================================================
 ;;; Artifacts: files Claude writes
 ;;; ============================================================
@@ -574,13 +589,62 @@ Elsewhere, raw fenced blocks."
       ("elisp" . "emacs-lisp") ("pwsh" . "powershell") ("ps1" . "powershell") ("ps" . "powershell"))))
 
 (declare-function org-escape-code-in-string "org-src")
+(defvar explicit-shell-file-name)
+(declare-function comint-send-input "comint")
+(declare-function comint-check-proc "comint")
+
+(defun kdb-claude--block-shell-kind (lang)
+  "The shell, bash or pwsh, that runs a block in LANG, or nil if none does.
+Blocks naming no shell run in this machine's: pwsh on Windows, bash elsewhere."
+  (pcase lang
+    ((or "powershell" "pwsh" "ps1" "ps") 'pwsh)
+    ((or "bash" "sh" "zsh") 'bash)
+    ((or "" "shell" "console") (if (eq system-type 'windows-nt) 'pwsh 'bash))))
+
+(defvar-local kdb-claude--shell-for nil
+  "(KIND . DIR) of the project shell this buffer is.")
+(put 'kdb-claude--shell-for 'permanent-local t)
+
+(defun kdb-claude--block-shell (kind dir)
+  "DIR's shell of KIND, started if need be and shown in the bottom panel."
+  (let ((buf (or (seq-find (lambda (b) (equal (buffer-local-value 'kdb-claude--shell-for b)
+                                              (cons kind dir)))
+                           (buffer-list))
+                 (generate-new-buffer
+                  (format "*claude %s: %s*" kind (file-name-nondirectory (directory-file-name dir)))))))
+    (unless (comint-check-proc buf)
+      (with-current-buffer buf
+        (setq-local kdb-claude--shell-for (cons kind dir))
+        (setq default-directory dir))
+      (let ((explicit-shell-file-name
+             (or (pcase kind
+                   ('pwsh (or (executable-find "pwsh") (executable-find "powershell")))
+                   ('bash (executable-find "bash")))
+                 (user-error "No %s on this machine" kind))))
+        (save-window-excursion (shell buf))))
+    (display-buffer buf)
+    buf))
+
+(defun kdb-claude--block-to-shell (kind code dir run)
+  "Put CODE at the prompt of DIR's KIND shell; with RUN, run it too.
+Output streams in as it comes, Emacs stays usable, and the shell is kept
+for the next block, so cd and variables carry over."
+  (let* ((buf (kdb-claude--block-shell kind dir))
+         (proc (get-buffer-process buf)))
+    (with-current-buffer buf
+      (goto-char (point-max))
+      (delete-region (process-mark proc) (point-max))
+      (insert code)
+      (when run (comint-send-input)))
+    buf))
 
 ;;;###autoload
-(defun kdb-claude-run-block ()
-  "Copy the code block at point, or the last one before it, to org babel.
-It is appended to *claude blocks* as a source block that runs in this
-buffer's directory; edit it if needed, then \\[org-ctrl-c-ctrl-c] runs it and
-the results land under it."
+(defun kdb-claude-run-block (&optional run)
+  "Take the code block at point, or the last one before it, to run it.
+Shell blocks go to the prompt of this project's shell in the bottom panel
+\(pwsh on Windows, bash elsewhere, or as the block names), to edit, then
+RET.  Others are appended to *claude blocks* as an org src block, to edit,
+then \\[org-ctrl-c-ctrl-c].  With RUN, run it right away and stay here."
   (interactive)
   (pcase-let* ((pos (point))
                (blocks (kdb-claude--code-blocks))
@@ -601,6 +665,20 @@ the results land under it."
               code (format "(progn (setq unread-command-events\n             (append unread-command-events (listify-key-sequence (kbd %S))))\n       \"Typed: %s\")"
                            keys keys))))
     (pulse-momentary-highlight-region beg end)
+    (if-let* ((kind (kdb-claude--block-shell-kind lang)))
+        (let ((shell (kdb-claude--block-to-shell kind code dir run)))
+          (if run
+              (message "Running in %s" (buffer-name shell))
+            (select-window (get-buffer-window shell))
+            (goto-char (point-max))
+            (message "Edit if needed, then RET to run")))
+      (kdb-claude--block-to-org lang code dir run))))
+
+(defun kdb-claude--block-to-org (lang code dir run)
+  "Append CODE in LANG to *claude blocks* to run in DIR; with RUN, run it.
+Run, its output is echoed and focus stays put; else point is left in the
+block to edit, then \\[org-ctrl-c-ctrl-c]."
+  (let ((from (selected-window)))
     (require 'org)
     (pop-to-buffer (get-buffer-create "*claude blocks*"))
     (unless (derived-mode-p 'org-mode) (org-mode))
@@ -620,36 +698,37 @@ the results land under it."
                         (if (equal lang "emacs-lisp") "" " :results output"))))
       (save-excursion
         (insert (org-escape-code-in-string code) "\n#+end_src\n")))
-    (message "Edit if needed, then C-c C-c to run")))
+    (if (not run)
+        (message "Edit if needed, then C-c C-c to run")
+      (let (result)
+        (unwind-protect (setq result (org-babel-execute-src-block))
+          (select-window from))
+        (message "%s" (if (and result (not (equal result "")))
+                          (string-trim-right (format "%s" result))
+                        "Ran it; no output (see *claude blocks*)"))))))
 
-(defun kdb-claude--send-block-at-label ()
-  "Send the code block under this \"LANG ⧉\" label to *claude blocks*.
-Returns the window showing it, point in the new block."
-  (save-excursion
+(defun kdb-claude--block-at-label (run)
+  "Take the code block under this \"LANG ⧉\" label to run; RUN it now if non-nil."
+  (let ((buf (current-buffer))
+        (pos (point)))
     (goto-char (or (next-single-property-change (point) 'agent-shell-markdown-source-block-body)
                    (point)))
-    (kdb-claude-run-block))
-  (get-buffer-window "*claude blocks*"))
+    (unwind-protect (kdb-claude-run-block run)
+      (with-current-buffer buf (goto-char pos)))))
 
 (defun kdb-claude-edit-block-at-label ()
-  "Open the code block under this label in *claude blocks*, to edit and run."
+  "Open the code block under this label to edit, then run.
+Shell blocks wait at the project shell's prompt; others in *claude blocks*."
   (interactive)
-  (select-window (kdb-claude--send-block-at-label)))
+  (kdb-claude--block-at-label nil))
 
 (defun kdb-claude-run-block-at-label ()
-  "Run the code block under this label, echoing its output.
-It runs in *claude blocks*, results under it, and focus stays here.
-Only `org-confirm-babel-evaluate' asks first (off in this config); e
-on the label opens it to edit first instead."
+  "Run the code block under this label; focus stays here.
+Shell blocks run in the project's shell in the bottom panel; others in
+*claude blocks*, their output echoed.  e on the label opens it to edit
+first instead."
   (interactive)
-  (let ((from (selected-window))
-        result)
-    (select-window (kdb-claude--send-block-at-label))
-    (unwind-protect (setq result (org-babel-execute-src-block))
-      (select-window from))
-    (message "%s" (if (and result (not (equal result "")))
-                      (string-trim-right (format "%s" result))
-                    "Ran it; no output (see *claude blocks*)"))))
+  (kdb-claude--block-at-label t))
 
 (declare-function agent-shell-markdown-replace-markup "agent-shell-markdown")
 (declare-function org-babel-execute-src-block "ob-core")

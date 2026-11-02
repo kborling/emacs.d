@@ -128,6 +128,12 @@
          (side . bottom)
          (window-height . 0.3)
          (slot . 0))
+        ;; Code blocks run from Claude's replies, and babel's errors
+        ("\\*\\(claude blocks\\|claude \\(bash\\|pwsh\\): .*\\|Org-Babel Error Output\\)\\*"
+         (display-buffer-in-side-window)
+         (side . bottom)
+         (window-height . 0.3)
+         (slot . 0))
         ;; Help/docs on the right
         ("\\*\\(Help\\|Apropos\\|info\\|Man \\|eldoc\\).*"
          (display-buffer-in-side-window)
@@ -1849,11 +1855,47 @@ and refresh it in the background."
 ;; One workspace (tab) per project, each with its own windows and buffer
 ;; list, so C-x b only offers this project's buffers.  Nothing is written
 ;; into projects: no todo file, no session files.
+(defvar kdb-tabs--restored nil
+  "Non-nil once the saved tabs have been restored, or there were none.")
+
+(defun kdb-tabs--own-frame-p (&optional frame)
+  "Non-nil unless FRAME is a daemon's hidden startup frame, which has no tabs."
+  (not (and (daemonp) (eq (or frame (selected-frame)) terminal-frame))))
+
+(defun kdb-tabs-restore (&optional _frame)
+  "Bring back last session's tabs, once, into a frame you can see.
+A daemon runs this when its first client frame opens."
+  (when (and (not kdb-tabs--restored) (kdb-tabs--own-frame-p))
+    (setq kdb-tabs--restored t)
+    (remove-hook 'server-after-make-frame-hook #'kdb-tabs-restore)
+    (unless (bound-and-true-p tabspaces-mode) (tabspaces-mode 1))
+    (when (file-exists-p tabspaces-session-file)
+      (tabspaces-restore-session tabspaces-session-file))))
+
+(defun kdb-tabs--may-save (&rest _)
+  "Non-nil when saving the tabs won't wipe the saved session.
+Not before they are restored, nor from a daemon's hidden frame."
+  (and kdb-tabs--restored (kdb-tabs--own-frame-p)))
+
+(defun kdb-tabs--save-closing-frame (frame)
+  "Save the tabs when the last frame you can see closes.
+A daemon keeps running, and has nothing to save from afterwards."
+  (when (and (bound-and-true-p tabspaces-mode)
+             (kdb-tabs--own-frame-p frame)
+             (null (seq-remove (lambda (f) (or (eq f frame) (not (kdb-tabs--own-frame-p f))))
+                               (frame-list))))
+    (with-selected-frame frame
+      (tabspaces--save-session-smart))))
+
 (use-package tabspaces
   :defer t
   :init
   ;; Loads dired and vc; keep it out of startup.
-  (run-with-idle-timer 0.5 nil #'tabspaces-mode)
+  (run-with-idle-timer 0.5 nil (lambda ()
+                                 (unless (bound-and-true-p tabspaces-mode) (tabspaces-mode 1))
+                                 (unless (daemonp) (kdb-tabs-restore))))
+  (when (daemonp)
+    (add-hook 'server-after-make-frame-hook #'kdb-tabs-restore))
   :custom
   (tabspaces-keymap-prefix "C-c TAB")
   (tabspaces-use-filtered-buffers-as-default (not (eq window-system 'x))) ; EXWM apps stay global
@@ -1862,10 +1904,18 @@ and refresh it in the background."
   (tabspaces-include-buffers '("*scratch*" "*Messages*"))
   (tabspaces-initialize-project-with-todo nil)
   (tabspaces-initialize-project-with-vc nil)
-  (tabspaces-session nil)
+  ;; Tabs and their buffers (Claude sessions included) come back after a
+  ;; restart, from ~/.emacs.d/tabsession.el; saved on exit, when the last
+  ;; frame closes, and every 10 idle minutes in case Emacs dies.
+  (tabspaces-session t)
+  (tabspaces-session-auto-save-delay 600)
   :bind (:map tabspaces-command-map
               ("f" . tab-bar-switch-to-next-tab)
-              ("p" . tab-bar-switch-to-prev-tab)))
+              ("p" . tab-bar-switch-to-prev-tab))
+  :config
+  (advice-add 'tabspaces--save-session-smart :before-while #'kdb-tabs--may-save)
+  (add-hook 'delete-frame-functions #'kdb-tabs--save-closing-frame)
+  (tabspaces-register-buffer-kind 'claude #'kdb-claude--tab-save #'kdb-claude--tab-restore))
 
 
 ;; Evil Mode (Vim Emulation) =============================== ;;
@@ -2045,7 +2095,7 @@ Safe to re-run; only missing models are downloaded."
               kdb-claude--tag-client kdb-claude--render-markdown
               kdb-claude--track-artifacts kdb-claude--track-emacs-session
               kdb-claude--header-symbol-fonts kdb-claude--tab-name-waiting
-              kdb-claude--redraw-tabs
+              kdb-claude--redraw-tabs kdb-claude--tab-save kdb-claude--tab-restore
               kdb-claude--busy-frames kdb-claude--logo-icon kdb-claude--logo-header
               kdb-claude--steady-busy-frame))
   (autoload fn "init-claude-workflow"))

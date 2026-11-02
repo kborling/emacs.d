@@ -51,6 +51,22 @@ Done.")
       (forward-line 1)
       (buffer-substring-no-properties (point) (point-max)))))
 
+(defun test-shell-buffer (kind dir)
+  (get-buffer (format "*claude %s: %s*" kind (file-name-nondirectory (directory-file-name dir)))))
+
+(defun test-shell-output (buf regexp)
+  "Wait until shell BUF shows REGEXP; return its text."
+  (let ((end (+ (float-time) 10)))
+    (while (and (not (with-current-buffer buf (save-excursion (goto-char (point-min)) (re-search-forward regexp nil t))))
+                (< (float-time) end))
+      (accept-process-output nil 0.05)))
+  (with-current-buffer buf (buffer-string)))
+
+(defun test-kill-shells ()
+  (dolist (b (buffer-list))
+    (when (string-match-p "\\`\\*claude \\(bash\\|pwsh\\): " (buffer-name b))
+      (let ((kill-buffer-query-functions nil)) (kill-buffer b)))))
+
 (ert-deftest run-block-finds-blocks ()
   (with-current-buffer (test-buffer)
     (should (equal (mapcar #'car (kdb-claude--code-blocks)) '("bash" "elisp" "")))
@@ -58,19 +74,29 @@ Done.")
       (should (equal (buffer-substring-no-properties (nth 1 b) (nth 2 b))
                      "echo \"it's $((1 + 2))\"\npwd\n")))))
 
-(ert-deftest run-block-shell-runs-in-session-dir ()
+(ert-deftest run-block-shell-goes-to-project-shell ()
+  ;; C-c l x on a bash block: at the prompt of the project's bash, in the
+  ;; bottom panel, to edit; RET runs it there, in the session's directory.
+  (test-kill-shells)
+  (delete-other-windows)
   (let* ((buf (test-buffer))
-         (dir (buffer-local-value 'default-directory buf))
-         (org (test-open buf (lambda () (search-forward "pwd")))))
-    (with-current-buffer org
-      (should (derived-mode-p 'org-mode))
-      (should (string-prefix-p (format "#+begin_src bash :dir %S :results output\n" (abbreviate-file-name dir))
-                               (buffer-string)))
-      (should (org-in-src-block-p)))             ; point is in the block, ready to edit
-    (let ((out (test-execute)))
-      (should (string-match-p "it's 3" out))
-      ;; Git Bash prints /c/... for c:/..., so match the directory's own name.
-      (should (string-match-p (regexp-quote (file-name-nondirectory (directory-file-name dir))) out)))))
+         (dir (buffer-local-value 'default-directory buf)))
+    (switch-to-buffer buf)
+    (goto-char (point-min))
+    (search-forward "pwd")
+    (kdb-claude-run-block)
+    (let ((shell (test-shell-buffer 'bash dir)))
+      (should shell)
+      (should (eq (window-buffer (selected-window)) shell))
+      (should (window-parameter (selected-window) 'window-side))   ; the bottom panel
+      (should (string-suffix-p "echo \"it's $((1 + 2))\"\npwd" (with-current-buffer shell (buffer-string))))
+      (should-not (string-match-p "it's 3" (with-current-buffer shell (buffer-string))))   ; not run yet
+      (with-current-buffer shell (comint-send-input))
+      (let ((out (test-shell-output shell "it's 3")))
+        (should (string-match-p "it's 3" out))
+        ;; Git Bash prints /c/... for c:/..., so match the directory's own name.
+        (should (string-match-p (regexp-quote (file-name-nondirectory (directory-file-name dir))) out)))))
+  (test-kill-shells))
 
 (ert-deftest run-block-elisp-and-history ()
   (let ((buf (test-buffer)))
@@ -78,24 +104,44 @@ Done.")
     (should (string-match-p ": 42" (test-execute)))
     ;; A second block is appended after the first and its results.
     (with-current-buffer buf
-      (goto-char (point-max))
+      (goto-char (point-min))
+      (search-forward "(* 2 21)")
       (kdb-claude-run-block))
     (with-current-buffer "*claude blocks*"
       (should (= 2 (how-many "^#\\+begin_src" (point-min) (point-max))))
       (should (string-match-p ": 42" (buffer-string))))))
 
-(ert-deftest run-block-plain-block-is-machine-shell-and-escaped ()
+(ert-deftest run-block-shell-per-directory ()
+  ;; Two projects both named "app" get a shell each, in their own folder.
+  (test-kill-shells)
+  (let* ((root (make-temp-file "twins" t))
+         (a (file-name-as-directory (expand-file-name "x/app" root)))
+         (b (file-name-as-directory (expand-file-name "y/app" root))))
+    (make-directory a t)
+    (make-directory b t)
+    (let ((sa (kdb-claude--block-shell 'bash a))
+          (sb (kdb-claude--block-shell 'bash b)))
+      (should-not (eq sa sb))
+      (should (eq sa (kdb-claude--block-shell 'bash a)))
+      (kdb-claude--block-to-shell 'bash "pwd" b t)
+      (should (string-match-p "y/app$" (test-shell-output sb "y/app$"))))
+    (test-kill-shells)
+    (delete-directory root t)))
+
+(ert-deftest run-block-plain-block-is-machine-shell ()
   ;; A block naming no language runs in this machine's shell.
-  (let ((org (test-open (test-buffer) (lambda () (point-max)))))   ; newest block
-    (with-current-buffer org
-      (should (string-match-p (if (eq system-type 'windows-nt) "^#\\+begin_src powershell " "^#\\+begin_src bash ")
-                              (buffer-string)))
-      (should (string-match-p "^,\\* not an org heading" (buffer-string)))
-      (should (= 0 (how-many "^\\* " (point-min) (point-max)))))
-    (unless (eq system-type 'windows-nt)          ; the body is a bash heredoc
-      (let ((out (test-execute)))
+  (should (eq (kdb-claude--block-shell-kind "") (if (eq system-type 'windows-nt) 'pwsh 'bash)))
+  (unless (eq system-type 'windows-nt)            ; the body is a bash heredoc
+    (test-kill-shells)
+    (let* ((buf (test-buffer))
+           (dir (buffer-local-value 'default-directory buf)))
+      (with-current-buffer buf
+        (goto-char (point-max))
+        (kdb-claude-run-block t))                 ; run it now
+      (let ((out (test-shell-output (test-shell-buffer 'bash dir) "not an org heading")))
         (should (string-match-p "plain" out))
-        (should (string-match-p "\\* not an org heading" out))))))
+        (should (string-match-p "\\* not an org heading" out))))
+    (test-kill-shells)))
 
 (ert-deftest run-block-keystrokes-are-typed ()
   ;; A block of Emacs keys, unlabeled or labeled as shell, is queued as
@@ -110,30 +156,35 @@ Done.")
         (should (equal (org-babel-execute-src-block) "Typed: M-x emacs-version RET"))
         (should (equal unread-command-events (listify-key-sequence (kbd "M-x emacs-version RET")))))))
   ;; Shell commands that merely contain C- or M- stay shell
+  (test-kill-shells)
   (dolist (cmd '("make -C src" "git commit -m M-x" "echo C-c"))
     (with-current-buffer (generate-new-buffer "*keys*")
+      (setq default-directory (file-name-as-directory (make-temp-file "blockdir" t)))
       (insert (format "```bash\n%s\n```\n" cmd))
-      (test-open (current-buffer) #'point-max))
-    (with-current-buffer "*claude blocks*"
-      (should (string-prefix-p "#+begin_src bash " (buffer-string))))))
+      (goto-char (point-max))
+      (kdb-claude-run-block)
+      (should (string-suffix-p cmd (with-current-buffer (test-shell-buffer 'bash default-directory)
+                                     (buffer-string))))))
+  (test-kill-shells))
 
 (ert-deftest run-block-shell-names-map-per-machine ()
-  (let ((sh (if (eq system-type 'windows-nt) "powershell" "bash")))
-    (dolist (case `(("" . ,sh) ("console" . ,sh) ("shell" . ,sh) ("sh" . "bash") ("bash" . "bash")
-                    ("zsh" . "bash") ("pwsh" . "powershell") ("powershell" . "powershell")))
-      (with-current-buffer (generate-new-buffer "*lang*")
-        (insert (format "```%s\necho hi\n```\n" (car case)))
-        (test-open (current-buffer) #'point-max))
-      (with-current-buffer "*claude blocks*"
-        (should (string-prefix-p (format "#+begin_src %s " (cdr case)) (buffer-string)))))))
+  (let ((sh (if (eq system-type 'windows-nt) 'pwsh 'bash)))
+    (dolist (case `(("" . ,sh) ("console" . ,sh) ("shell" . ,sh) ("sh" . bash) ("bash" . bash)
+                    ("zsh" . bash) ("pwsh" . pwsh) ("powershell" . pwsh) ("ps1" . pwsh)
+                    ("elisp" . nil) ("python" . nil) ("org" . nil)))
+      (should (eq (kdb-claude--block-shell-kind (car case)) (cdr case))))))
 
 (ert-deftest run-block-powershell-language ()
   (with-current-buffer (generate-new-buffer "*ps*")
     (insert "```pwsh\nGet-Date\n```\n")
-    (test-open (current-buffer) #'point-max))
-  (with-current-buffer "*claude blocks*"
-    (should (string-prefix-p "#+begin_src powershell " (buffer-string))))
-  (should (fboundp 'org-babel-execute:powershell)))
+    (goto-char (point-max))
+    (if (or (executable-find "pwsh") (executable-find "powershell"))
+        (progn (kdb-claude-run-block)
+               (should (test-shell-buffer 'pwsh default-directory))
+               (test-kill-shells))
+      ;; Without PowerShell: a clear error, not a broken shell.
+      (should (string-match-p "No pwsh on this machine"
+                              (cadr (should-error (kdb-claude-run-block) :type 'user-error)))))))
 
 (ert-deftest run-block-uses-agent-shell-rendering ()
   ;; As in a session: a tool call with an unpaired raw fence, then a reply
@@ -297,7 +348,36 @@ Done.")
     (kdb-claude-edit-block-at-label)
     (should (equal (buffer-name (window-buffer (selected-window))) "*claude blocks*"))
     (should (org-in-src-block-p))
-    (should-not (string-match-p "RESULTS" (buffer-string)))))
+    (should-not (string-match-p "RESULTS" (buffer-string)))
+    ;; A bash block: x runs it in the project's shell, focus stays here,
+    ;; and the shell is reused, so cd carries over to the next block.
+    (select-window session)
+    (test-kill-shells)
+    (goto-char (point-min))
+    (search-forward "bash ⧉")
+    (let ((bash-label (match-beginning 0))
+          (dir default-directory))
+      (goto-char bash-label)
+      (kdb-claude-run-block-at-label)
+      (should (eq (selected-window) session))
+      (should (= (point) bash-label))
+      (let ((shell (test-shell-buffer 'bash dir)))
+        ;; Sent before bash's first prompt, so the output may follow it.
+        (should (string-match-p "\\(^\\|\\$ \\)first$" (test-shell-output shell "\\(^\\|\\$ \\)first$")))
+        (with-current-buffer shell
+          (goto-char (point-max))
+          (insert "cd /tmp && echo moved")
+          (comint-send-input))
+        (test-shell-output shell "^moved$")
+        (kdb-claude--block-to-shell 'bash "pwd" dir t)
+        (should (string-match-p "^/tmp$" (test-shell-output shell "^/tmp$"))))
+      ;; e on it: at the prompt, not run, and the shell window selected.
+      (select-window session)
+      (goto-char bash-label)
+      (kdb-claude-edit-block-at-label)
+      (should (eq (window-buffer (selected-window)) (test-shell-buffer 'bash dir)))
+      (should (string-suffix-p "echo first" (buffer-string))))
+    (test-kill-shells)))
 
 (ert-deftest run-block-none-before-point ()
   (with-current-buffer (test-buffer)
