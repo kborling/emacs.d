@@ -1414,6 +1414,12 @@ and refresh it in the background."
   (exec-path-from-shell-initialize))
 
 
+;; Tools installed in the user profile (opencode's installer, npm's global
+;; prefix: claude-agent-acp, ccusage) aren't always on PATH.  Both lists:
+;; exec-path for programs Emacs starts, PATH for shell commands.
+(dolist (dir '(".opencode/bin" ".npm-global/bin"))
+  (kdb-add-to-path (expand-file-name dir (or (getenv "USERPROFILE") "~"))))
+
 (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
 (require 'init-theme)   ; cross-platform theme switching (s-t / s-T)
 
@@ -2059,12 +2065,6 @@ Safe to re-run; only missing models are downloaded."
   :ensure t
   :commands (agent-shell-anthropic-start-claude-code agent-shell-send-file-to)
   :config
-  ;; Agents installed in the user profile (opencode's installer, npm's
-  ;; global prefix) aren't always on PATH.
-  (dolist (dir '(".opencode/bin" ".npm-global/bin"))
-    (let ((dir (expand-file-name dir (or (getenv "USERPROFILE") "~"))))
-      (when (file-directory-p dir)
-        (add-to-list 'exec-path dir))))
   (setq agent-shell-anthropic-authentication
         (agent-shell-anthropic-make-authentication :login t)
         ;; M-x agent-shell asks which agent; C-c l starts Claude directly.

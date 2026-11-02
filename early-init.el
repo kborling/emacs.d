@@ -21,6 +21,14 @@
 
 (setq large-file-warning-threshold 200000000)
 
+(defun kdb-add-to-path (dir)
+  "Put DIR first on `exec-path' and PATH, if it exists and isn't there yet.
+PATH, which shell commands use, gets Windows-style backslashes on Windows."
+  (when (and (file-directory-p dir) (not (member dir exec-path)))
+    (add-to-list 'exec-path dir)
+    (setenv "PATH" (concat (if (eq system-type 'windows-nt) (subst-char-in-string ?/ ?\\ dir) dir)
+                           path-separator (getenv "PATH")))))
+
 ;; Windows: file and process I/O is the bottleneck there
 (when (eq system-type 'windows-nt)
   (setq w32-pipe-read-delay 0
@@ -41,10 +49,7 @@
                 (setq file-name-handler-alist
                       (delete-dups (append file-name-handler-alist handlers))))))
   ;; Explorer keeps a stale PATH until sign-in; npm global bin may be missing.
-  (let ((npm (expand-file-name "npm" (getenv "APPDATA"))))
-    (when (and (file-directory-p npm) (not (member npm exec-path)))
-      (add-to-list 'exec-path npm)
-      (setenv "PATH" (concat npm path-separator (getenv "PATH")))))
+  (kdb-add-to-path (expand-file-name "npm" (getenv "APPDATA")))
   ;; Git's bin first, so "bash" (org babel, Claude code blocks) is Git Bash,
   ;; not WSL's System32\bash.exe.
   (when-let* ((git (executable-find "git"))
