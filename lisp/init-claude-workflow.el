@@ -369,6 +369,41 @@ each time a turn starts or ends."
   (setq kdb-claude-busy-indicator style))
 
 ;;; ============================================================
+;;; Tabs: mark the ones with a session waiting for you
+;;; ============================================================
+
+(defvar agent-shell-attention--pending)
+(declare-function tabspaces--buffer-list "tabspaces")
+(declare-function agent-shell-attention--tab-displays-buffer-p "agent-shell-attention")
+
+(defun kdb-claude--tab-waiting-p (tab index)
+  "Non-nil if a session in TAB, number INDEX from 0, is waiting for you.
+Waiting means what agent-shell-attention counts: a permission request
+or a finished turn."
+  (when-let* (((boundp 'agent-shell-attention--pending))
+              (waiting (seq-filter #'buffer-live-p
+                                   (hash-table-keys agent-shell-attention--pending))))
+    (if (bound-and-true-p tabspaces-mode)
+        (seq-some (lambda (b) (memq b waiting)) (tabspaces--buffer-list nil index))
+      (seq-some (lambda (b) (if (eq (car tab) 'current-tab)
+                                (get-buffer-window b)
+                              (agent-shell-attention--tab-displays-buffer-p tab b)))
+                waiting))))
+
+;;;###autoload
+(defun kdb-claude--tab-name-waiting (name tab i)
+  "NAME with a marker when TAB, number I, has a session waiting for you.
+For `tab-bar-tab-name-format-functions'."
+  (if (kdb-claude--tab-waiting-p tab (1- i))
+      (concat (propertize "● " 'face '(:inherit warning :weight bold)) name)
+    name))
+
+;;;###autoload
+(defun kdb-claude--redraw-tabs (&rest _)
+  "Redraw the tab bar: which session waits can change with the count unchanged."
+  (force-mode-line-update t))
+
+;;; ============================================================
 ;;; Artifacts: files Claude writes
 ;;; ============================================================
 

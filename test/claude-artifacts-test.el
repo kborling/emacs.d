@@ -272,4 +272,38 @@
       (should (equal noted '("sess-42"))))
     (kill-buffer buf)))
 
+(ert-deftest tabs-mark-sessions-waiting-for-you ()
+  (require 'agent-shell-attention)
+  (let ((a (generate-new-buffer "*claude a*"))
+        (b (generate-new-buffer "*claude b*"))
+        (agent-shell-attention--pending (make-hash-table :test #'eq))
+        (tab-bar-tab-hints t)
+        (tabspaces-mode nil))
+    (unwind-protect
+        (progn
+          (tab-bar-mode 1)
+          (delete-other-windows)
+          (switch-to-buffer a)
+          (tab-bar-new-tab)
+          (switch-to-buffer b)                     ; tab 1 shows a, tab 2 shows b
+          (cl-flet ((names () (mapcar (lambda (tab)
+                                        (substring-no-properties
+                                         (kdb-claude--tab-name-waiting
+                                          "x" tab (1+ (seq-position (frame-parameter nil 'tabs) tab)))))
+                                      (frame-parameter nil 'tabs))))
+            (should (equal (names) '("x" "x")))     ; nobody waiting
+            (puthash a 'end_turn agent-shell-attention--pending)
+            (should (equal (names) '("● x" "x")))   ; the hidden tab with a
+            (remhash a agent-shell-attention--pending)
+            (puthash b 'permission agent-shell-attention--pending)
+            (should (equal (names) '("x" "● x")))   ; now the current tab
+            ;; With tabspaces, each tab's buffers come from it, hidden or not.
+            (cl-letf (((symbol-function 'tabspaces--buffer-list)
+                       (lambda (_frame index) (list (if (= index 0) a b)))))
+              (let ((tabspaces-mode t))
+                (should (equal (names) '("x" "● x")))))))
+      (ignore-errors (tab-bar-close-other-tabs))
+      (tab-bar-mode -1)
+      (kill-buffer a) (kill-buffer b))))
+
 ;;; claude-artifacts-test.el ends here

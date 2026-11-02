@@ -2044,7 +2044,8 @@ Safe to re-run; only missing models are downloaded."
               kdb-claude--start-with kdb-claude-spawn kdb-claude-message
               kdb-claude--tag-client kdb-claude--render-markdown
               kdb-claude--track-artifacts kdb-claude--track-emacs-session
-              kdb-claude--header-symbol-fonts
+              kdb-claude--header-symbol-fonts kdb-claude--tab-name-waiting
+              kdb-claude--redraw-tabs
               kdb-claude--busy-frames kdb-claude--logo-icon kdb-claude--logo-header
               kdb-claude--steady-busy-frame))
   (autoload fn "init-claude-workflow"))
@@ -2124,6 +2125,9 @@ Safe to re-run; only missing models are downloaded."
   :demand t
   :config
   (setq agent-shell-attention-notify-function #'kdb-claude--notify)
+  ;; A marker on each tab with a session waiting for you.
+  (add-to-list 'tab-bar-tab-name-format-functions #'kdb-claude--tab-name-waiting t)
+  (advice-add 'agent-shell-attention--update-indicator :after #'kdb-claude--redraw-tabs)
   (agent-shell-attention-mode 1))
 
 (global-set-key (kbd "C-c l") #'kdb-claude)
