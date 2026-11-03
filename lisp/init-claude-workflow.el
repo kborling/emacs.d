@@ -725,7 +725,9 @@ window you have since used for something else is left alone."
 
 (defun kdb-claude--note-artifact (buf id tool-call)
   "Record the file tool call ID wrote in session BUF, showing it if a document.
-Only Write calls, which create files; Edit ones change files already there."
+Only Write calls, which create files; Edit ones change files already there.
+Files under a _temp/ folder are working files (the review skill writes
+many) and are left alone."
   (when (and (buffer-live-p buf)
              (equal (map-elt tool-call :status) "completed")
              (equal (map-elt tool-call :kind) "edit"))
@@ -733,7 +735,8 @@ Only Write calls, which create files; Edit ones change files already there."
       (unless (member id kdb-claude--artifact-calls)
         (push id kdb-claude--artifact-calls)
         (when-let* (((map-contains-key (map-elt tool-call :raw-input) 'content))
-                    (file (kdb-claude--tool-call-file tool-call)))
+                    (file (kdb-claude--tool-call-file tool-call))
+                    ((not (string-match-p "/_temp/" file))))
           (setq kdb-claude--artifacts (cons file (delete file kdb-claude--artifacts)))
           (when (and kdb-claude-artifact-auto-show
                      (member (downcase (or (file-name-extension file) ""))
@@ -743,8 +746,10 @@ Only Write calls, which create files; Edit ones change files already there."
             ;; another tab mustn't open panes over your work.
             (if-let* ((win (get-buffer-window buf)))
                 (kdb-claude--show-artifact file nil win)
-              (message "%s created %s (C-c l a to open)"
-                       (buffer-name buf) (file-name-nondirectory file)))))))))
+              ;; Not over a prompt you're answering.
+              (unless (active-minibuffer-window)
+                (message "%s created %s (C-c l a to open)"
+                         (buffer-name buf) (file-name-nondirectory file))))))))))
 
 ;;;###autoload
 (defun kdb-claude--track-emacs-session ()
@@ -1096,6 +1101,36 @@ tool calls and results are left out."
     (require 'org)                      ; loads init-org
     (kdb/md-to-org-buffer md (format "*claude reply: %s*" (buffer-name)))
     (message (substitute-command-keys "\\<org-mode-map>\\[org-export-dispatch] to export"))))
+
+;;;###autoload
+(defun kdb-claude-copy-session-id ()
+  "Copy this session's Claude id, for claude --resume and the like."
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-mode)
+    (user-error "Run this in a Claude session buffer"))
+  (let ((id (or (agent-shell-session-id) (user-error "No session yet"))))
+    (kill-new id)
+    (message "Copied session id %s" id)
+    id))
+
+;;;###autoload
+(defun kdb-claude-open-in-desktop ()
+  "Open this session in Claude Desktop, to carry on there.
+A copy, not a mirror: keep going in one place or the two diverge."
+  (interactive)
+  (let* ((id (kdb-claude-copy-session-id))
+         (claude (or (executable-find "claude") (user-error "claude not found")))
+         (out (get-buffer-create " *claude-desktop*"))
+         (process-connection-type nil))
+    (with-current-buffer out (erase-buffer))
+    ;; From the session's folder: Claude keeps sessions per project.
+    (make-process :name "claude-desktop" :buffer out :noquery t
+                  :command (list claude "--desktop" "--resume" id)
+                  :sentinel (lambda (proc _)
+                              (when (and (memq (process-status proc) '(exit signal))
+                                         (not (zerop (process-exit-status proc))))
+                                (message "Claude Desktop didn't open: %s"
+                                         (with-current-buffer out (string-trim (buffer-string)))))))))
 
 ;;;###autoload
 (defun kdb-claude-usage ()
@@ -1553,7 +1588,9 @@ or the session ends.  Run again in a watched session to stop."
     ("r" "Name this session" agent-shell-hq-label)
     ("a" "Artifacts: open a file Claude created" kdb-claude-open-artifact)
     ("e" "Artifacts: open their folder" kdb-claude-reveal-artifact)
-    ("w" "Watch PR CI, auto-fix (toggle)" kdb-claude-watch-pr)]
+    ("w" "Watch PR CI, auto-fix (toggle)" kdb-claude-watch-pr)
+    ("y" "Copy session id" kdb-claude-copy-session-id)
+    ("D" "Open in Claude Desktop" kdb-claude-open-in-desktop)]
    ["History"
     ("c" "Continue a recent session" kdb-claude-recent)
     ("h" "All sessions" kdb-claude-history)

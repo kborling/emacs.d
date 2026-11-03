@@ -392,4 +392,58 @@
   (let ((kdb-claude-busy-beats-per-second 5))
     (should (= 5 (plist-get (kdb-claude--heartbeat-rate '(:on-heartbeat ignore)) :beats-per-second)))))
 
+(ert-deftest artifact-temp-working-files-ignored ()
+  ;; The review skill writes many files under _temp/: not listed, shown or announced.
+  (let ((buf (test-session)) msgs)
+    (make-directory (expand-file-name "_temp" test-dir))
+    (cl-letf (((symbol-function 'message) (lambda (&rest args) (push args msgs))))
+      (test-write buf "t1" "_temp/notes.md"))
+    (should-not (buffer-local-value 'kdb-claude--artifacts buf))
+    (should-not (test-shown))
+    (should-not msgs)
+    ;; A real document still is.
+    (test-write buf "t2" "report.md")
+    (should (equal (buffer-local-value 'kdb-claude--artifacts buf)
+                   (list (expand-file-name "report.md" test-dir))))))
+
+(ert-deftest artifact-announcement-waits-for-no-prompt ()
+  ;; A session you're not looking at doesn't write over a prompt you're answering.
+  (let ((buf (test-session)) msgs)
+    (switch-to-buffer (get-buffer-create "*my work*"))
+    (cl-letf (((symbol-function 'message) (lambda (&rest args) (push args msgs)))
+              ((symbol-function 'active-minibuffer-window) (lambda () (selected-window))))
+      (test-write buf "t1" "report.md"))
+    (should (buffer-local-value 'kdb-claude--artifacts buf))   ; still listed
+    (should-not msgs)))
+
+(ert-deftest session-id-copied-and-opened-in-desktop ()
+  (let ((buf (test-session)) spawned shown
+        (interprogram-cut-function nil)          ; the kill ring only, no clipboard
+        (interprogram-paste-function nil)
+        ;; A real process that has exited with an error, for the sentinel.
+        (failed (make-process :name "fails" :noquery t
+                              :command (list (expand-file-name invocation-name invocation-directory)
+                                             "-Q" "--batch" "--eval" "(kill-emacs 1)"))))
+    (while (process-live-p failed) (accept-process-output failed 0.05))
+    (with-current-buffer buf
+      (setq major-mode 'agent-shell-mode)
+      (cl-letf (((symbol-function 'agent-shell-session-id) (lambda (&rest _) "sess-42"))
+                ((symbol-function 'executable-find) (lambda (_) "/bin/claude"))
+                ((symbol-function 'make-process)
+                 (lambda (&rest args) (setq spawned (cons default-directory args)) 'proc))
+                ((symbol-function 'message) (lambda (fmt &rest args) (push (apply #'format fmt args) shown))))
+        (should (equal (kdb-claude-copy-session-id) "sess-42"))
+        (should (equal (current-kill 0) "sess-42"))
+        (kdb-claude-open-in-desktop)
+        ;; From the session's folder, where Claude keeps it.
+        (should (equal (car spawned) test-dir))
+        (should (equal (plist-get (cdr spawned) :command)
+                       '("/bin/claude" "--desktop" "--resume" "sess-42")))
+        ;; It failing says why.
+        (with-current-buffer " *claude-desktop*" (insert "no desktop app\n"))
+        (funcall (plist-get (cdr spawned) :sentinel) failed "exited abnormally")
+        (should (equal (car shown) "Claude Desktop didn't open: no desktop app"))))
+    (with-temp-buffer
+      (should-error (kdb-claude-copy-session-id) :type 'user-error))))
+
 ;;; claude-artifacts-test.el ends here
