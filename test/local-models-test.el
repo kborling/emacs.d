@@ -50,25 +50,25 @@
     (should (equal test-browsed "https://ollama.com/download"))))
 
 (ert-deftest local-models-everything-present ()
+  ;; Completion is only on demand (C-c a c): never turned on as you type.
   (test-with-ollama t kdb-local-models
     (with-temp-buffer
-      (emacs-lisp-mode)                            ; hook turns completion on
-      (should (memq (current-buffer) test-enabled))
-      (setq test-enabled nil)
+      (emacs-lisp-mode)
       (kdb-local-models-setup)
       (should-not test-pulled)                     ; nothing to download
-      (should (memq (current-buffer) test-enabled)))))
+      (should-not test-enabled))))
 
 (ert-deftest local-models-pulls-only-missing ()
   (test-with-ollama t (list (car kdb-local-models))
-    (with-temp-buffer
-      (emacs-lisp-mode)
-      (setq test-enabled nil)
-      (kdb-local-models-setup)
-      (should (equal test-pulled (concat "ollama pull " (cadr kdb-local-models))))
-      ;; Completion comes on in open code buffers once the pull finishes.
-      (test-wait-for (lambda () test-enabled))
-      (should (memq (current-buffer) test-enabled))))
+    (let ((ready nil))
+      (cl-letf (((symbol-function 'kdb-local-models--ready) (lambda () (setq ready t))))
+        (with-temp-buffer
+          (emacs-lisp-mode)
+          (kdb-local-models-setup)
+          (should (equal test-pulled (concat "ollama pull " (cadr kdb-local-models))))
+          (test-wait-for (lambda () ready))
+          (should ready)
+          (should-not test-enabled)))))   ; completion stays on demand
   (ignore-errors (kill-buffer "*Ollama setup*")))
 
 (ert-deftest local-models-waits-for-server ()

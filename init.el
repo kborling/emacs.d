@@ -1982,11 +1982,11 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
 (global-set-key (kbd "C-c t V") #'kdb-evil-toggle-buffer)
 
 ;; Local models (Ollama) =================================== ;;
-;; Coding models that fit a 4 GB GPU, run locally: completion as you type
-;; (minuet) and chat/rewrite (gptel).  Setup: C-c a s.
+;; Coding models that fit a 4 GB GPU, run locally: completion when asked,
+;; C-c a c (minuet), and chat/rewrite (gptel).  Setup: C-c a s.
 
 (defvar kdb-local-models '("qwen2.5-coder:3b" "qwen2.5-coder:7b")
-  "Ollama models: the first completes code as you type, the last chats.")
+  "Ollama models: the first completes code, the last chats.")
 
 (defvar kdb-ollama-available 'unknown)
 
@@ -2007,18 +2007,10 @@ Set in personal.el, e.g. (setq kdb-evil-project-list \\='(\"/path/to/project\"))
         (make-process :name "ollama" :buffer " *ollama*" :noquery t
                       :command '("ollama" "serve"))))))
 
-(defun kdb-local-completion-maybe ()
-  "Complete code as you type, if Ollama is installed."
-  (when (kdb-ollama-available-p)
-    (minuet-auto-suggestion-mode 1)))
-(add-hook 'prog-mode-hook #'kdb-local-completion-maybe)
-
 (defun kdb-local-models--ready ()
-  "Turn on completion in open code buffers and say how to use it all."
-  (dolist (b (buffer-list))
-    (with-current-buffer b
-      (when (derived-mode-p 'prog-mode) (minuet-auto-suggestion-mode 1))))
-  (message "Local models ready: completion in code buffers (TAB accepts), C-c a a to chat"))
+  "Say how to use the local models.
+Completion is on demand only; as-you-type is C-c a C, per buffer."
+  (message "Local models ready: C-c a c suggests a completion (TAB accepts), C-c a a to chat"))
 
 (defun kdb-local-models-setup ()
   "Get local coding models working: Ollama running, `kdb-local-models' pulled.
