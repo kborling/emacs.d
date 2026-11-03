@@ -1850,7 +1850,11 @@ and refresh it in the background."
         tab-bar-close-button-show nil
         tab-bar-new-button-show nil
         tab-bar-tab-hints t            ; Show tab numbers in tab names
-        tab-bar-format '(tab-bar-format-tabs tab-bar-separator)))
+        tab-bar-format '(tab-bar-format-tabs tab-bar-separator))
+  ;; M-1..M-8 go to that tab, M-9 the last, M-0 the one you were just in.
+  ;; Not in terminal Emacs, where M-digits split windows (init-terminal).
+  (unless (bound-and-true-p kdb-terminal-mode)
+    (customize-set-variable 'tab-bar-select-tab-modifiers '(meta))))
 
 ;; One workspace (tab) per project, each with its own windows and buffer
 ;; list, so C-x b only offers this project's buffers.  Nothing is written
@@ -1909,6 +1913,8 @@ A daemon keeps running, and has nothing to save from afterwards."
   ;; frame closes, and every 10 idle minutes in case Emacs dies.
   (tabspaces-session t)
   (tabspaces-session-auto-save-delay 600)
+  ;; All tabs in that one file: per-project files would land in projects.
+  (tabspaces-session-project-session-store nil)
   :bind (:map tabspaces-command-map
               ("f" . tab-bar-switch-to-next-tab)
               ("p" . tab-bar-switch-to-prev-tab))
@@ -2097,17 +2103,19 @@ Safe to re-run; only missing models are downloaded."
               kdb-claude--header-symbol-fonts kdb-claude--tab-name-waiting
               kdb-claude--redraw-tabs kdb-claude--tab-save kdb-claude--tab-restore
               kdb-claude--busy-frames kdb-claude--logo-icon kdb-claude--logo-header
-              kdb-claude--steady-busy-frame))
+              kdb-claude--steady-busy-frame kdb-claude--display-in-project-tab
+              kdb-claude--close-session-window))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
                  kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review
                  kdb-claude-watch-pr kdb-claude-schedule kdb-claude-run-block
                  kdb-claude-reply-to-org kdb-claude-usage kdb-claude-open-artifact
-                 kdb-claude-set-busy-indicator kdb-claude-start-model)
+                 kdb-claude-set-busy-indicator kdb-claude-start-model
+                 kdb-claude-reveal-artifact kdb-reveal-in-file-manager kdb-claude-scratch)
                 ("init-claude-print" kdb-claude-print)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
                  kdb-claude-search kdb-claude-import-export
-                 kdb-claude-ask-archive kdb-claude-resume-archived kdb-claude-history
+                 kdb-claude-ask-archive kdb-claude-resume-archived kdb-claude-history kdb-claude-recent
                  kdb-claude-setup)))
   (dolist (fn (cdr spec))
     (autoload fn (car spec) nil t)))
@@ -2120,13 +2128,16 @@ Safe to re-run; only missing models are downloaded."
         (agent-shell-anthropic-make-authentication :login t)
         ;; M-x agent-shell asks which agent; C-c l starts Claude directly.
         agent-shell-preferred-agent-config nil
-        ;; Auto-approve file edits; shell commands still ask.
-        agent-shell-anthropic-default-session-mode-id "acceptEdits"
-        ;; Code block labels: RET copies (built in), x runs the block in
-        ;; org babel, e opens it there to edit first.
+        ;; Claude decides what needs asking; C-c C-m switches mode
+        ;; (e.g. bypass) per session.
+        agent-shell-anthropic-default-session-mode-id "auto"
+        ;; Code block labels: RET copies (built in), x runs the block (shell
+        ;; blocks in the project's shell, others in org babel), e edits first.
         agent-shell-markdown-render-function #'kdb-claude--render-markdown
         ;; Resume from the history list (C-c l h), not a picker on every start.
         agent-shell-session-strategy 'new
+        ;; Each project's sessions share a tab named after it, side by side.
+        agent-shell-display-action '((kdb-claude--display-in-project-tab display-buffer-same-window))
         ;; Keep conversation data out of projects and this repo: the private
         ;; archive already has every transcript, so agent-shell's copy is off.
         agent-shell-transcript-file-path-function nil
@@ -2148,6 +2159,7 @@ Safe to re-run; only missing models are downloaded."
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-artifacts)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-emacs-session)
+  (add-hook 'agent-shell-mode-hook #'kdb-claude--close-session-window)
   (setq agent-shell-busy-indicator-frames #'kdb-claude--busy-frames)
   (advice-add 'agent-shell--busy-indicator-frame :filter-return #'kdb-claude--steady-busy-frame)
   (advice-add 'agent-shell--fetch-agent-icon :before-until #'kdb-claude--logo-icon)

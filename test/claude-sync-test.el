@@ -362,4 +362,42 @@ under a path limit that makes LONG's transcripts too long to open."
       (should (equal (kdb-claude-sync-code-sessions) "Synced 0 Claude Code sessions")))
     (delete-directory root t)))
 
+(ert-deftest recent-sessions-newest-first-open-on-top ()
+  (let* ((archive (file-name-as-directory (make-temp-file "archive" t)))
+         (code (expand-file-name "code-sessions/" archive))
+         resumed gone)
+    (make-directory code)
+    (cl-flet ((session (id title updated &optional client cwd)
+                (with-temp-file (expand-file-name (concat id ".org") code)
+                  (insert (format "#+TITLE: %s\n#+UPDATED: %s\n#+CWD: %s\n#+CLIENT: %s\n#+BRANCH: main\n"
+                                  title updated (or cwd "/home/me/api") (or client "cli"))))))
+      (session "old" "Old work" "2026-01-01 10:00")
+      (session "new" "New work" "2026-03-01 10:00")
+      (session "open" "Open one" "2025-12-01 10:00")
+      (session "oneshot" "Reply with a title" "2026-03-02 10:00" "sdk-cli")
+      (session "scratch" "Test run" "2026-03-03 10:00" "cli" temporary-file-directory)
+      (session "dup" "New work" "2026-02-01 10:00"))
+    (cl-letf (((symbol-function 'kdb-claude--ensure-archive) (lambda () archive))
+              ((symbol-function 'kdb-claude--live-sessions) (lambda () (list (cons "open" 'buf))))
+              ((symbol-function 'kdb-claude-sync-code-sessions-async) #'ignore)
+              ((symbol-function 'kdb-claude-resume-archived) (lambda (f) (setq resumed f)))
+              ((symbol-function 'kdb-claude--goto-session) (lambda (b) (setq gone b))))
+      (let ((cands (kdb-claude--recent-candidates)))
+        ;; Open first, then newest; one-shots and temp-folder sessions left out;
+        ;; a repeated title gets a number.
+        (should (equal (mapcar (lambda (c) (file-name-base (cdr c))) cands)
+                       '("open" "new" "dup" "old")))
+        (should (string-match-p "\\`api +New work\\'" (car (nth 1 cands))))
+        (should (string-suffix-p "<2>" (car (nth 2 cands))))
+        (should (string-match-p "\\`● open .*terminal  main  /home/me/api\\'"
+                                (get-text-property 0 'kdb-annotation (car (nth 0 cands)))))
+        ;; Picking: an archived one resumes; an open one is gone to.
+        (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) (car (nth 1 cands)))))
+          (kdb-claude-recent))
+        (should (equal (file-name-base resumed) "new"))
+        (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) (car (nth 0 cands)))))
+          (kdb-claude-recent))
+        (should (eq gone 'buf))))
+    (delete-directory archive t)))
+
 ;;; claude-sync-test.el ends here

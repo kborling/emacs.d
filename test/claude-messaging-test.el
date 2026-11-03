@@ -10,7 +10,7 @@
 
 (defvar test-busy nil)
 (defvar test-delivered nil "(BUFFER . PROMPT) submitted, newest first.")
-(defvar test-started nil "(DIR PROMPT ENV) per started session.")
+(defvar test-started nil "(DIR PROMPT ENV QUIETLY) per started session.")
 
 (defun shell-maker-busy () test-busy)
 (cl-defun agent-shell--prompt-queue-enqueue (&key prompt)
@@ -22,12 +22,12 @@
 
 ;; Stand-in for starting a session: a buffer, plus the client-maker call
 ;; agent-shell-start makes synchronously, which is where the id is set.
-(defun kdb-claude--start-with (dir &optional prompt _session-id)
+(defun kdb-claude--start-with (dir &optional prompt _session-id quietly)
   (let* ((buf (generate-new-buffer "*Claude test session*"))
          (client (with-current-buffer buf
                    (setq default-directory dir)
                    (agent-shell-anthropic-make-claude-client :buffer buf))))
-    (push (list dir prompt (map-elt client :environment-variables)) test-started)
+    (push (list dir prompt (map-elt client :environment-variables) quietly) test-started)
     buf))
 
 (defun test-session (id)
@@ -114,6 +114,7 @@
   (test-reset)
   (let ((id (kdb-claude-spawn "/tmp/" "Just do it")))
     (should (equal (nth 1 (car test-started)) "Just do it"))   ; no report-back footer
+    (should (eq (nth 3 (car test-started)) 'background))      ; focus stays with you
     (kill-buffer (kdb-claude--session-buffer id))))
 
 (ert-deftest messaging-spawn-on-branch-uses-worktree ()

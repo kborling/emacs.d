@@ -15,7 +15,10 @@
 (declare-function agent-shell-anthropic-start-claude-code "agent-shell-anthropic")
 (declare-function agent-shell-insert "agent-shell")
 (declare-function agent-shell-send-dwim "agent-shell")
-(declare-function agent-shell-start "agent-shell")
+(declare-function agent-shell--start "agent-shell")
+(declare-function dired-get-filename "dired")
+(declare-function dbus-call-method "dbus")
+(declare-function w32-shell-execute "w32fns.c")
 (declare-function agent-shell-subscribe-to "agent-shell")
 (declare-function agent-shell-unsubscribe "agent-shell")
 (declare-function agent-review "agent-review")
@@ -143,14 +146,88 @@ The region, Dired files or org entry at point become its first input."
   (let ((agent-shell-cwd-function (if dir (lambda () dir) agent-shell-cwd-function)))
     (agent-shell-anthropic-start-claude-code)))
 
-(defun kdb-claude--start-with (dir &optional prompt session-id)
+(declare-function tabspaces--list-tabspaces "tabspaces")
+(declare-function tabspaces-generate-descriptive-tab-name "tabspaces")
+
+(defvar tabspaces-project-fallback-to-tab)
+
+(defun kdb-claude--project-dir (dir)
+  "DIR's project root, or DIR outside any project."
+  (if-let* ((project (let ((tabspaces-project-fallback-to-tab nil)) (project-current nil dir))))
+      (project-root project)
+    dir))
+
+(defun kdb-claude--project-tab (root)
+  "Name of the tab for project ROOT, or nil if there is none."
+  (let ((names (mapcar (lambda (tab) (alist-get 'name tab)) (tab-bar-tabs))))
+    (seq-find (lambda (name) (member name names))
+              (list (cdr (seq-find (lambda (e) (ignore-errors (file-equal-p (car e) root)))
+                                   (bound-and-true-p tabspaces-project-tab-map)))
+                    (file-name-nondirectory (directory-file-name root))))))
+
+(defun kdb-claude--session-windows ()
+  "Windows in this tab showing a Claude session."
+  (seq-filter (lambda (w) (with-current-buffer (window-buffer w) (derived-mode-p 'agent-shell-mode)))
+              (window-list)))
+
+;;;###autoload
+(defun kdb-claude--display-in-project-tab (buffer _alist)
+  "Show Claude session BUFFER in its project's tab, split beside the others.
+With no tab for the project yet, open one named after it.  Returns the
+window, for `agent-shell-display-action'."
+  (when (bound-and-true-p tab-bar-mode)
+    (let* ((root (kdb-claude--project-dir (buffer-local-value 'default-directory buffer)))
+           (tab (kdb-claude--project-tab root)))
+      (if (not tab)
+          (progn
+            (tab-bar-new-tab)
+            (tab-bar-rename-tab
+             (if (bound-and-true-p tabspaces-mode)
+                 (tabspaces-generate-descriptive-tab-name (abbreviate-file-name root)
+                                                          (tabspaces--list-tabspaces))
+               (file-name-nondirectory (directory-file-name root))))
+            (delete-other-windows)
+            (switch-to-buffer buffer nil t)
+            (selected-window))
+        (tab-bar-switch-to-tab tab)
+        (let* ((beside (or (car (last (kdb-claude--session-windows))) (selected-window)))
+               (win (or (ignore-errors
+                          (split-window beside nil (if (>= (window-total-width beside) 160) 'right 'below)))
+                        beside)))
+          (set-window-buffer win buffer)
+          (unless (eq win beside) (balance-windows (window-parent win)))
+          win)))))
+
+(defun kdb-claude--show-in-background (buf)
+  "Show session BUF in its project tab, then come back to this tab and window."
+  (let ((from (tab-bar--current-tab-index))
+        (win (selected-window)))
+    (when (kdb-claude--display-in-project-tab buf nil)
+      (unless (eql from (tab-bar--current-tab-index))
+        (tab-bar-select-tab (1+ from)))
+      (when (window-live-p win) (select-window win)))))
+
+;;;###autoload
+(defun kdb-claude--close-session-window ()
+  "When a session is killed, close its split rather than show another buffer."
+  (add-hook 'kill-buffer-hook
+            (lambda ()
+              (dolist (w (get-buffer-window-list (current-buffer) nil))
+                (ignore-errors (delete-window w))))
+            nil t))
+
+(defun kdb-claude--start-with (dir &optional prompt session-id quietly)
   "Start a Claude shell in DIR, resuming SESSION-ID if non-nil.
-Submit PROMPT once the shell is ready.  Return the shell buffer."
+Submit PROMPT once the shell is ready.  Return the shell buffer.
+QUIETLY `background': shown in its project tab, focus stays here;
+`hidden': not shown at all."
   (require 'agent-shell)
   (let* ((default-directory dir)
          (agent-shell-cwd-function (lambda () dir))
-         (buf (agent-shell-start :config (agent-shell-anthropic-make-claude-code-config)
-                                 :session-id session-id)))
+         (buf (agent-shell--start :config (agent-shell-anthropic-make-claude-code-config)
+                                  :no-focus quietly :new-session t :session-id session-id)))
+    (when (eq quietly 'background)
+      (kdb-claude--show-in-background buf))
     (when prompt
       (let (token)
         (setq token (agent-shell-subscribe-to
@@ -169,6 +246,17 @@ outside any project, pick the directory."
   (interactive "P")
   (kdb-claude--new-in (when (or pick (not (project-current)))
                         (kdb-claude-read-directory "Project: "))))
+
+;;;###autoload
+(defun kdb-claude-scratch ()
+  "Start a throwaway session for a one-off question, outside any project.
+It runs in a scratch folder under the temp directory, gets its own tab,
+and stays out of `kdb-claude-recent'.  The region, Dired files or org
+entry at point are carried over, as with `kdb-claude-new'."
+  (interactive)
+  (let ((dir (file-name-as-directory (expand-file-name "claude-scratch" temporary-file-directory))))
+    (make-directory dir t)
+    (kdb-claude--new-in dir)))
 
 ;;;###autoload
 (defun kdb-claude-send ()
@@ -416,7 +504,7 @@ For `tab-bar-tab-name-format-functions'."
   "Resume the Claude session in RECORD, as `kdb-claude--tab-save' made it."
   (let ((dir (plist-get record :dir)))
     (when (file-directory-p dir)
-      (kdb-claude--start-with (file-name-as-directory dir) nil (plist-get record :session)))))
+      (kdb-claude--start-with (file-name-as-directory dir) nil (plist-get record :session) 'hidden))))
 
 ;;; ============================================================
 ;;; Artifacts: files Claude writes
@@ -471,14 +559,16 @@ window you have since used for something else is left alone."
       win)))
 
 (defun kdb-claude--note-artifact (buf id tool-call)
-  "Record the file of tool call ID in session BUF, showing it if a document."
+  "Record the file tool call ID wrote in session BUF, showing it if a document.
+Only Write calls, which create files; Edit ones change files already there."
   (when (and (buffer-live-p buf)
              (equal (map-elt tool-call :status) "completed")
              (equal (map-elt tool-call :kind) "edit"))
     (with-current-buffer buf
       (unless (member id kdb-claude--artifact-calls)
         (push id kdb-claude--artifact-calls)
-        (when-let* ((file (kdb-claude--tool-call-file tool-call)))
+        (when-let* (((map-contains-key (map-elt tool-call :raw-input) 'content))
+                    (file (kdb-claude--tool-call-file tool-call)))
           (setq kdb-claude--artifacts (cons file (delete file kdb-claude--artifacts)))
           (when (and kdb-claude-artifact-auto-show
                      (member (downcase (or (file-name-extension file) ""))
@@ -488,7 +578,7 @@ window you have since used for something else is left alone."
             ;; another tab mustn't open panes over your work.
             (if-let* ((win (get-buffer-window buf)))
                 (kdb-claude--show-artifact file nil win)
-              (message "%s wrote %s (C-c l a to open)"
+              (message "%s created %s (C-c l a to open)"
                        (buffer-name buf) (file-name-nondirectory file)))))))))
 
 ;;;###autoload
@@ -514,25 +604,61 @@ window you have since used for something else is left alone."
                                               (map-elt data :tool-call)))))))
 
 ;;;###autoload
-(defun kdb-claude-open-artifact ()
-  "Open a file this session wrote, newest first, in the artifact pane."
-  (interactive)
+(defun kdb-reveal-in-file-manager (file)
+  "Open FILE's folder in Explorer, Finder or the desktop's file manager.
+FILE is selected there; a directory is opened itself.  Interactively,
+this buffer's file, the Dired file at point, or the directory.  The
+path goes on the kill ring, to paste in an attach dialog."
+  (interactive (list (or buffer-file-name
+                         (and (derived-mode-p 'dired-mode) (dired-get-filename nil t))
+                         default-directory)))
+  (let* ((file (expand-file-name file))
+         (dir (file-directory-p file)))
+    (pcase system-type
+      ('windows-nt (w32-shell-execute "open" "explorer.exe"
+                                      (format (if dir "\"%s\"" "/select,\"%s\"")
+                                              (subst-char-in-string ?/ ?\\ (directory-file-name file)))))
+      ('darwin (apply #'call-process "open" nil 0 nil (if dir (list file) (list "-R" file))))
+      (_ (unless (ignore-errors
+                   (require 'dbus)
+                   (dbus-call-method :session "org.freedesktop.FileManager1" "/org/freedesktop/FileManager1"
+                                     "org.freedesktop.FileManager1" (if dir "ShowFolders" "ShowItems")
+                                     (list (concat "file://" file)) "")
+                   t)
+           (call-process "xdg-open" nil 0 nil (if dir file (file-name-directory file))))))
+    (kill-new file)
+    (message "Shown in file manager; path copied: %s" (abbreviate-file-name file))))
+
+;;;###autoload
+(defun kdb-claude-open-artifact (&optional reveal)
+  "Open a file this session created, newest first, in the artifact pane.
+With prefix arg REVEAL, pick one of their folders to open in the file
+manager instead, to share from."
+  (interactive "P")
   (let* ((buf (if (derived-mode-p 'agent-shell-mode)
                   (current-buffer)
                 (or (seq-find (lambda (b) (buffer-local-value 'kdb-claude--artifacts b))
                               (buffer-list))
                     (user-error "No Claude session has written files yet"))))
          (files (seq-filter #'file-exists-p (buffer-local-value 'kdb-claude--artifacts buf)))
-         (names (mapcar #'abbreviate-file-name files)))
-    (unless files (user-error "This session hasn't written any files yet"))
-    (kdb-claude--show-artifact
-     (expand-file-name
-      (completing-read "File Claude wrote: "
-                       (lambda (s p a)
-                         (if (eq a 'metadata) '(metadata (display-sort-function . identity))
-                           (complete-with-action a names s p)))
-                       nil t))
-     t)))
+         (names (delete-dups (mapcar (if reveal
+                                         (lambda (f) (abbreviate-file-name (file-name-directory f)))
+                                       #'abbreviate-file-name)
+                                     files))))
+    (unless files (user-error "This session hasn't created any files yet"))
+    (funcall (if reveal #'kdb-reveal-in-file-manager (lambda (f) (kdb-claude--show-artifact f t)))
+             (expand-file-name
+              (completing-read (if reveal "Open folder: " "File Claude created: ")
+                               (lambda (s p a)
+                                 (if (eq a 'metadata) '(metadata (display-sort-function . identity) (cycle-sort-function . identity))
+                                   (complete-with-action a names s p)))
+                               nil t)))))
+
+;;;###autoload
+(defun kdb-claude-reveal-artifact ()
+  "Open a folder this session created files in, in Explorer, Finder, etc."
+  (interactive)
+  (kdb-claude-open-artifact t))
 
 ;;; ============================================================
 ;;; Running code blocks from replies
@@ -987,7 +1113,8 @@ FROM, the id of the calling session, PROMPT ends with how to report back."
                      (random #x10000)))
          (buf (let ((kdb-claude--next-id id))
                 (kdb-claude--start-with
-                 dir (if from (concat prompt (kdb-claude--report-back from id)) prompt)))))
+                 dir (if from (concat prompt (kdb-claude--report-back from id)) prompt)
+                 nil 'background))))
     (kdb-claude--session-id buf)))
 
 ;;;###autoload
@@ -1001,7 +1128,7 @@ does; for that, see Windows Task Scheduler."
                      (read-string "Prompt: ")))
   (when (string-blank-p time)
     (user-error "No time given"))
-  (let ((timer (run-at-time time nil #'kdb-claude--start-with dir prompt)))
+  (let ((timer (run-at-time time nil #'kdb-claude--start-with dir prompt nil 'background)))
     (when (time-less-p (timer--time timer) nil)
       (cancel-timer timer)
       (timer-inc-time timer (* 24 60 60))
@@ -1244,22 +1371,25 @@ or the session ends.  Run again in a watched session to stop."
   [["Start"
     ("n" "New here (C-u pick project)" kdb-claude-new)
     ("N" "New on project + branch" kdb-claude-start)
+    ("z" "Throwaway (one-off question)" kdb-claude-scratch)
     ("t" "Schedule a session" kdb-claude-schedule)
     ("m" "New with another model" kdb-claude-start-model)]
    ["Send"
     ("s" "Region/note/files → session" kdb-claude-send)
     ("f" "File → session" agent-shell-send-file-to)
     ("v" "Review my changes" kdb-claude-review)
-    ("x" "Code block → org babel (C-c C-c runs)" kdb-claude-run-block)
+    ("x" "Code block → project shell / org babel" kdb-claude-run-block)
     ("o" "Last reply → org (C-c C-e exports)" kdb-claude-reply-to-org)]
    ["Sessions"
     ("'" "Answer / next waiting" kdb-claude-answer)
     ("d" "Dashboard" agent-shell-attention-dashboard)
     ("l" "Peek / switch (by project)" agent-shell-hq-peek)
     ("r" "Name this session" agent-shell-hq-label)
-    ("a" "Artifacts: open a file Claude wrote" kdb-claude-open-artifact)
+    ("a" "Artifacts: open a file Claude created" kdb-claude-open-artifact)
+    ("e" "Artifacts: open their folder" kdb-claude-reveal-artifact)
     ("w" "Watch PR CI, auto-fix (toggle)" kdb-claude-watch-pr)]
    ["History"
+    ("c" "Continue a recent session" kdb-claude-recent)
     ("h" "All sessions" kdb-claude-history)
     ("/" "Search text" kdb-claude-search)
     ("A" "Ask past sessions" kdb-claude-ask-archive)

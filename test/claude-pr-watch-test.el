@@ -343,7 +343,7 @@ esac
         (should (time-less-p nil (timer--time timer)))
         (sleep-for 1.5)
         (accept-process-output nil 0.1)
-        (should (equal fired '("/tmp/" "go")))))
+        (should (equal fired '("/tmp/" "go" nil background)))))
     (should-error (kdb-claude-schedule "  " "/tmp/" "go") :type 'user-error)))
 
 ;;; claude-pr-watch-test.el ends here

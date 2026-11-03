@@ -382,6 +382,7 @@ as a directory name."
                     (if (eq action 'metadata)
                         `(metadata
                           (display-sort-function . identity)
+                          (cycle-sort-function . identity)
                           (annotation-function
                            . ,(lambda (c)
                                 (when-let* ((time (cdr (assoc (expand-file-name c) claude))))
@@ -539,9 +540,107 @@ Empty input shows everything."
 (defun kdb-claude-history-resume ()
   "Continue the session at point, switching to it if it is already open."
   (interactive)
-  (let* ((file (or (tabulated-list-get-id) (user-error "No session here")))
-         (buf (cdr (assoc (file-name-base file) (kdb-claude--live-sessions)))))
-    (if buf (switch-to-buffer buf) (kdb-claude-resume-archived file))))
+  (kdb-claude--resume (or (tabulated-list-get-id) (user-error "No session here"))))
+
+(defun kdb-claude--goto-session (buf)
+  "Go to session BUF: its window, in whichever tab shows it, or show it."
+  (if-let* ((tab (and (bound-and-true-p tab-bar-mode) (tab-bar-get-buffer-tab buf))))
+      (progn (tab-bar-select-tab (1+ (tab-bar--tab-index tab)))
+             (select-window (get-buffer-window buf)))
+    (pop-to-buffer buf (bound-and-true-p agent-shell-display-action))))
+
+(defun kdb-claude--resume (file)
+  "Continue archived session FILE, or go to it if it is open."
+  (if-let* ((buf (cdr (assoc (file-name-base file) (kdb-claude--live-sessions)))))
+      (kdb-claude--goto-session buf)
+    (kdb-claude-resume-archived file)))
+
+(defvar icomplete-vertical-mode)
+(declare-function icomplete--vertical-minibuffer-setup "icomplete")
+
+(defvar kdb-claude-recent-count 40
+  "How many sessions `kdb-claude-recent' offers.")
+
+(defun kdb-claude--age (time)
+  "TIME as a short age: 5m, 3h, 2d."
+  (let ((s (float-time (time-subtract nil time))))
+    (cond ((< s 3600) (format "%dm" (max 1 (/ s 60))))
+          ((< s 86400) (format "%dh" (/ s 3600)))
+          (t (format "%dd" (/ s 86400))))))
+
+(defun kdb-claude--recent-candidates ()
+  "Recent sessions as (CANDIDATE . FILE), newest first, open ones on top.
+A candidate is the project and title; its annotation (text property)
+says when, where it ran, and the branch.  One-shot claude -p calls and
+sessions in temporary folders are left out."
+  (let* ((live (kdb-claude--live-sessions))
+         (tmp (file-truename temporary-file-directory))
+         (rows (seq-keep
+                (lambda (f)
+                  (let* ((h (kdb-claude--org-header f))
+                         (cwd (cdr (assoc "CWD" h))))
+                    (unless (or (equal (kdb-claude--history-source f h) "claude -p")
+                                (and cwd (file-in-directory-p cwd tmp)))
+                      (list f h (or (cdr (assoc "UPDATED" h)) (cdr (assoc "DATE" h)) "")))))
+                (directory-files-recursively (kdb-claude--ensure-archive) "\\.org$")))
+         (rows (seq-take (sort rows (lambda (a b) (string> (nth 2 a) (nth 2 b))))
+                         kdb-claude-recent-count))
+         (rows (append (seq-filter (lambda (r) (assoc (file-name-base (car r)) live)) rows)
+                       (seq-remove (lambda (r) (assoc (file-name-base (car r)) live)) rows)))
+         (seen (make-hash-table :test #'equal)))
+    (mapcar
+     (lambda (r)
+       (pcase-let* ((`(,f ,h ,updated) r)
+                    (cwd (cdr (assoc "CWD" h)))
+                    (project (cond ((let ((p (cdr (assoc "PROJECT" h))))
+                                      (and p (not (string-empty-p p)) p)))
+                                   (cwd (file-name-nondirectory (directory-file-name cwd)))
+                                   (t "")))
+                    (base (format "%-16s %s" (truncate-string-to-width project 16 nil nil "…")
+                                  (or (cdr (assoc "TITLE" h)) (file-name-base f))))
+                    (n (cl-incf (gethash base seen 0)))
+                    (cand (if (= n 1) base (format "%s <%d>" base n))))
+         (cons (propertize
+                cand 'kdb-annotation
+                (string-join
+                 (delq nil (list (and (assoc (file-name-base f) live) "● open")
+                                 (ignore-errors (kdb-claude--age (date-to-time updated)))
+                                 (let ((src (kdb-claude--history-source f h)))
+                                   (unless (string-empty-p src) src))
+                                 (cdr (assoc "BRANCH" h))
+                                 (and cwd (abbreviate-file-name cwd))))
+                 "  "))
+               f)))
+     rows)))
+
+;;;###autoload
+(defun kdb-claude-recent ()
+  "Continue a recent session, picked by project and title, newest first.
+Ones open in Emacs are on top and are gone to, not restarted.  For older
+sessions, or to search what was said, see `kdb-claude-history'."
+  (interactive)
+  (kdb-claude-sync-code-sessions-async (lambda () (clrhash kdb-claude--header-cache)))
+  (let* ((cands (or (kdb-claude--recent-candidates) (user-error "No sessions archived yet")))
+         ;; One per line, even when the minibuffer is horizontal.
+         (icomplete-vertical-mode t)
+         (pick (minibuffer-with-setup-hook
+                   (:append (lambda () (when (fboundp 'icomplete--vertical-minibuffer-setup)
+                                         (icomplete--vertical-minibuffer-setup))))
+                 (completing-read
+                  "Continue session: "
+                  (lambda (s p a)
+                    (if (eq a 'metadata)
+                        `(metadata (category . kdb-claude-session)
+                                   (display-sort-function . identity)
+                                   (cycle-sort-function . identity)
+                                   (annotation-function
+                                    . ,(lambda (c)
+                                         (when-let* ((ann (get-text-property
+                                                           0 'kdb-annotation (car (assoc c cands)))))
+                                           (concat "   " (propertize ann 'face 'completions-annotations))))))
+                      (complete-with-action a cands s p)))
+                  nil t))))
+    (kdb-claude--resume (cdr (assoc pick cands)))))
 
 ;;; ============================================================
 ;;; Claude Desktop Export

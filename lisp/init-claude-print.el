@@ -43,11 +43,12 @@ resolves the extension automatically."
   :type '(choice (const :tag "CLI default" nil) string)
   :group 'kdb-claude-print)
 
-(defcustom kdb-claude-print-permission-mode "acceptEdits"
+(defcustom kdb-claude-print-permission-mode "auto"
   "Permission mode for sessions.
 Anything the mode doesn't allow is asked in the session buffer.
-\"acceptEdits\" auto-approves file edits and asks for shell; \"default\"
-asks for both; \"dontAsk\" silently denies anything not pre-approved;
+\"auto\" lets Claude decide what needs asking; \"acceptEdits\"
+auto-approves file edits and asks for shell; \"default\" asks for both;
+\"dontAsk\" silently denies anything not pre-approved;
 \"bypassPermissions\" allows everything; \"plan\" is read-only."
   :type '(choice (const "acceptEdits")
                  (const "default")

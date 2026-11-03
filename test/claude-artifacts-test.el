@@ -24,7 +24,8 @@
   (kdb-claude--note-artifact
    buf id (append tool-call
                   `((:status . "completed") (:kind . "edit")
-                    (:raw-input . ((file_path . ,(expand-file-name file test-dir))))
+                    (:raw-input . ((file_path . ,(expand-file-name file test-dir))
+                                   (content . "...")))
                     (:locations . (((path . ,(expand-file-name file test-dir)))))))))
 
 (defun test-shown ()
@@ -63,10 +64,16 @@
                                           (:locations . (((path . ,(expand-file-name "a.md" test-dir)))))))
     (should-not (buffer-local-value 'kdb-claude--artifacts buf))
     (should-not (test-shown))
-    ;; Completed, from locations alone (no raw input); a repeated update is ignored.
+    ;; An Edit of a file already there isn't one Claude made.
+    (kdb-claude--note-artifact buf "t3" `((:status . "completed") (:kind . "edit")
+                                          (:raw-input . ((file_path . ,(expand-file-name "a.md" test-dir))
+                                                         (old_string . "x") (new_string . "y")))))
+    (should-not (buffer-local-value 'kdb-claude--artifacts buf))
+    ;; A completed Write; a repeated update is ignored.
     (dotimes (_ 2)
       (kdb-claude--note-artifact buf "t1" `((:status . "completed") (:kind . "edit")
-                                            (:locations . (((path . ,(expand-file-name "a.md" test-dir))))))))
+                                            (:raw-input . ((file_path . ,(expand-file-name "a.md" test-dir))
+                                                           (content . "x"))))))
     (should (equal (buffer-local-value 'kdb-claude--artifacts buf)
                    (list (expand-file-name "a.md" test-dir))))
     (should (equal (test-shown) (list (expand-file-name "a.md" test-dir))))))
@@ -79,7 +86,7 @@
     (sleep-for 1.1)                              ; a newer mtime
     (with-temp-file file (insert "# plan v2\n"))
     (kdb-claude--note-artifact buf "t2" `((:status . "completed") (:kind . "edit")
-                                          (:locations . (((path . ,file))))))
+                                          (:raw-input . ((file_path . ,file) (content . "# plan v2\n")))))
     (should (equal (with-current-buffer (get-file-buffer file) (buffer-string)) "# plan v2\n"))
     (should (equal (buffer-local-value 'kdb-claude--artifacts buf) (list file)))))
 
@@ -123,7 +130,8 @@
              `((:event . tool-call-update)
                (:data . ((:tool-call-id . "t9")
                          (:tool-call . ((:status . "completed") (:kind . "edit")
-                                        (:raw-input . ((file_path . ,(expand-file-name "via-event.md" test-dir))))))))))
+                                        (:raw-input . ((file_path . ,(expand-file-name "via-event.md" test-dir))
+                                                       (content . "x")))))))))
     (should (equal (test-shown) (list (expand-file-name "via-event.md" test-dir))))))
 
 (ert-deftest artifact-hidden-session-leaves-layout-alone ()
@@ -135,7 +143,7 @@
       (test-write buf "t1" "report.md"))
     (should (= 1 (length (window-list))))
     (should (eq (window-buffer (selected-window)) (get-buffer "*my work*")))
-    (should (equal msg (format "%s wrote report.md (C-c l a to open)" (buffer-name buf))))
+    (should (equal msg (format "%s created report.md (C-c l a to open)" (buffer-name buf))))
     (should (buffer-local-value 'kdb-claude--artifacts buf))))
 
 (ert-deftest artifact-reused-pane-is-not-taken-over ()
@@ -305,5 +313,51 @@
       (ignore-errors (tab-bar-close-other-tabs))
       (tab-bar-mode -1)
       (kill-buffer a) (kill-buffer b))))
+
+(ert-deftest reveal-in-file-manager-per-system ()
+  (let (calls)
+    (cl-letf (((symbol-function 'w32-shell-execute) (lambda (&rest a) (push (cons 'w32 a) calls)))
+              ((symbol-function 'call-process) (lambda (&rest a) (push a calls) 0))
+              ((symbol-function 'dbus-call-method) (lambda (&rest _) (error "No file manager"))))
+      (let ((system-type 'windows-nt))
+        (kdb-reveal-in-file-manager "/Users/me/My Docs/plan.docx"))
+      ;; Backslashes, and quoted for the space.
+      (should (equal (car calls) `(w32 "open" "explorer.exe"
+                                       ,(format "/select,\"%s\"" (subst-char-in-string
+                                                                  ?/ ?\\ (expand-file-name "/Users/me/My Docs/plan.docx"))))))
+      (should (string-match-p "\\\\me\\\\My Docs\\\\plan" (nth 3 (car calls))))
+      (let ((system-type 'darwin))
+        (kdb-reveal-in-file-manager "/tmp/plan.docx"))
+      (should (equal (car calls) '("open" nil 0 nil "-R" "/tmp/plan.docx")))
+      ;; Linux with no FileManager1 service: open the folder.
+      (let ((system-type 'gnu/linux))
+        (kdb-reveal-in-file-manager "/tmp/plan.docx"))
+      (should (equal (car calls) '("xdg-open" nil 0 nil "/tmp/")))
+      (should (equal (current-kill 0) "/tmp/plan.docx"))
+      ;; A folder is opened, not selected in its parent.
+      (let ((system-type 'darwin))
+        (kdb-reveal-in-file-manager "/tmp/"))
+      (should (equal (car calls) '("open" nil 0 nil "/tmp/")))
+      (let ((system-type 'windows-nt))
+        (kdb-reveal-in-file-manager "/tmp/"))
+      (should (string-prefix-p "\"" (nth 3 (car calls)))))))
+
+(ert-deftest artifact-reveal-offers-folders ()
+  (let ((buf (test-session))
+        offered opened)
+    (let ((kdb-claude-artifact-auto-show nil))
+      (make-directory (expand-file-name "out" test-dir))
+      (test-write buf "t1" "a.md")
+      (test-write buf "t2" "out/b.docx")
+      (test-write buf "t3" "c.md"))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt table &rest _)
+                 (setq offered (all-completions "" table))
+                 (cadr offered)))
+              ((symbol-function 'kdb-reveal-in-file-manager) (lambda (f) (setq opened f))))
+      (with-current-buffer buf (kdb-claude-reveal-artifact)))
+    (should (equal offered (mapcar #'abbreviate-file-name
+                                   (list test-dir (expand-file-name "out/" test-dir)))))
+    (should (equal opened (expand-file-name "out/" test-dir)))))
 
 ;;; claude-artifacts-test.el ends here
