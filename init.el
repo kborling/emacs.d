@@ -2095,7 +2095,7 @@ Safe to re-run; only missing models are downloaded."
               kdb-claude--header-symbol-fonts kdb-claude--tab-name-waiting
               kdb-claude--redraw-tabs kdb-claude--tab-save kdb-claude--tab-restore
               kdb-claude--busy-frames kdb-claude--logo-icon kdb-claude--logo-header
-              kdb-claude--steady-busy-frame kdb-claude--display-in-project-tab
+              kdb-claude--steady-busy-frame kdb-claude--heartbeat-rate kdb-claude--display-in-project-tab
               kdb-claude--close-session-window))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
@@ -2154,6 +2154,7 @@ Safe to re-run; only missing models are downloaded."
   (add-hook 'agent-shell-mode-hook #'kdb-claude--close-session-window)
   (setq agent-shell-busy-indicator-frames #'kdb-claude--busy-frames)
   (advice-add 'agent-shell--busy-indicator-frame :filter-return #'kdb-claude--steady-busy-frame)
+  (advice-add 'agent-shell-heartbeat-make :filter-args #'kdb-claude--heartbeat-rate)
   (advice-add 'agent-shell--fetch-agent-icon :before-until #'kdb-claude--logo-icon)
   (dolist (fn '(agent-shell--make-header-model agent-shell--header-model-refresh-frame))
     (advice-add fn :filter-return #'kdb-claude--logo-header))

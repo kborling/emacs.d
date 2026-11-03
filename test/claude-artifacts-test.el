@@ -360,4 +360,36 @@
                                    (list test-dir (expand-file-name "out/" test-dir)))))
     (should (equal opened (expand-file-name "out/" test-dir)))))
 
+(ert-deftest busy-header-has-few-frames ()
+  ;; Bar and hop repeat together: 24 headers to draw, each frame made once.
+  (should (zerop (mod (length kdb-claude--logo-hop) (length kdb-claude--busy-bar))))
+  (let ((kdb-claude--logo-files (make-hash-table :test #'equal))
+        (made 0))
+    (cl-letf (((symbol-function 'kdb-claude--logo-file) (lambda (_) (cl-incf made) "/tmp/frame.svg")))
+      (dotimes (_ 3) (kdb-claude--logo-icon "kdb-logo-3|claude"))
+      (should (equal (kdb-claude--logo-icon "kdb-logo-3|claude") "/tmp/frame.svg"))
+      (should-not (kdb-claude--logo-icon "claude"))           ; not a hop frame
+      (should (= made 1)))))
+
+(ert-deftest tabs-redrawn-only-when-waiting-changes ()
+  (let ((agent-shell-attention--pending (make-hash-table :test #'eq))
+        (kdb-claude--waiting-drawn nil)
+        (a (generate-new-buffer "a")) (b (generate-new-buffer "b"))
+        (redraws 0))
+    (cl-letf (((symbol-function 'force-mode-line-update) (lambda (&rest _) (cl-incf redraws))))
+      (kdb-claude--redraw-tabs)                    ; nothing waits, nothing changed
+      (should (= redraws 0))
+      (puthash a t agent-shell-attention--pending)
+      (dotimes (_ 3) (kdb-claude--redraw-tabs))    ; the 1 s timer, a waiting
+      (should (= redraws 1))
+      (remhash a agent-shell-attention--pending)   ; same count, another session
+      (puthash b t agent-shell-attention--pending)
+      (kdb-claude--redraw-tabs)
+      (should (= redraws 2)))
+    (kill-buffer a) (kill-buffer b)))
+
+(ert-deftest heartbeat-rate-is-set ()
+  (let ((kdb-claude-busy-beats-per-second 5))
+    (should (= 5 (plist-get (kdb-claude--heartbeat-rate '(:on-heartbeat ignore)) :beats-per-second)))))
+
 ;;; claude-artifacts-test.el ends here

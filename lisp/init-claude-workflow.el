@@ -347,10 +347,12 @@ hopping beside a sliding bar), or any value
 `agent-shell-busy-indicator-frames' takes, e.g. `wave'.")
 
 (defconst kdb-claude--busy-bar
-  (let ((cells (mapcar (lambda (n) (string-pad (make-string n ?░) 8)) (number-sequence 1 8))))
-    (append cells (cdr (reverse (cdr cells))) (list (make-string 8 ?\s))))
+  (let ((bar (lambda (n) (string-pad (make-string n ?░) 8))))
+    (append (mapcar bar (number-sequence 1 8)) (mapcar bar '(6 4 2 0))))
   "An 8-cell bar that grows and shrinks, 10 frames a second.
-Listed here, not agent-shell's `wide', so its width can be held when idle.")
+Listed here, not agent-shell's `wide', so its width can be held when idle.
+Its 12 frames are one hop of `kdb-claude--logo-hop', so bar and icon
+repeat together and the header has few distinct frames to draw.")
 
 (defconst kdb-claude--logo-hop
   (let ((hop '((0 1.14 0.84 0) (-6 0.92 1.12 3) (-14 0.96 1.06 5) (-19 1.0 1.0 6)
@@ -389,13 +391,21 @@ The whole icon moves; its artwork is never altered."
             href href (+ 100 (nth 0 hop)) (nth 3 hop)
             (* kdb-claude--logo-size (nth 1 hop)) (* kdb-claude--logo-size (nth 2 hop)))))
 
+(defvar kdb-claude--logo-files (make-hash-table :test #'equal)
+  "Header icon name -> its hop frame's file: each is drawn once, not per tick.")
+
 ;;;###autoload
 (defun kdb-claude--logo-icon (name)
   "Icon file for header icon NAME if it is a hopping-logo frame, else nil.
 Before-until advice on `agent-shell--fetch-agent-icon'.  NAME is
 kdb-logo-STEP|ICON, ICON being the name agent-shell would fetch."
-  (when (and (stringp name)
-             (string-match "\\`kdb-logo-\\([0-9]+\\)|\\(.+\\)" name))
+  (when (and (stringp name) (string-prefix-p "kdb-logo-" name))
+    (with-memoization (gethash name kdb-claude--logo-files)
+      (kdb-claude--logo-file name))))
+
+(defun kdb-claude--logo-file (name)
+  "Write the hop frame NAME (kdb-logo-STEP|ICON) names; return its file."
+  (when (string-match "\\`kdb-logo-\\([0-9]+\\)|\\(.+\\)" name)
     (let ((step (min (string-to-number (match-string 1 name)) (1- (length kdb-claude--logo-hop)))))
       (when-let* ((icon (agent-shell--fetch-agent-icon (match-string 2 name))))
         (let* ((svg (kdb-claude--logo-svg icon step))
@@ -426,6 +436,16 @@ when the busy text changes."
       (cons (cons :icon-name name)
             (assq-delete-all :icon-name (copy-alist model)))
     model))
+
+(defvar kdb-claude-busy-beats-per-second
+  (if (string-prefix-p "RDP-" (or (getenv "SESSIONNAME") "")) 5 10)
+  "Busy animation steps a second.  Halved over Remote Desktop (and AVD),
+where each redraw is slow.")
+
+;;;###autoload
+(defun kdb-claude--heartbeat-rate (args)
+  "ARGS for `agent-shell-heartbeat-make', at `kdb-claude-busy-beats-per-second'."
+  (append (list :beats-per-second kdb-claude-busy-beats-per-second) args))
 
 ;;;###autoload
 (defun kdb-claude--busy-frames ()
@@ -486,10 +506,20 @@ For `tab-bar-tab-name-format-functions'."
       (concat (propertize "● " 'face '(:inherit warning :weight bold)) name)
     name))
 
+(defvar kdb-claude--waiting-drawn nil
+  "The sessions waiting for you when the tab bar was last redrawn.")
+
 ;;;###autoload
 (defun kdb-claude--redraw-tabs (&rest _)
-  "Redraw the tab bar: which session waits can change with the count unchanged."
-  (force-mode-line-update t))
+  "Redraw the tab bar when which sessions wait for you has changed.
+It can change with the count unchanged.  Runs every second, so it
+redraws only on a change."
+  (let ((waiting (and (boundp 'agent-shell-attention--pending)
+                      (seq-filter #'buffer-live-p (hash-table-keys agent-shell-attention--pending)))))
+    (unless (and (= (length waiting) (length kdb-claude--waiting-drawn))
+                 (seq-every-p (lambda (b) (memq b kdb-claude--waiting-drawn)) waiting))
+      (setq kdb-claude--waiting-drawn waiting)
+      (force-mode-line-update t))))
 
 ;;;###autoload
 (defun kdb-claude--tab-save (buf)
