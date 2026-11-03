@@ -28,6 +28,7 @@ personal.el                   Private settings (API keys — not tracked)
 personal.el.template          Template for personal.el
 custom.el                     Customize output
 lisp/
+  init-claude-packages.el     Claude at startup: agent-shell & co., keys, background sync
   init-claude-workflow.el     Claude transient over agent-shell: start, send, sessions
   init-claude.el              Claude session archive, history, search, Desktop import
   init-claude-print.el        Fallback Claude backend over pipes (M-x kdb-claude-print)

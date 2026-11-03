@@ -128,12 +128,6 @@
          (side . bottom)
          (window-height . 0.3)
          (slot . 0))
-        ;; Code blocks run from Claude's replies, and babel's errors
-        ("\\*\\(claude blocks\\|claude \\(bash\\|pwsh\\): .*\\|Org-Babel Error Output\\)\\*"
-         (display-buffer-in-side-window)
-         (side . bottom)
-         (window-height . 0.3)
-         (slot . 0))
         ;; Help/docs on the right
         ("\\*\\(Help\\|Apropos\\|info\\|Man \\|eldoc\\).*"
          (display-buffer-in-side-window)
@@ -1920,8 +1914,7 @@ A daemon keeps running, and has nothing to save from afterwards."
               ("p" . tab-bar-switch-to-prev-tab))
   :config
   (advice-add 'tabspaces--save-session-smart :before-while #'kdb-tabs--may-save)
-  (add-hook 'delete-frame-functions #'kdb-tabs--save-closing-frame)
-  (tabspaces-register-buffer-kind 'claude #'kdb-claude--tab-save #'kdb-claude--tab-restore))
+  (add-hook 'delete-frame-functions #'kdb-tabs--save-closing-frame))
 
 
 ;; Evil Mode (Vim Emulation) =============================== ;;
@@ -2082,128 +2075,9 @@ Safe to re-run; only missing models are downloaded."
   (minuet-set-optional-options minuet-openai-fim-compatible-options :max_tokens 64))
 
 ;; Claude ================================================= ;;
-;; agent-shell runs Claude Code over ACP using the `claude' login (Max).
-;; Needs node: npm install -g @agentclientprotocol/claude-agent-acp
-
-;; Before any use-package below: installing a :vc package compiles it,
-;; which loads agent-shell and runs its :config mid-install.
-(autoload 'kdb-claude-agent-shell-subdir "init-claude")
-(dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify
-              kdb-claude--start-with kdb-claude-spawn kdb-claude-message
-              kdb-claude--tag-client kdb-claude--render-markdown
-              kdb-claude--track-artifacts kdb-claude--track-emacs-session
-              kdb-claude--header-symbol-fonts kdb-claude--tab-name-waiting
-              kdb-claude--redraw-tabs kdb-claude--tab-save kdb-claude--tab-restore
-              kdb-claude--busy-frames kdb-claude--logo-icon kdb-claude--logo-header
-              kdb-claude--steady-busy-frame kdb-claude--heartbeat-rate kdb-claude--display-in-project-tab
-              kdb-claude--close-session-window))
-  (autoload fn "init-claude-workflow"))
-(dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
-                 kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review
-                 kdb-claude-watch-pr kdb-claude-schedule kdb-claude-run-block
-                 kdb-claude-reply-to-org kdb-claude-usage kdb-claude-open-artifact
-                 kdb-claude-set-busy-indicator kdb-claude-start-model
-                 kdb-claude-reveal-artifact kdb-reveal-in-file-manager kdb-claude-scratch
-                 kdb-claude-review-pr)
-                ("init-claude-print" kdb-claude-print)
-                ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
-                 kdb-claude-search kdb-claude-import-export
-                 kdb-claude-ask-archive kdb-claude-resume-archived kdb-claude-history kdb-claude-recent
-                 kdb-claude-setup)))
-  (dolist (fn (cdr spec))
-    (autoload fn (car spec) nil t)))
-
-(use-package agent-shell
-  :ensure t
-  :commands (agent-shell-anthropic-start-claude-code agent-shell-send-file-to)
-  :config
-  (setq agent-shell-anthropic-authentication
-        (agent-shell-anthropic-make-authentication :login t)
-        ;; M-x agent-shell asks which agent; C-c l starts Claude directly.
-        agent-shell-preferred-agent-config nil
-        ;; Claude decides what needs asking; C-c C-m switches mode
-        ;; (e.g. bypass) per session.
-        agent-shell-anthropic-default-session-mode-id "auto"
-        ;; Code block labels: RET copies (built in), x runs the block (shell
-        ;; blocks in the project's shell, others in org babel), e edits first.
-        agent-shell-markdown-render-function #'kdb-claude--render-markdown
-        ;; Resume from the history list (C-c l h), not a picker on every start.
-        agent-shell-session-strategy 'new
-        ;; Each project's sessions share a tab named after it, side by side.
-        agent-shell-display-action '((kdb-claude--display-in-project-tab display-buffer-same-window))
-        ;; Keep conversation data out of projects and this repo: the private
-        ;; archive already has every transcript, so agent-shell's copy is off.
-        agent-shell-transcript-file-path-function nil
-        ;; ...and don't offer to save one when a session is killed.
-        shell-maker-prompt-before-killing-buffer nil
-        agent-shell-dot-subdir-function #'kdb-claude-agent-shell-subdir
-        shell-maker-root-path (kdb-claude-agent-shell-subdir "")
-        ;; Queue permission requests so C-c ' can answer them from anywhere.
-        agent-shell-permission-responder-function #'kdb-claude--capture-permission
-        ;; The adapter logs to stderr unless given a log dir, and acp.el
-        ;; reports any stderr as an error, which aborts agent-review.
-        agent-shell-anthropic-claude-environment
-        (agent-shell-make-environment-variables
-         "CLAUDE_AGENT_LOGS" (expand-file-name "claude-agent-logs" temporary-file-directory)))
-  ;; The default, ImageMagick's import, is often missing on Linux; maim
-  ;; (-s: drag a region) where installed.  macOS/Windows keep the default.
-  (when (and (eq system-type 'gnu/linux) (executable-find "maim"))
-    (setq agent-shell-screenshot-command '("maim" "-s")))
-  (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions)
-  (add-hook 'agent-shell-mode-hook #'kdb-claude--track-artifacts)
-  (add-hook 'agent-shell-mode-hook #'kdb-claude--track-emacs-session)
-  (add-hook 'agent-shell-mode-hook #'kdb-claude--close-session-window)
-  (setq agent-shell-busy-indicator-frames #'kdb-claude--busy-frames)
-  (advice-add 'agent-shell--busy-indicator-frame :filter-return #'kdb-claude--steady-busy-frame)
-  (advice-add 'agent-shell-heartbeat-make :filter-args #'kdb-claude--heartbeat-rate)
-  (advice-add 'agent-shell--fetch-agent-icon :before-until #'kdb-claude--logo-icon)
-  (dolist (fn '(agent-shell--make-header-model agent-shell--header-model-refresh-frame))
-    (advice-add fn :filter-return #'kdb-claude--logo-header))
-  (when (eq system-type 'windows-nt)
-    (advice-add 'agent-shell--make-header-model :filter-return #'kdb-claude--header-symbol-fonts))
-  ;; Each session knows its id (KDB_CLAUDE_SESSION) for kdb-claude-message.
-  (advice-add 'agent-shell-anthropic-make-claude-client :around #'kdb-claude--tag-client))
-
-;; Peek: sessions grouped by project with live status; RET switches.
-;; Label: Claude names the session.  (hq's HUD needs persp-mode; unused.)
-(use-package agent-shell-hq
-  :vc (:url "https://github.com/SreenivasVRao/agent-shell-hq" :rev :newest)
-  :commands (agent-shell-hq-peek agent-shell-hq-label))
-
-;; Second-opinion review of uncommitted changes; send findings back with S.
-(use-package agent-review
-  :vc (:url "https://github.com/nineluj/agent-review" :rev :newest)
-  :commands agent-review)
-
-(use-package agent-shell-attention
-  :vc (:url "https://github.com/ultronozm/agent-shell-attention.el" :rev :newest)
-  :after agent-shell
-  :demand t
-  :config
-  (setq agent-shell-attention-notify-function #'kdb-claude--notify)
-  ;; A marker on each tab with a session waiting for you.
-  (add-to-list 'tab-bar-tab-name-format-functions #'kdb-claude--tab-name-waiting t)
-  (advice-add 'agent-shell-attention--update-indicator :after #'kdb-claude--redraw-tabs)
-  (agent-shell-attention-mode 1))
-
-(global-set-key (kbd "C-c l") #'kdb-claude)
-(global-set-key (kbd "C-c ;") #'agent-shell-hq-peek)
-(global-set-key (kbd "C-c '") #'kdb-claude-answer)
-
-;; Session transcripts stay out of recent files (and so out of var/recentf).
-(with-eval-after-load 'recentf
-  (add-to-list 'recentf-exclude
-               (lambda (f)
-                 (file-in-directory-p
-                  f (or (bound-and-true-p kdb-claude-archive-dir) "~/.claude-archive")))))
-
-;; Keep the archive current so search/ask/resume see recent sessions.
-;; The conversion runs in a background Emacs, so idle time never freezes.
-(run-with-idle-timer 300 t (lambda ()
-                             (require 'init-claude)
-                             (when (kdb-claude--archive-repo-p)
-                               (with-demoted-errors "Claude archive sync: %S"
-                                 (kdb-claude-sync-code-sessions-async)))))
+;; agent-shell and friends, keys, and what runs in the background.  The
+;; commands themselves load on first use (lisp/init-claude*.el).
+(require 'init-claude-packages)
 
 
 ;; Local Variables:

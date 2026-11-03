@@ -1024,7 +1024,7 @@ imported claude.ai chat, or a session whose directory is gone) starts a
 new session in a project you pick that reads FILE first and carries on."
   (interactive
    (list (if (and buffer-file-name
-                  (file-in-directory-p buffer-file-name (kdb-claude--ensure-archive)))
+                  (kdb-claude--path-within-p buffer-file-name (kdb-claude--ensure-archive)))
              buffer-file-name
            (read-file-name "Archived session: " (kdb-claude--ensure-archive)))))
   (require 'init-claude-workflow)
