@@ -434,6 +434,11 @@
         (should (equal (current-kill 0) "sess-42"))
         ;; Shared live: queued, so a turn in progress isn't cut into.
         (kdb-claude-remote-control)
+        (should (equal queued (list buf "/remote-control")))
+        ;; Again: stop sharing; and again: share.
+        (kdb-claude-remote-control)
+        (should (equal queued (list buf "/remote-control off")))
+        (kdb-claude-remote-control)
         (should (equal queued (list buf "/remote-control")))))
     (with-temp-buffer
       (should-error (kdb-claude-copy-session-id) :type 'user-error)

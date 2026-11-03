@@ -1113,16 +1113,24 @@ tool calls and results are left out."
     (message "Copied session id %s" id)
     id))
 
+(defvar-local kdb-claude--remote-control nil
+  "Non-nil while this session is shared by `kdb-claude-remote-control'.")
+
 ;;;###autoload
 (defun kdb-claude-remote-control ()
-  "Share this session live with Claude Desktop, claude.ai/code and the app.
-Claude replies with its link; both sides can then send.  claude
---desktop --resume can't take a session open here, so this is how
-Desktop sees one.  /remote-control off, sent here, stops sharing."
+  "Share this session live with claude.ai/code and the Claude apps, or stop.
+Claude replies with its link; both sides can then send.  Run again to
+stop sharing.  claude --desktop --resume can't take a session open
+here, so this is how the apps see one."
   (interactive)
   (unless (derived-mode-p 'agent-shell-mode)
     (user-error "Run this in a Claude session buffer"))
-  (kdb-claude--queue-prompt (current-buffer) "/remote-control"))
+  (setq kdb-claude--remote-control (not kdb-claude--remote-control))
+  (kdb-claude--queue-prompt (current-buffer)
+                            (if kdb-claude--remote-control "/remote-control" "/remote-control off"))
+  (message (if kdb-claude--remote-control
+               "Sharing this session; its link comes in the reply"
+             "Stopping sharing")))
 
 ;;;###autoload
 (defun kdb-claude-usage ()
@@ -1582,7 +1590,7 @@ or the session ends.  Run again in a watched session to stop."
     ("e" "Artifacts: open their folder" kdb-claude-reveal-artifact)
     ("w" "Watch PR CI, auto-fix (toggle)" kdb-claude-watch-pr)
     ("y" "Copy session id" kdb-claude-copy-session-id)
-    ("D" "Share live (Desktop, web, phone)" kdb-claude-remote-control)]
+    ("D" "Share live / stop (web, apps)" kdb-claude-remote-control)]
    ["History"
     ("c" "Continue a recent session" kdb-claude-recent)
     ("h" "All sessions" kdb-claude-history)
