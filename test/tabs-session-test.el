@@ -167,4 +167,42 @@
   (tab-bar-mode -1)
   (should-not (kdb-claude--display-in-project-tab (test-claude-buffer "/tmp/" "x") nil)))
 
+(ert-deftest session-shown-in-its-tab-is-not-split-again ()
+  (test-with-tabs
+   (let* ((api (test-project "api"))
+          (a (test-claude-buffer api "a"))
+          (win (kdb-claude--display-in-project-tab a nil)))
+     (tab-bar-switch-to-tab (car (test-tab-names)))
+     (should (eq (kdb-claude--display-in-project-tab a nil) win))
+     (should (one-window-p t)))))
+
+(ert-deftest send-to-a-session-or-a-new-one ()
+  (require 'agent-shell)
+  (let* ((api (test-project "api"))
+         (a (test-claude-buffer api "a"))
+         (from (test-claude-buffer api "from"))
+         offered started sent)
+    (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (list from a)))
+              ((symbol-function 'agent-shell--context) (lambda (&rest _) "the region"))
+              ((symbol-function 'agent-shell--display-buffer) #'ignore)
+              ((symbol-function 'agent-shell--insert-to-shell-buffer)
+               (lambda (&rest args) (setq sent args)))
+              ((symbol-function 'kdb-claude--new-in) (lambda (dir) (setq started dir)))
+              ((symbol-function 'kdb-claude-read-directory) (lambda (&rest _) "/elsewhere/")))
+      (with-current-buffer from
+        ;; Open sessions first, not the one you're in; then new ones.
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (_p table &rest _) (setq offered (all-completions "" table)) (car offered))))
+          (kdb-claude-send))
+        (should (= 3 (length offered)))
+        (should (string-match-p "\\`api +Claude Agent @ test" (nth 0 offered)))
+        (should (equal sent (list :text "the region" :shell-buffer a)))
+        (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) (nth 1 offered))))
+          (kdb-claude-send))
+        (should (equal started api))
+        (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) (nth 2 offered))))
+          (kdb-claude-send))
+        (should (equal started "/elsewhere/"))))
+    (kill-buffer a) (kill-buffer from)))
+
 ;;; tabs-session-test.el ends here

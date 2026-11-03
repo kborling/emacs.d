@@ -16,6 +16,10 @@
 (declare-function agent-shell-insert "agent-shell")
 (declare-function agent-shell-send-dwim "agent-shell")
 (declare-function agent-shell--start "agent-shell")
+(declare-function agent-shell--context "agent-shell")
+(declare-function agent-shell--display-buffer "agent-shell")
+(declare-function agent-shell--insert-to-shell-buffer "agent-shell")
+(declare-function agent-shell-buffers "agent-shell")
 (declare-function dired-get-filename "dired")
 (declare-function dbus-call-method "dbus")
 (declare-function w32-shell-execute "w32fns.c")
@@ -190,13 +194,14 @@ window, for `agent-shell-display-action'."
             (switch-to-buffer buffer nil t)
             (selected-window))
         (tab-bar-switch-to-tab tab)
-        (let* ((beside (or (car (last (kdb-claude--session-windows))) (selected-window)))
-               (win (or (ignore-errors
-                          (split-window beside nil (if (>= (window-total-width beside) 160) 'right 'below)))
-                        beside)))
-          (set-window-buffer win buffer)
-          (unless (eq win beside) (balance-windows (window-parent win)))
-          win)))))
+        (or (get-buffer-window buffer)
+            (let* ((beside (or (car (last (kdb-claude--session-windows))) (selected-window)))
+                   (win (or (ignore-errors
+                              (split-window beside nil (if (>= (window-total-width beside) 160) 'right 'below)))
+                            beside)))
+              (set-window-buffer win buffer)
+              (unless (eq win beside) (balance-windows (window-parent win)))
+              win))))))
 
 (defun kdb-claude--show-in-background (buf)
   "Show session BUF in its project tab, then come back to this tab and window."
@@ -260,11 +265,38 @@ entry at point are carried over, as with `kdb-claude-new'."
 
 ;;;###autoload
 (defun kdb-claude-send ()
-  "Send the region, Dired files or org entry at point to a session you pick."
+  "Send the region, Dired files or org entry at point to a session you pick.
+Or hand it off to a new session, in this project or another."
   (interactive)
   (require 'agent-shell)
   (kdb-claude--mark-org-entry)
-  (agent-shell-send-dwim '(16)))
+  (let* ((here (kdb-claude--project-dir default-directory))
+         (new-here (format "+ New session in %s" (abbreviate-file-name here)))
+         (new-other "+ New session in another project…")
+         (sessions (mapcar (lambda (b)
+                             (cons (format "%-16s %s"
+                                           (truncate-string-to-width
+                                            (file-name-nondirectory
+                                             (directory-file-name
+                                              (kdb-claude--project-dir (buffer-local-value 'default-directory b))))
+                                            16 nil nil "…")
+                                           (buffer-name b))
+                                   b))
+                           (remq (current-buffer) (agent-shell-buffers))))
+         (pick (completing-read
+                "Send to: "
+                (lambda (s p a)
+                  (if (eq a 'metadata)
+                      '(metadata (display-sort-function . identity) (cycle-sort-function . identity))
+                    (complete-with-action a (append (mapcar #'car sessions) (list new-here new-other)) s p)))
+                nil t)))
+    (cond ((equal pick new-here) (kdb-claude--new-in here))
+          ((equal pick new-other) (kdb-claude--new-in (kdb-claude-read-directory "Project: ")))
+          (t (let* ((buf (cdr (assoc pick sessions)))
+                    (text (agent-shell--context :shell-buffer buf)))
+               (agent-shell--display-buffer buf)
+               (when text
+                 (agent-shell--insert-to-shell-buffer :text text :shell-buffer buf)))))))
 
 ;;;###autoload
 (defun kdb-claude-review ()
@@ -1405,7 +1437,7 @@ or the session ends.  Run again in a watched session to stop."
     ("t" "Schedule a session" kdb-claude-schedule)
     ("m" "New with another model" kdb-claude-start-model)]
    ["Send"
-    ("s" "Region/note/files → session" kdb-claude-send)
+    ("s" "Region/note/files → session (or new)" kdb-claude-send)
     ("f" "File → session" agent-shell-send-file-to)
     ("v" "Review my changes" kdb-claude-review)
     ("x" "Code block → project shell / org babel" kdb-claude-run-block)
