@@ -205,4 +205,39 @@
         (should (equal started "/elsewhere/"))))
     (kill-buffer a) (kill-buffer from)))
 
+(ert-deftest pr-url-parts ()
+  (should (equal (kdb-claude--pr-url-parts "https://github.com/acme/apps/pull/123") '("apps" "123")))
+  (should (equal (kdb-claude--pr-url-parts "https://github.com/acme/data/pull/45/files#diff-1") '("data" "45")))
+  (should (equal (kdb-claude--pr-url-parts "https://github.acme.com/team/apps/pull/7") '("apps" "7")))
+  (should (equal (kdb-claude--pr-url-parts "https://github.com/acme/apps.git") '("apps" nil)))
+  (should-not (kdb-claude--pr-url-parts "not a url")))
+
+(ert-deftest pr-review-opens-its-own-tab ()
+  (test-with-tabs
+   (let* ((apps (test-project "apps"))
+          (kdb-claude-review-skill "team-review")
+          (kdb-claude-review-repos nil)
+          started)
+     (cl-letf (((symbol-function 'project-known-project-roots) (lambda () (list "/x/data/" apps)))
+               ((symbol-function 'kdb-claude--start-with)
+                (lambda (dir prompt &rest _)
+                  (setq started (list dir prompt))
+                  ;; As agent-shell shows a new session.
+                  (let ((buf (test-claude-buffer dir "r")))
+                    (funcall (caar agent-shell-display-action) buf nil)
+                    buf))))
+       (kdb-claude-review-pr "https://github.com/acme/apps/pull/123")
+       (should (equal started (list apps "/team-review https://github.com/acme/apps/pull/123")))
+       (should (equal (alist-get 'name (tab-bar--current-tab)) "PR apps#123"))
+       (should (one-window-p t))
+       ;; The same PR again: back to its tab, nothing new started.
+       (tab-bar-switch-to-tab (car (test-tab-names)))
+       (setq started nil)
+       (kdb-claude-review-pr "https://github.com/acme/apps/pull/123/files")
+       (should-not started)
+       (should (equal (alist-get 'name (tab-bar--current-tab)) "PR apps#123"))
+       ;; A checkout named differently comes from the configured list.
+       (let ((kdb-claude-review-repos '(("data" . "/src/data-repo/"))))
+         (should (equal (kdb-claude--repo-checkout "data") "/src/data-repo/")))))))
+
 ;;; tabs-session-test.el ends here

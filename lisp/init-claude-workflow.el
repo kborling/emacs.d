@@ -307,6 +307,62 @@ In the results, mark findings with m and send them to a session with S."
   (agent-review (agent-shell-anthropic-make-claude-code-config)))
 
 ;;; ============================================================
+;;; Reviewing a GitHub pull request with the team's skill
+;;; ============================================================
+
+(defvar agent-shell-display-action)
+
+(defvar kdb-claude-review-skill "code-review"
+  "The skill a PR review runs, as /NAME URL.  Set it in personal.el.")
+
+(defvar kdb-claude-review-repos nil
+  "Alist of GitHub repo name -> local checkout, for PR reviews.
+Only needed when the checkout's folder isn't named like the repo; those
+are found among known projects.  Set it in personal.el.")
+
+(defun kdb-claude--pr-url-parts (url)
+  "(REPO NUMBER) of GitHub pull request URL, NUMBER nil if not a PR."
+  (when (string-match "\\`https?://[^/]+/[^/]+/\\([^/#?]+\\)\\(?:/pull/\\([0-9]+\\)\\)?" url)
+    (list (string-remove-suffix ".git" (match-string 1 url)) (match-string 2 url))))
+
+(defun kdb-claude--repo-checkout (repo)
+  "Local checkout of GitHub REPO: configured, a known project, or asked."
+  (or (cdr (assoc repo kdb-claude-review-repos))
+      (seq-find (lambda (dir) (equal (file-name-nondirectory (directory-file-name dir)) repo))
+                (and (fboundp 'project-known-project-roots) (project-known-project-roots)))
+      (kdb-claude-read-directory (format "Checkout of %s: " repo))))
+
+;;;###autoload
+(defun kdb-claude-review-pr (url)
+  "Review the GitHub pull request at URL with `kdb-claude-review-skill'.
+A new session in the repo's checkout runs /SKILL URL, in its own tab
+named after the PR.  Reviewing the same PR again goes back to that tab.
+Interactively, a GitHub URL just copied is the default."
+  (interactive
+   (let ((copied (ignore-errors (string-trim (current-kill 0 t)))))
+     (list (read-string (format-prompt "GitHub PR URL"
+                                       (and copied (kdb-claude--pr-url-parts copied) copied))
+                        nil nil (and copied (kdb-claude--pr-url-parts copied) copied)))))
+  (pcase-let* ((`(,repo ,number) (or (kdb-claude--pr-url-parts url)
+                                     (user-error "Not a GitHub URL: %s" url)))
+               (tab (if number (format "PR %s#%s" repo number) (format "review %s" repo))))
+    (if (and (bound-and-true-p tab-bar-mode)
+             (member tab (mapcar (lambda (tb) (alist-get 'name tb)) (tab-bar-tabs))))
+        (progn (tab-bar-switch-to-tab tab)
+               (message "Already reviewing %s here" tab))
+      (let* ((dir (file-name-as-directory (expand-file-name (kdb-claude--repo-checkout repo))))
+             (agent-shell-display-action
+              (if (bound-and-true-p tab-bar-mode)
+                  `((,(lambda (buf _)
+                        (tab-bar-new-tab)
+                        (tab-bar-rename-tab tab)
+                        (delete-other-windows)
+                        (switch-to-buffer buf nil t)
+                        (selected-window))))
+                agent-shell-display-action)))
+        (kdb-claude--start-with dir (format "/%s %s" kdb-claude-review-skill url))))))
+
+;;; ============================================================
 ;;; Worktrees
 ;;; ============================================================
 
@@ -1440,6 +1496,7 @@ or the session ends.  Run again in a watched session to stop."
     ("s" "Region/note/files → session (or new)" kdb-claude-send)
     ("f" "File → session" agent-shell-send-file-to)
     ("v" "Review my changes" kdb-claude-review)
+    ("R" "Review a GitHub PR (URL)" kdb-claude-review-pr)
     ("x" "Code block → project shell / org babel" kdb-claude-run-block)
     ("o" "Last reply → org (C-c C-e exports)" kdb-claude-reply-to-org)]
    ["Sessions"
