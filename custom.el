@@ -6,8 +6,8 @@
  ;; If there is more than one, they won't work right.
  '(package-selected-packages
    '(acme-theme agent-shell angular-mode cape compat corfu cperl-mode
-                csv-mode deadgrep deft dictionary diff-hl eat
-                editorconfig eglot-booster elixir-ts-mode
+                csharp-mode csv-mode deadgrep deft dictionary diff-hl
+                eat editorconfig eglot eglot-booster elixir-ts-mode
                 evil-collection exec-path-from-shell exwm faceup
                 fleury-theme flymake hl-todo less-css-mode lua-mode
                 marginalia markdown-mode markdown-ts-mode memmet-mode
