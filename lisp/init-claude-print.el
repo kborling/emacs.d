@@ -165,7 +165,7 @@ reads, and background prefetches.  Note: `--bare' forces API-key auth
               (seq-filter
                (lambda (b)
                  (and (eq (buffer-local-value 'major-mode b) 'kdb-claude-print-mode)
-                      (file-in-directory-p dir (buffer-local-value 'default-directory b))))
+                      (kdb-claude--path-within-p dir (buffer-local-value 'default-directory b))))
                (buffer-list))))
         (kdb-claude-print--new-buffer))))
 

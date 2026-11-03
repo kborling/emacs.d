@@ -400,4 +400,15 @@ under a path limit that makes LONG's transcripts too long to open."
         (should (eq gone 'buf))))
     (delete-directory archive t)))
 
+(ert-deftest path-within-by-name ()
+  ;; By name, so it holds where `file-equal-p' finds any two folders equal.
+  (should (kdb-claude--path-within-p "/home/me/api/src" "/home/me/api/"))
+  (should (kdb-claude--path-within-p "/home/me/api/" "/home/me/api"))
+  (should-not (kdb-claude--path-within-p "/home/me/" "/home/me/api/"))      ; a parent isn't within
+  (should-not (kdb-claude--path-within-p "/home/me/apiary/" "/home/me/api/"))
+  (let ((system-type 'windows-nt))
+    (should (kdb-claude--path-within-p "/Home/Me/API/" "/home/me/api/")))
+  (let ((system-type 'gnu/linux))
+    (should-not (kdb-claude--path-within-p "/Home/Me/API/" "/home/me/api/"))))
+
 ;;; claude-sync-test.el ends here

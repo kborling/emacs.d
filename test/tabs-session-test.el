@@ -57,7 +57,7 @@
               (should (get-file-buffer file))
               ;; The same folder, however Windows spells it (KEVINB~1 or not).
               (should (= 1 (length resumed)))
-              (should (file-equal-p (car (car resumed)) root))
+              (should (equal (file-truename (car (car resumed))) (file-truename root)))
               (should (equal (cadr (car resumed)) "sess-123"))
               ;; Only once.
               (kdb-tabs-restore)

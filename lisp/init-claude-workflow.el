@@ -169,7 +169,8 @@ project would put a session outside any project in whatever tab you're in."
   "Name of the tab for project ROOT, or nil if there is none."
   (let ((names (mapcar (lambda (tab) (alist-get 'name tab)) (tab-bar-tabs))))
     (seq-find (lambda (name) (member name names))
-              (list (cdr (seq-find (lambda (e) (ignore-errors (file-equal-p (car e) root)))
+              (list (cdr (seq-find (lambda (e) (and (kdb-claude--path-within-p (car e) root)
+                                                    (kdb-claude--path-within-p root (car e))))
                                    (bound-and-true-p tabspaces-project-tab-map)))
                     (file-name-nondirectory (directory-file-name root))))))
 

@@ -295,6 +295,15 @@ converting make the JSONL newer and are picked up next sync."
                           (cdr msg))))))
     (set-file-times org-file mtime)))
 
+(defun kdb-claude--path-within-p (file dir)
+  "Non-nil if FILE is DIR or inside it, by name.
+Ignores case where file names do.  Not `file-equal-p' or
+`file-in-directory-p': with `w32-get-true-file-attributes' off, as on
+Windows here, they find any two folders equal."
+  (string-prefix-p (file-name-as-directory (expand-file-name dir))
+                   (file-name-as-directory (expand-file-name file))
+                   (memq system-type '(windows-nt cygwin darwin))))
+
 (defun kdb-claude--org-keyword (file keyword)
   "Return the value of #+KEYWORD in the header of org FILE."
   (with-temp-buffer
@@ -580,7 +589,7 @@ sessions in temporary folders are left out."
                   (let* ((h (kdb-claude--org-header f))
                          (cwd (cdr (assoc "CWD" h))))
                     (unless (or (equal (kdb-claude--history-source f h) "claude -p")
-                                (and cwd (file-in-directory-p cwd tmp)))
+                                (and cwd (kdb-claude--path-within-p cwd tmp)))
                       (list f h (or (cdr (assoc "UPDATED" h)) (cdr (assoc "DATE" h)) "")))))
                 (directory-files-recursively (kdb-claude--ensure-archive) "\\.org$")))
          (rows (seq-take (sort rows (lambda (a b) (string> (nth 2 a) (nth 2 b))))
