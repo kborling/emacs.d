@@ -161,7 +161,7 @@ under a path limit that makes LONG's transcripts too long to open."
           (should (> (length file) 260))
           (should (zerop (call-process
                           "powershell" nil nil nil "-NoProfile" "-NonInteractive" "-Command"
-                          (format "[IO.Directory]::CreateDirectory('%s') | Out-Null; [IO.File]::WriteAllText('%s', 'hello ñ', [Text.UTF8Encoding]::new($false)); [IO.File]::SetLastWriteTime('%s', [DateTime]'2020-01-02')"
+                          (format "[IO.Directory]::CreateDirectory('%s') | Out-Null; [IO.File]::WriteAllText('%s', 'hello ' + [char]0xF1, [Text.UTF8Encoding]::new($false)); [IO.File]::SetLastWriteTime('%s', [DateTime]'2020-01-02')"
                                   (funcall win dir) (funcall win file) (funcall win file)))))
           (let ((copy (cdr (assoc file (kdb-claude--copy-long-files (list file) out)))))
             (should copy)

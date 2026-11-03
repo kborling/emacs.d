@@ -1114,27 +1114,15 @@ tool calls and results are left out."
     id))
 
 ;;;###autoload
-(defun kdb-claude-open-in-desktop ()
-  "Open this session in Claude Desktop, to carry on there.
-A copy, not a mirror: keep going in one place or the two diverge."
+(defun kdb-claude-remote-control ()
+  "Share this session live with Claude Desktop, claude.ai/code and the app.
+Claude replies with its link; both sides can then send.  claude
+--desktop --resume can't take a session open here, so this is how
+Desktop sees one.  /remote-control off, sent here, stops sharing."
   (interactive)
-  (let ((id (kdb-claude-copy-session-id))
-        (claude (or (executable-find "claude") (user-error "claude not found"))))
-    ;; From the session's folder: Claude keeps sessions per project.
-    (if (eq system-type 'windows-nt)
-        ;; --desktop needs a console, and Emacs' processes have none.
-        (w32-shell-execute "open" claude (format "--desktop --resume %s" id))
-      (let ((out (get-buffer-create " *claude-desktop*"))
-            (process-connection-type nil))
-        (with-current-buffer out (erase-buffer))
-        (make-process :name "claude-desktop" :buffer out :noquery t
-                      :command (list claude "--desktop" "--resume" id)
-                      :sentinel (lambda (proc _)
-                                  (when (and (memq (process-status proc) '(exit signal))
-                                             (not (zerop (process-exit-status proc))))
-                                    (message "Claude Desktop didn't open: %s"
-                                             (with-current-buffer out
-                                               (string-trim (buffer-string)))))))))))
+  (unless (derived-mode-p 'agent-shell-mode)
+    (user-error "Run this in a Claude session buffer"))
+  (kdb-claude--queue-prompt (current-buffer) "/remote-control"))
 
 ;;;###autoload
 (defun kdb-claude-usage ()
@@ -1594,7 +1582,7 @@ or the session ends.  Run again in a watched session to stop."
     ("e" "Artifacts: open their folder" kdb-claude-reveal-artifact)
     ("w" "Watch PR CI, auto-fix (toggle)" kdb-claude-watch-pr)
     ("y" "Copy session id" kdb-claude-copy-session-id)
-    ("D" "Open in Claude Desktop" kdb-claude-open-in-desktop)]
+    ("D" "Share live (Desktop, web, phone)" kdb-claude-remote-control)]
    ["History"
     ("c" "Continue a recent session" kdb-claude-recent)
     ("h" "All sessions" kdb-claude-history)

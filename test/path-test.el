@@ -13,7 +13,10 @@
     (kdb-add-to-path dir)
     (kdb-add-to-path dir)                      ; twice: still once
     (should (equal exec-path (list dir "/usr/bin")))
-    (should (equal (getenv "PATH") (concat dir path-separator "/usr/bin")))
+    ;; Shells get Windows-style backslashes on Windows.
+    (should (equal (getenv "PATH")
+                   (concat (if (eq system-type 'windows-nt) (subst-char-in-string ?/ ?\\ dir) dir)
+                           path-separator "/usr/bin")))
     ;; A folder that isn't there is left out.
     (kdb-add-to-path (expand-file-name "missing" dir))
     (should (= 2 (length exec-path)))

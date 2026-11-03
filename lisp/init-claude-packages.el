@@ -28,7 +28,7 @@
                  kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review
                  kdb-claude-watch-pr kdb-claude-schedule kdb-claude-run-block
                  kdb-claude-reply-to-org kdb-claude-usage kdb-claude-open-artifact
-                 kdb-claude-copy-session-id kdb-claude-open-in-desktop
+                 kdb-claude-copy-session-id kdb-claude-remote-control
                  kdb-claude-set-busy-indicator kdb-claude-start-model
                  kdb-claude-reveal-artifact kdb-reveal-in-file-manager kdb-claude-scratch
                  kdb-claude-review-pr)

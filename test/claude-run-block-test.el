@@ -63,9 +63,16 @@ Done.")
   (with-current-buffer buf (buffer-string)))
 
 (defun test-kill-shells ()
-  (dolist (b (buffer-list))
-    (when (string-match-p "\\`\\*claude \\(bash\\|pwsh\\): " (buffer-name b))
-      (let ((kill-buffer-query-functions nil)) (kill-buffer b)))))
+  "Kill the block shells, and wait for them to end: Windows won't delete
+a folder a shell is still in."
+  (let (procs)
+    (dolist (b (buffer-list))
+      (when (string-match-p "\\`\\*claude \\(bash\\|pwsh\\): " (buffer-name b))
+        (when-let* ((p (get-buffer-process b))) (push p procs))
+        (let ((kill-buffer-query-functions nil)) (kill-buffer b))))
+    (let ((end (+ (float-time) 5)))
+      (while (and (seq-some #'process-live-p procs) (< (float-time) end))
+        (accept-process-output nil 0.05)))))
 
 (ert-deftest run-block-finds-blocks ()
   (with-current-buffer (test-buffer)

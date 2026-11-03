@@ -316,6 +316,11 @@
 
 (ert-deftest reveal-in-file-manager-per-system ()
   (let (calls)
+  ;; Paths as this system expands them: /tmp is c:/tmp on Windows.
+  (let ((plan (expand-file-name "/tmp/plan.docx"))
+        (tmp (file-name-as-directory (expand-file-name "/tmp/")))
+        (interprogram-cut-function nil)
+        (interprogram-paste-function nil))
     (cl-letf (((symbol-function 'w32-shell-execute) (lambda (&rest a) (push (cons 'w32 a) calls)))
               ((symbol-function 'call-process) (lambda (&rest a) (push a calls) 0))
               ((symbol-function 'dbus-call-method) (lambda (&rest _) (error "No file manager"))))
@@ -328,19 +333,19 @@
       (should (string-match-p "\\\\me\\\\My Docs\\\\plan" (nth 3 (car calls))))
       (let ((system-type 'darwin))
         (kdb-reveal-in-file-manager "/tmp/plan.docx"))
-      (should (equal (car calls) '("open" nil 0 nil "-R" "/tmp/plan.docx")))
+      (should (equal (car calls) (list "open" nil 0 nil "-R" plan)))
       ;; Linux with no FileManager1 service: open the folder.
       (let ((system-type 'gnu/linux))
         (kdb-reveal-in-file-manager "/tmp/plan.docx"))
-      (should (equal (car calls) '("xdg-open" nil 0 nil "/tmp/")))
-      (should (equal (current-kill 0) "/tmp/plan.docx"))
+      (should (equal (car calls) (list "xdg-open" nil 0 nil tmp)))
+      (should (equal (current-kill 0) plan))
       ;; A folder is opened, not selected in its parent.
       (let ((system-type 'darwin))
         (kdb-reveal-in-file-manager "/tmp/"))
-      (should (equal (car calls) '("open" nil 0 nil "/tmp/")))
+      (should (equal (car calls) (list "open" nil 0 nil tmp)))
       (let ((system-type 'windows-nt))
         (kdb-reveal-in-file-manager "/tmp/"))
-      (should (string-prefix-p "\"" (nth 3 (car calls)))))))
+      (should (string-prefix-p "\"" (nth 3 (car calls))))))))
 
 (ert-deftest artifact-reveal-offers-folders ()
   (let ((buf (test-session))
@@ -416,40 +421,22 @@
     (should (buffer-local-value 'kdb-claude--artifacts buf))   ; still listed
     (should-not msgs)))
 
-(ert-deftest session-id-copied-and-opened-in-desktop ()
-  (let ((buf (test-session)) spawned shown
+(ert-deftest session-id-copied-and-shared-live ()
+  (let ((buf (test-session)) queued
         (interprogram-cut-function nil)          ; the kill ring only, no clipboard
-        (interprogram-paste-function nil)
-        ;; A real process that has exited with an error, for the sentinel.
-        (failed (make-process :name "fails" :noquery t
-                              :command (list (expand-file-name invocation-name invocation-directory)
-                                             "-Q" "--batch" "--eval" "(kill-emacs 1)"))))
-    (while (process-live-p failed) (accept-process-output failed 0.05))
+        (interprogram-paste-function nil))
     (with-current-buffer buf
       (setq major-mode 'agent-shell-mode)
       (cl-letf (((symbol-function 'agent-shell-session-id) (lambda (&rest _) "sess-42"))
-                ((symbol-function 'executable-find) (lambda (_) "/bin/claude"))
-                ((symbol-function 'make-process)
-                 (lambda (&rest args) (setq spawned (cons default-directory args)) 'proc))
-                ((symbol-function 'message) (lambda (fmt &rest args) (push (apply #'format fmt args) shown))))
+                ((symbol-function 'kdb-claude--queue-prompt)
+                 (lambda (b text) (setq queued (list b text)))))
         (should (equal (kdb-claude-copy-session-id) "sess-42"))
         (should (equal (current-kill 0) "sess-42"))
-        (kdb-claude-open-in-desktop)
-        ;; From the session's folder, where Claude keeps it.
-        (should (equal (car spawned) test-dir))
-        (should (equal (plist-get (cdr spawned) :command)
-                       '("/bin/claude" "--desktop" "--resume" "sess-42")))
-        ;; It failing says why.
-        (with-current-buffer " *claude-desktop*" (insert "no desktop app\n"))
-        (funcall (plist-get (cdr spawned) :sentinel) failed "exited abnormally")
-        (should (equal (car shown) "Claude Desktop didn't open: no desktop app"))
-        ;; Windows: through the shell, which gives it the console it needs.
-        (let ((system-type 'windows-nt) opened)
-          (cl-letf (((symbol-function 'w32-shell-execute)
-                     (lambda (&rest args) (setq opened (cons default-directory args)))))
-            (kdb-claude-open-in-desktop))
-          (should (equal opened (list test-dir "open" "/bin/claude" "--desktop --resume sess-42"))))))
+        ;; Shared live: queued, so a turn in progress isn't cut into.
+        (kdb-claude-remote-control)
+        (should (equal queued (list buf "/remote-control")))))
     (with-temp-buffer
-      (should-error (kdb-claude-copy-session-id) :type 'user-error))))
+      (should-error (kdb-claude-copy-session-id) :type 'user-error)
+      (should-error (kdb-claude-remote-control) :type 'user-error))))
 
 ;;; claude-artifacts-test.el ends here
