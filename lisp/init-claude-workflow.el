@@ -312,8 +312,8 @@ In the results, mark findings with m and send them to a session with S."
 
 (defvar agent-shell-display-action)
 
-(defvar kdb-claude-review-skill "code-review"
-  "The skill a PR review runs, as /NAME URL.  Set it in personal.el.")
+(defvar kdb-claude-review-skill "app-dev-code-review"
+  "The skill a PR review runs, as /NAME, in the PR's worktree.")
 
 (defvar kdb-claude-review-repos nil
   "Alist of GitHub repo name -> local checkout, for PR reviews.
@@ -325,6 +325,41 @@ are found among known projects.  Set it in personal.el.")
   (when (string-match "\\`https?://[^/]+/[^/]+/\\([^/#?]+\\)\\(?:/pull/\\([0-9]+\\)\\)?" url)
     (list (string-remove-suffix ".git" (match-string 1 url)) (match-string 2 url))))
 
+(defun kdb-claude--run-steps (dir steps done)
+  "Run STEPS, each a command list, one after another in DIR; then call DONE.
+In the background, so a slow fetch doesn't freeze Emacs.  A failing step
+stops there and shows its output."
+  (if (null steps)
+      (funcall done)
+    (let ((default-directory dir)
+          (out (get-buffer-create " *kdb-claude-steps*")))
+      (with-current-buffer out (erase-buffer))
+      (make-process
+       :name "kdb-claude-step" :buffer out :command (car steps) :noquery t
+       :sentinel (lambda (proc _)
+                   (unless (process-live-p proc)
+                     (if (zerop (process-exit-status proc))
+                         (kdb-claude--run-steps dir (cdr steps) done)
+                       (message "%s failed: %s" (string-join (car steps) " ")
+                                (with-current-buffer out (string-trim (buffer-string)))))))))))
+
+(defun kdb-claude--pr-worktree (checkout repo number done)
+  "Make worktree REPO-review-NUMBER beside CHECKOUT on the PR's branch.
+Then call DONE with its directory.  CHECKOUT itself is never switched.
+An existing one is checked out again, for the PR's latest commits."
+  (let ((dir (file-name-as-directory
+              (expand-file-name (format "%s-review-%s" repo number)
+                                (file-name-directory (directory-file-name checkout)))))
+        (gh (or (executable-find "gh") (user-error "Needs gh, GitHub's CLI"))))
+    (message "Checking out PR #%s in %s…" number (abbreviate-file-name dir))
+    (kdb-claude--run-steps
+     checkout
+     (unless (file-directory-p dir)
+       (list (list "git" "worktree" "add" "--detach" (directory-file-name dir))))
+     (lambda ()
+       (kdb-claude--run-steps dir (list (list gh "pr" "checkout" number))
+                              (lambda () (funcall done dir)))))))
+
 (defun kdb-claude--repo-checkout (repo)
   "Local checkout of GitHub REPO: configured, a known project, or asked."
   (or (cdr (assoc repo kdb-claude-review-repos))
@@ -335,32 +370,35 @@ are found among known projects.  Set it in personal.el.")
 ;;;###autoload
 (defun kdb-claude-review-pr (url)
   "Review the GitHub pull request at URL with `kdb-claude-review-skill'.
-A new session in the repo's checkout runs /SKILL URL, in its own tab
-named after the PR.  Reviewing the same PR again goes back to that tab.
-Interactively, a GitHub URL just copied is the default."
+Its branch is checked out in a worktree, REPO-review-N beside the repo's
+checkout, and a session there runs /SKILL, in its own tab named after
+the PR.  Reviewing the same PR again goes back to that tab.
+Interactively, a PR URL just copied is the default."
   (interactive
-   (let ((copied (ignore-errors (string-trim (current-kill 0 t)))))
-     (list (read-string (format-prompt "GitHub PR URL"
-                                       (and copied (kdb-claude--pr-url-parts copied) copied))
-                        nil nil (and copied (kdb-claude--pr-url-parts copied) copied)))))
-  (pcase-let* ((`(,repo ,number) (or (kdb-claude--pr-url-parts url)
-                                     (user-error "Not a GitHub URL: %s" url)))
-               (tab (if number (format "PR %s#%s" repo number) (format "review %s" repo))))
+   (let* ((copied (ignore-errors (string-trim (current-kill 0 t))))
+          (copied (and copied (cadr (kdb-claude--pr-url-parts copied)) copied)))
+     (list (read-string (format-prompt "GitHub PR URL" copied) nil nil copied))))
+  (pcase-let* ((`(,repo ,number) (kdb-claude--pr-url-parts url))
+               (tab (format "PR %s#%s" repo number)))
+    (unless number (user-error "Not a GitHub pull request URL: %s" url))
     (if (and (bound-and-true-p tab-bar-mode)
              (member tab (mapcar (lambda (tb) (alist-get 'name tb)) (tab-bar-tabs))))
         (progn (tab-bar-switch-to-tab tab)
                (message "Already reviewing %s here" tab))
-      (let* ((dir (file-name-as-directory (expand-file-name (kdb-claude--repo-checkout repo))))
-             (agent-shell-display-action
-              (if (bound-and-true-p tab-bar-mode)
-                  `((,(lambda (buf _)
-                        (tab-bar-new-tab)
-                        (tab-bar-rename-tab tab)
-                        (delete-other-windows)
-                        (switch-to-buffer buf nil t)
-                        (selected-window))))
-                agent-shell-display-action)))
-        (kdb-claude--start-with dir (format "/%s %s" kdb-claude-review-skill url))))))
+      (kdb-claude--pr-worktree
+       (file-name-as-directory (expand-file-name (kdb-claude--repo-checkout repo)))
+       repo number
+       (lambda (dir)
+         (let ((agent-shell-display-action
+                (if (bound-and-true-p tab-bar-mode)
+                    `((,(lambda (buf _)
+                          (tab-bar-new-tab)
+                          (tab-bar-rename-tab tab)
+                          (delete-other-windows)
+                          (switch-to-buffer buf nil t)
+                          (selected-window))))
+                  agent-shell-display-action)))
+           (kdb-claude--start-with dir (concat "/" kdb-claude-review-skill))))))))
 
 ;;; ============================================================
 ;;; Worktrees

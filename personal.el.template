@@ -14,9 +14,9 @@
 ;; Claude session archive
 ;; (setq kdb-claude-archive-dir "~/.claude-archive")
 ;; (setq kdb-claude-export-directory "~/Downloads/")
-;; PR reviews (C-c l R): the team's review skill, and where each repo is
-;; checked out if its folder isn't named like the repo.
-;; (setq kdb-claude-review-skill "code-review")
+;; PR reviews (C-c l R): the review skill (default app-dev-code-review), and
+;; where each repo is checked out if its folder isn't named like the repo.
+;; (setq kdb-claude-review-skill "app-dev-code-review")
 ;; (setq kdb-claude-review-repos '(("apps" . "C:/src/apps/") ("data" . "C:/src/data/")))
 
 ;; SQL connections (Azure)

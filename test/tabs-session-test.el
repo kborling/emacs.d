@@ -212,32 +212,69 @@
   (should (equal (kdb-claude--pr-url-parts "https://github.com/acme/apps.git") '("apps" nil)))
   (should-not (kdb-claude--pr-url-parts "not a url")))
 
-(ert-deftest pr-review-opens-its-own-tab ()
+(defun test-wait (pred)
+  (let ((end (+ (float-time) 10)))
+    (while (and (not (funcall pred)) (< (float-time) end))
+      (accept-process-output nil 0.05))))
+
+(ert-deftest pr-review-in-its-own-worktree-and-tab ()
   (test-with-tabs
-   (let* ((apps (test-project "apps"))
-          (kdb-claude-review-skill "team-review")
-          (kdb-claude-review-repos nil)
+   (let* ((root (file-name-as-directory (make-temp-file "prs" t)))
+          (apps (file-name-as-directory (expand-file-name "apps" root)))
+          (bin (expand-file-name "bin/" root))
+          (gh (expand-file-name "gh" bin))
+          (exec-path (cons bin exec-path))
+          (kdb-claude-review-skill "app-dev-code-review")
+          (kdb-claude-review-repos (list (cons "apps" apps)))
           started)
-     (cl-letf (((symbol-function 'project-known-project-roots) (lambda () (list "/x/data/" apps)))
-               ((symbol-function 'kdb-claude--start-with)
+     ;; A repo, and a gh whose `pr checkout N' puts the worktree on pr-N.
+     (make-directory apps t)
+     (make-directory bin t)
+     (let ((default-directory apps))
+       (dolist (args '(("init" "-q" "-b" "main") ("-c" "user.name=t" "-c" "user.email=t@t"
+                                                  "commit" "-q" "--allow-empty" "-m" "x")))
+         (apply #'call-process "git" nil nil nil args)))
+     (with-temp-file gh
+       (insert "#!/bin/sh\n[ \"$3\" = 9 ] && { echo 'no pull request 9' >&2; exit 1; }\n"
+               "[ \"$1 $2\" = \"pr checkout\" ] && exec git checkout -q -B \"pr-$3\"\nexit 1\n"))
+     (set-file-modes gh #o755)
+     (cl-letf (((symbol-function 'kdb-claude--start-with)
                 (lambda (dir prompt &rest _)
                   (setq started (list dir prompt))
-                  ;; As agent-shell shows a new session.
                   (let ((buf (test-claude-buffer dir "r")))
                     (funcall (caar agent-shell-display-action) buf nil)
                     buf))))
        (kdb-claude-review-pr "https://github.com/acme/apps/pull/123")
-       (should (equal started (list apps "/team-review https://github.com/acme/apps/pull/123")))
-       (should (equal (alist-get 'name (tab-bar--current-tab)) "PR apps#123"))
-       (should (one-window-p t))
-       ;; The same PR again: back to its tab, nothing new started.
-       (tab-bar-switch-to-tab (car (test-tab-names)))
+       (test-wait (lambda () started))
+       (let ((wt (file-name-as-directory (expand-file-name "apps-review-123" root))))
+         ;; The session runs in the worktree, on the PR's branch, with the bare skill.
+         (should (equal started (list wt "/app-dev-code-review")))
+         (should (equal (car (kdb-claude--git-lines wt "branch" "--show-current")) "pr-123"))
+         (should (equal (car (kdb-claude--git-lines apps "branch" "--show-current")) "main"))
+         (should (equal (alist-get 'name (tab-bar--current-tab)) "PR apps#123"))
+         ;; Again with its tab closed: the worktree is reused.
+         (tab-bar-close-tab)
+         (setq started nil)
+         (kdb-claude-review-pr "https://github.com/acme/apps/pull/123/files")
+         (test-wait (lambda () started))
+         (should (equal (car started) wt)))
+       ;; gh failing: its error is shown, no session starts.
        (setq started nil)
-       (kdb-claude-review-pr "https://github.com/acme/apps/pull/123/files")
+       (let (shown)
+         (cl-letf (((symbol-function 'message)
+                    (lambda (fmt &rest args) (push (apply #'format fmt args) shown))))
+           (kdb-claude-review-pr "https://github.com/acme/apps/pull/9")
+           (test-wait (lambda () (seq-some (lambda (m) (string-match-p "no pull request 9" m)) shown))))
+         (should (seq-some (lambda (m) (string-match-p "failed: no pull request 9" m)) shown)))
        (should-not started)
-       (should (equal (alist-get 'name (tab-bar--current-tab)) "PR apps#123"))
-       ;; A checkout named differently comes from the configured list.
-       (let ((kdb-claude-review-repos '(("data" . "/src/data-repo/"))))
-         (should (equal (kdb-claude--repo-checkout "data") "/src/data-repo/")))))))
+       ;; Not a PR link.
+       (should-error (kdb-claude-review-pr "https://github.com/acme/apps") :type 'user-error))
+     (delete-directory root t))))
+
+(ert-deftest pr-review-checkout-found-by-repo-name ()
+  (let ((kdb-claude-review-repos '(("data" . "/src/data-repo/"))))
+    (should (equal (kdb-claude--repo-checkout "data") "/src/data-repo/")))
+  (cl-letf (((symbol-function 'project-known-project-roots) (lambda () '("/x/data/" "/y/apps/"))))
+    (should (equal (kdb-claude--repo-checkout "apps") "/y/apps/"))))
 
 ;;; tabs-session-test.el ends here
