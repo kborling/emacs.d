@@ -554,7 +554,7 @@ Empty input shows everything."
 (defun kdb-claude--goto-session (buf)
   "Go to session BUF: its window, in whichever tab shows it, or show it."
   (if-let* ((tab (and (bound-and-true-p tab-bar-mode) (tab-bar-get-buffer-tab buf))))
-      (progn (tab-bar-select-tab (1+ (tab-bar--tab-index tab)))
+      (progn (tab-bar-select-tab (1+ (alist-get 'index tab)))
              (select-window (get-buffer-window buf)))
     (pop-to-buffer buf (bound-and-true-p agent-shell-display-action))))
 

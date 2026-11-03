@@ -179,6 +179,37 @@
      (should (eq (kdb-claude--display-in-project-tab a nil) win))
      (should (one-window-p t)))))
 
+(ert-deftest session-in-a-custom-named-tab-is-gone-to ()
+  ;; A PR review's session lives in "PR apps#1"; showing it again (agent-shell
+  ;; does when it's ready) goes there, not to a second tab.
+  (test-with-tabs
+   (let* ((wt (test-project "apps-review-1"))
+          (r (test-claude-buffer wt "r")))
+     (tab-bar-new-tab)
+     (tab-bar-rename-tab "PR apps#1")
+     (switch-to-buffer r)
+     (tab-bar-switch-to-tab (car (test-tab-names)))
+     (let ((count (length (test-tab-names)))
+           (win (kdb-claude--display-in-project-tab r nil)))
+       (should (= count (length (test-tab-names))))
+       (should (equal (alist-get 'name (tab-bar--current-tab)) "PR apps#1"))
+       (should (eq (window-buffer win) r))
+       ;; From its own tab too.
+       (should (eq (kdb-claude--display-in-project-tab r nil) win))
+       (should (= count (length (test-tab-names))))))))
+
+(ert-deftest goto-session-in-another-tab ()
+  ;; Picking an open session in C-c l c goes to the tab showing it.
+  (test-with-tabs
+   (let ((r (test-claude-buffer (test-project "api") "r")))
+     (tab-bar-new-tab)
+     (tab-bar-rename-tab "api")
+     (switch-to-buffer r)
+     (tab-bar-switch-to-tab (car (test-tab-names)))
+     (kdb-claude--goto-session r)
+     (should (equal (alist-get 'name (tab-bar--current-tab)) "api"))
+     (should (eq (window-buffer (selected-window)) r)))))
+
 (ert-deftest send-to-a-session-or-a-new-one ()
   (require 'agent-shell)
   (let* ((api (test-project "api"))

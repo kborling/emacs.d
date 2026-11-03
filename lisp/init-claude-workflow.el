@@ -182,31 +182,35 @@ project would put a session outside any project in whatever tab you're in."
 ;;;###autoload
 (defun kdb-claude--display-in-project-tab (buffer _alist)
   "Show Claude session BUFFER in its project's tab, split beside the others.
-With no tab for the project yet, open one named after it.  Returns the
-window, for `agent-shell-display-action'."
+With no tab for the project yet, open one named after it.  A tab already
+showing BUFFER, whatever its name (a PR review's, say), is gone to
+instead.  Returns the window, for `agent-shell-display-action'."
   (when (bound-and-true-p tab-bar-mode)
-    (let* ((root (kdb-claude--project-dir (buffer-local-value 'default-directory buffer)))
-           (tab (kdb-claude--project-tab root)))
-      (if (not tab)
-          (progn
-            (tab-bar-new-tab)
-            (tab-bar-rename-tab
-             (if (bound-and-true-p tabspaces-mode)
-                 (tabspaces-generate-descriptive-tab-name (abbreviate-file-name root)
-                                                          (tabspaces--list-tabspaces))
-               (file-name-nondirectory (directory-file-name root))))
-            (delete-other-windows)
-            (switch-to-buffer buffer nil t)
-            (selected-window))
-        (tab-bar-switch-to-tab tab)
-        (or (get-buffer-window buffer)
-            (let* ((beside (or (car (last (kdb-claude--session-windows))) (selected-window)))
-                   (win (or (ignore-errors
-                              (split-window beside nil (if (>= (window-total-width beside) 160) 'right 'below)))
-                            beside)))
-              (set-window-buffer win buffer)
-              (unless (eq win beside) (balance-windows (window-parent win)))
-              win))))))
+    (if-let* ((shown (tab-bar-get-buffer-tab buffer)))
+        (progn (tab-bar-select-tab (1+ (alist-get 'index shown)))
+               (get-buffer-window buffer))
+      (let* ((root (kdb-claude--project-dir (buffer-local-value 'default-directory buffer)))
+             (tab (kdb-claude--project-tab root)))
+        (if (not tab)
+            (progn
+              (tab-bar-new-tab)
+              (tab-bar-rename-tab
+               (if (bound-and-true-p tabspaces-mode)
+                   (tabspaces-generate-descriptive-tab-name (abbreviate-file-name root)
+                                                            (tabspaces--list-tabspaces))
+                 (file-name-nondirectory (directory-file-name root))))
+              (delete-other-windows)
+              (switch-to-buffer buffer nil t)
+              (selected-window))
+          (tab-bar-switch-to-tab tab)
+          (or (get-buffer-window buffer)
+              (let* ((beside (or (car (last (kdb-claude--session-windows))) (selected-window)))
+                     (win (or (ignore-errors
+                                (split-window beside nil (if (>= (window-total-width beside) 160) 'right 'below)))
+                              beside)))
+                (set-window-buffer win buffer)
+                (unless (eq win beside) (balance-windows (window-parent win)))
+                win)))))))
 
 (defun kdb-claude--show-in-background (buf)
   "Show session BUF in its project tab, then come back to this tab and window."
