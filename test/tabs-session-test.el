@@ -55,7 +55,10 @@
                 (should (member "notes" names))
                 (should (member "claude" names)))
               (should (get-file-buffer file))
-              (should (equal resumed (list (list root "sess-123"))))
+              ;; The same folder, however Windows spells it (KEVINB~1 or not).
+              (should (= 1 (length resumed)))
+              (should (file-equal-p (car (car resumed)) root))
+              (should (equal (cadr (car resumed)) "sess-123"))
               ;; Only once.
               (kdb-tabs-restore)
               (should (= 1 (length resumed)))))
@@ -234,10 +237,18 @@
        (dolist (args '(("init" "-q" "-b" "main") ("-c" "user.name=t" "-c" "user.email=t@t"
                                                   "commit" "-q" "--allow-empty" "-m" "x")))
          (apply #'call-process "git" nil nil nil args)))
-     (with-temp-file gh
-       (insert "#!/bin/sh\n[ \"$3\" = 9 ] && { echo 'no pull request 9' >&2; exit 1; }\n"
-               "[ \"$1 $2\" = \"pr checkout\" ] && exec git checkout -q -B \"pr-$3\"\nexit 1\n"))
-     (set-file-modes gh #o755)
+     ;; A script Windows runs is a .bat; it's found before the real gh.exe.
+     (if (eq system-type 'windows-nt)
+         (with-temp-file (concat gh ".bat")
+           (insert "@echo off\r\n"
+                   "if \"%3\"==\"9\" (\r\n  echo no pull request 9 1>&2\r\n  exit /b 1\r\n)\r\n"
+                   "if not \"%1 %2\"==\"pr checkout\" exit /b 1\r\n"
+                   "git checkout -q -B pr-%3\r\n"))
+       (with-temp-file gh
+         (insert "#!/bin/sh\n[ \"$3\" = 9 ] && { echo 'no pull request 9' >&2; exit 1; }\n"
+                 "[ \"$1 $2\" = \"pr checkout\" ] && exec git checkout -q -B \"pr-$3\"\nexit 1\n"))
+       (set-file-modes gh #o755))
+     (should (string-prefix-p (expand-file-name "gh" bin) (executable-find "gh")))
      (cl-letf (((symbol-function 'kdb-claude--start-with)
                 (lambda (dir prompt &rest _)
                   (setq started (list dir prompt))

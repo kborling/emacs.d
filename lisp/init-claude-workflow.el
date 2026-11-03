@@ -153,11 +153,15 @@ The region, Dired files or org entry at point become its first input."
 (declare-function tabspaces--list-tabspaces "tabspaces")
 (declare-function tabspaces-generate-descriptive-tab-name "tabspaces")
 
-(defvar tabspaces-project-fallback-to-tab)
+(defvar project-find-functions)
+(declare-function project-try-vc "project")
 
 (defun kdb-claude--project-dir (dir)
-  "DIR's project root, or DIR outside any project."
-  (if-let* ((project (let ((tabspaces-project-fallback-to-tab nil)) (project-current nil dir))))
+  "DIR's project root, or DIR outside any project.
+Only DIR itself decides: tabspaces' fallback to the current tab's
+project would put a session outside any project in whatever tab you're in."
+  (if-let* ((project (let ((project-find-functions (list #'project-try-vc)))
+                       (project-current nil dir))))
       (project-root project)
     dir))
 
