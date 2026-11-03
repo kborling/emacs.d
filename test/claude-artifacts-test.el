@@ -442,7 +442,13 @@
         ;; It failing says why.
         (with-current-buffer " *claude-desktop*" (insert "no desktop app\n"))
         (funcall (plist-get (cdr spawned) :sentinel) failed "exited abnormally")
-        (should (equal (car shown) "Claude Desktop didn't open: no desktop app"))))
+        (should (equal (car shown) "Claude Desktop didn't open: no desktop app"))
+        ;; Windows: through the shell, which gives it the console it needs.
+        (let ((system-type 'windows-nt) opened)
+          (cl-letf (((symbol-function 'w32-shell-execute)
+                     (lambda (&rest args) (setq opened (cons default-directory args)))))
+            (kdb-claude-open-in-desktop))
+          (should (equal opened (list test-dir "open" "/bin/claude" "--desktop --resume sess-42"))))))
     (with-temp-buffer
       (should-error (kdb-claude-copy-session-id) :type 'user-error))))
 

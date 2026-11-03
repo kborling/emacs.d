@@ -1118,19 +1118,23 @@ tool calls and results are left out."
   "Open this session in Claude Desktop, to carry on there.
 A copy, not a mirror: keep going in one place or the two diverge."
   (interactive)
-  (let* ((id (kdb-claude-copy-session-id))
-         (claude (or (executable-find "claude") (user-error "claude not found")))
-         (out (get-buffer-create " *claude-desktop*"))
-         (process-connection-type nil))
-    (with-current-buffer out (erase-buffer))
+  (let ((id (kdb-claude-copy-session-id))
+        (claude (or (executable-find "claude") (user-error "claude not found"))))
     ;; From the session's folder: Claude keeps sessions per project.
-    (make-process :name "claude-desktop" :buffer out :noquery t
-                  :command (list claude "--desktop" "--resume" id)
-                  :sentinel (lambda (proc _)
-                              (when (and (memq (process-status proc) '(exit signal))
-                                         (not (zerop (process-exit-status proc))))
-                                (message "Claude Desktop didn't open: %s"
-                                         (with-current-buffer out (string-trim (buffer-string)))))))))
+    (if (eq system-type 'windows-nt)
+        ;; --desktop needs a console, and Emacs' processes have none.
+        (w32-shell-execute "open" claude (format "--desktop --resume %s" id))
+      (let ((out (get-buffer-create " *claude-desktop*"))
+            (process-connection-type nil))
+        (with-current-buffer out (erase-buffer))
+        (make-process :name "claude-desktop" :buffer out :noquery t
+                      :command (list claude "--desktop" "--resume" id)
+                      :sentinel (lambda (proc _)
+                                  (when (and (memq (process-status proc) '(exit signal))
+                                             (not (zerop (process-exit-status proc))))
+                                    (message "Claude Desktop didn't open: %s"
+                                             (with-current-buffer out
+                                               (string-trim (buffer-string)))))))))))
 
 ;;;###autoload
 (defun kdb-claude-usage ()
