@@ -286,11 +286,17 @@ instead.  Returns the window, for `agent-shell-display-action'."
         (tab-bar-select-tab (1+ from)))
       (when (window-live-p win) (select-window win)))))
 
+(defvar kdb-claude--opened)
+(defvar kdb-claude--id)
+
 ;;;###autoload
 (defun kdb-claude--close-session-window ()
-  "When a session is killed, close its split rather than show another buffer."
+  "When a session is killed, close its split rather than show another buffer.
+What it opened (`kdb-claude-show', `kdb-claude-run') is closed too."
   (add-hook 'kill-buffer-hook
             (lambda ()
+              (when kdb-claude--id
+                (ignore-errors (kdb-claude-cleanup kdb-claude--id)))
               (dolist (w (get-buffer-window-list (current-buffer) nil))
                 (ignore-errors (delete-window w))))
             nil t))
@@ -1409,6 +1415,119 @@ Delivered when TO's current turn is over.  Meant for `emacsclient --eval'."
     (kdb-claude--queue-prompt
      buf (if from (format "[Message from Claude session %s]\n%s" from text) text))
     (format "Queued for %s" to)))
+
+;;; What a session shows and runs, kept in its own tab
+
+(defvar-local kdb-claude--opened nil
+  "Buffers this session opened or started, to close in `kdb-claude-cleanup'.")
+
+(defun kdb-claude--in-session-tab (id fn &optional no-show)
+  "Call FN with session ID's buffer, its window selected, in its tab.
+Then come back to the tab and window you were in, so nothing moves
+under you.  A session not shown anywhere is put in its project's tab
+first, unless NO-SHOW.  Return FN's value."
+  (let* ((buf (or (kdb-claude--session-buffer id) (user-error "No Claude session %s" id)))
+         (from-tab (and (bound-and-true-p tab-bar-mode) (tab-bar--current-tab-index)))
+         (from-win (selected-window)))
+    (unless (or no-show (get-buffer-window buf t))
+      (kdb-claude--show-in-background buf))
+    (unwind-protect
+        (progn
+          (when-let* ((tab (and from-tab (tab-bar-get-buffer-tab buf))))
+            (tab-bar-select-tab (1+ (alist-get 'index tab))))
+          (if-let* ((win (get-buffer-window buf)))
+              (with-selected-window win (funcall fn buf))
+            (funcall fn buf)))
+      (when (and from-tab (not (eql from-tab (tab-bar--current-tab-index))))
+        (tab-bar-select-tab (1+ from-tab)))
+      (when (window-live-p from-win) (select-window from-win)))))
+
+(defun kdb-claude--session-window (buf id)
+  "The window beside session BUF where session ID shows things.
+The one it used before in this tab, else a new split, marked as its own."
+  (or (seq-find (lambda (w) (equal (window-parameter w 'kdb-claude-session) id)) (window-list))
+      (let* ((beside (or (get-buffer-window buf) (selected-window)))
+             (win (or (ignore-errors
+                        (split-window beside nil (if (>= (window-total-width beside) 160) 'right 'below)))
+                      (user-error "No room in the session's tab to show it"))))
+        (set-window-parameter win 'kdb-claude-session id)
+        win)))
+
+;;;###autoload
+(defun kdb-claude-show (id what &optional line)
+  "Show WHAT, a file or a buffer name, beside session ID in its tab, at LINE.
+Your tab, window and cursor stay where they are.  Meant for
+`emacsclient --eval'; `kdb-claude-cleanup' closes what this opened."
+  (kdb-claude--in-session-tab
+   id (lambda (buf)
+        (let* ((shown (or (get-buffer what)
+                          (let ((file (expand-file-name what (buffer-local-value 'default-directory buf))))
+                            (unless (file-exists-p file) (user-error "No file or buffer %s" what))
+                            (or (get-file-buffer file)
+                                (let ((new (find-file-noselect file)))
+                                  (with-current-buffer buf (push new kdb-claude--opened))
+                                  new)))))
+               (win (kdb-claude--session-window buf id)))
+          (set-window-buffer win shown)
+          (when line
+            (with-selected-window win
+              (goto-char (point-min))
+              (forward-line (1- line))
+              (recenter)))
+          (format "Showing %s beside session %s" (buffer-name shown) id)))))
+
+;;;###autoload
+(defun kdb-claude-run (id command &optional dir)
+  "Run COMMAND in the project shell of session ID, shown in its tab.
+DIR defaults to the session's directory; the shell is pwsh on Windows,
+bash elsewhere, and is kept, so cd and variables carry over.  Return the
+shell's buffer name, for `kdb-claude-output'.  Meant for `emacsclient --eval'."
+  (kdb-claude--in-session-tab
+   id (lambda (buf)
+        (let* ((dir (file-name-as-directory
+                     (expand-file-name (or dir (buffer-local-value 'default-directory buf)))))
+               (kind (if (eq system-type 'windows-nt) 'pwsh 'bash))
+               (had (seq-find (lambda (b) (and (equal (buffer-local-value 'kdb-claude--shell-for b)
+                                                      (cons kind dir))
+                                               (get-buffer-process b)))
+                              (buffer-list)))
+               (shell (kdb-claude--block-to-shell kind command dir t)))
+          (unless had (with-current-buffer buf (push shell kdb-claude--opened)))
+          (buffer-name shell)))))
+
+;;;###autoload
+(defun kdb-claude-output (buffer &optional lines)
+  "The last LINES (default 40) lines of BUFFER, such as a `kdb-claude-run' shell."
+  (with-current-buffer (or (get-buffer buffer) (user-error "No buffer %s" buffer))
+    (save-excursion
+      (goto-char (point-max))
+      (forward-line (- (or lines 40)))
+      (buffer-substring-no-properties (point) (point-max)))))
+
+;;;###autoload
+(defun kdb-claude-cleanup (id)
+  "Close what session ID opened: its windows, and buffers it opened or started.
+Buffers with unsaved changes are kept.  Also run when the session ends."
+  (let* ((buf (or (kdb-claude--session-buffer id) (user-error "No Claude session %s" id)))
+         (opened (seq-filter #'buffer-live-p (buffer-local-value 'kdb-claude--opened buf)))
+         (kept (seq-filter (lambda (b) (and (buffer-file-name b) (buffer-modified-p b))) opened))
+         (gone (seq-difference opened kept))
+         (windows 0))
+    ;; Windows first, in the session's tab: a buffer killed while its tab
+    ;; is hidden leaves tab-bar's "Old buffer" placeholder behind.
+    (kdb-claude--in-session-tab
+     id (lambda (_)
+          (dolist (w (window-list))
+            (when (and (or (equal (window-parameter w 'kdb-claude-session) id)
+                           (memq (window-buffer w) gone))
+                       (ignore-errors (delete-window w) t))
+              (cl-incf windows))))
+     t)
+    (let ((kill-buffer-query-functions nil))
+      (mapc #'kill-buffer gone))
+    (with-current-buffer buf (setq kdb-claude--opened nil))
+    (format "Closed %d window(s), %d buffer(s)%s" windows (length gone)
+            (if kept (format "; kept unsaved %s" (mapconcat #'buffer-name kept ", ")) ""))))
 
 (defun kdb-claude--report-back (from id)
   "Instructions for session ID to report back to session FROM."

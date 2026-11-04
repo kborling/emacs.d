@@ -16,6 +16,7 @@
 (autoload 'kdb-claude-agent-shell-subdir "init-claude")
 (dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify
               kdb-claude--start-with kdb-claude-spawn kdb-claude-message
+              kdb-claude-show kdb-claude-run kdb-claude-output kdb-claude-cleanup
               kdb-claude--tag-client kdb-claude--render-markdown
               kdb-claude--track-artifacts kdb-claude--track-emacs-session
               kdb-claude--header-symbol-fonts kdb-claude--tab-name-waiting

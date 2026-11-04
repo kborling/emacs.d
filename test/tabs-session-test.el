@@ -319,4 +319,54 @@
   (cl-letf (((symbol-function 'project-known-project-roots) (lambda () '("/x/data/" "/y/apps/"))))
     (should (equal (kdb-claude--repo-checkout "apps") "/y/apps/"))))
 
+(ert-deftest session-shows-and-runs-in-its-own-tab-then-cleans-up ()
+  (test-with-tabs
+   (let* ((api (test-project "api"))
+          (notes (expand-file-name "notes.txt" api))
+          (mine (expand-file-name "mine.txt" api))
+          (s (test-claude-buffer api "s")))
+     (with-temp-file notes (insert "one\ntwo\nthree\n"))
+     (with-temp-file mine (insert "my file\n"))
+     (with-current-buffer s (setq kdb-claude--id "api-1"))
+     (kdb-claude--display-in-project-tab s nil)           ; the session's tab, "api"
+     (tab-bar-switch-to-tab (car (test-tab-names)))       ; you, elsewhere
+     (let ((here (selected-window))
+           (mine-buf (find-file-noselect mine)))          ; already open, yours
+       ;; Show: in the session's tab; you stay put.
+       (should (string-match-p "Showing notes.txt" (kdb-claude-show "api-1" "notes.txt" 2)))
+       (kdb-claude-show "api-1" mine)
+       (should (eq (selected-window) here))
+       (should-not (equal (alist-get 'name (tab-bar--current-tab)) "api"))
+       (tab-bar-switch-to-tab "api")
+       (should (= 2 (length (window-list))))               ; one split, reused
+       (should (get-buffer-window mine-buf))
+       (tab-bar-switch-to-tab (car (test-tab-names)))
+       ;; Run: in the project shell, in the session's tab; output readable.
+       (let ((shell (kdb-claude-run "api-1" "echo hi-from-claude")))
+         (let ((end (+ (float-time) 10)))
+           (while (and (not (string-match-p "\\(^\\|\\$ \\)hi-from-claude$" (kdb-claude-output shell)))
+                       (< (float-time) end))
+             (accept-process-output nil 0.05)))
+         (should (string-match-p "\\(^\\|\\$ \\)hi-from-claude$" (kdb-claude-output shell)))
+         (should (eq (selected-window) here))
+         ;; Cleanup: what it opened goes; your file stays, and so does unsaved work.
+         (with-current-buffer (get-file-buffer notes) (insert "edit"))
+         (should (string-match-p "kept unsaved notes.txt" (kdb-claude-cleanup "api-1")))
+         (should-not (get-buffer shell))
+         (should (buffer-live-p mine-buf))
+         (tab-bar-switch-to-tab "api")
+         (should (one-window-p t))
+         (with-current-buffer (get-file-buffer notes) (set-buffer-modified-p nil)))
+       ;; Kept for its unsaved changes, notes.txt is yours now.
+       (kill-buffer (get-file-buffer notes))
+       ;; The session ending cleans up too.
+       (let ((later (expand-file-name "later.txt" api)))
+         (with-temp-file later (insert "x\n"))
+         (kdb-claude-show "api-1" later)
+         (should (= 2 (length (window-list))))
+         (kill-buffer s)
+         (should-not (get-file-buffer later))
+         (should (one-window-p t)))
+       (kill-buffer mine-buf)))))
+
 ;;; tabs-session-test.el ends here
