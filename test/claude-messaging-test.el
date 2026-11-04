@@ -180,4 +180,33 @@
     (should (equal (test-env-value env "ANTHROPIC_AUTH_TOKEN") "ollama"))
     (kill-buffer buf)))
 
+(ert-deftest queue-edit-in-place ()
+  (require 'agent-shell)
+  (let ((shell (generate-new-buffer "*Claude queue test*")))
+    (with-current-buffer shell
+      (setq-local agent-shell--state (list (cons :pending-prompts (list "first" "second\nlines" "third")))))
+    (cl-letf (((symbol-function 'agent-shell--shell-buffer) (lambda (&rest _) shell))
+              ((symbol-function 'completing-read)
+               (lambda (_p table &rest _) (nth 1 (all-completions "" table)))))   ; "2: second lines"
+      ;; Changed in place, others kept in order.
+      (cl-letf (((symbol-function 'agent-shell--prompt-queue-read)
+                 (lambda (&key initial) (should (equal initial "second\nlines")) "second, better")))
+        (kdb-claude-queue-edit))
+      (should (equal (map-elt (buffer-local-value 'agent-shell--state shell) :pending-prompts)
+                     '("first" "second, better" "third")))
+      ;; Emptied: taken out.
+      (cl-letf (((symbol-function 'agent-shell--prompt-queue-read) (lambda (&rest _) "  ")))
+        (kdb-claude-queue-edit))
+      (should (equal (map-elt (buffer-local-value 'agent-shell--state shell) :pending-prompts)
+                     '("first" "third")))
+      ;; Sent while you were editing: not put back.
+      (cl-letf (((symbol-function 'agent-shell--prompt-queue-read)
+                 (lambda (&rest _)
+                   (with-current-buffer shell (map-put! agent-shell--state :pending-prompts nil))
+                   "late")))
+        (should-error (kdb-claude-queue-edit) :type 'user-error))
+      (should-not (map-elt (buffer-local-value 'agent-shell--state shell) :pending-prompts))
+      (should-error (kdb-claude-queue-edit) :type 'user-error))     ; nothing queued
+    (kill-buffer shell)))
+
 ;;; claude-messaging-test.el ends here

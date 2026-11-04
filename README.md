@@ -32,6 +32,7 @@ lisp/
   init-claude-workflow.el     Claude transient over agent-shell: start, send, sessions
   init-claude.el              Claude session archive, history, search, Desktop import
   init-claude-print.el        Fallback Claude backend over pipes (M-x kdb-claude-print)
+  init-local-models.el        Local coding models: Ollama, gptel chat, minuet completion
   init-org.el                 Org mode, capture templates, org-modern
   init-vc.el                  VC/Git transient menu (Magit-like, built-in VC)
   init-exwm.el                EXWM window manager (X11 only)

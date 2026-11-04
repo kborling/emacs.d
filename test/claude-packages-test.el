@@ -11,6 +11,10 @@
   (should (eq (key-binding (kbd "C-c l")) 'kdb-claude))
   (should (eq (key-binding (kbd "C-c '")) 'kdb-claude-answer))
   (should (fboundp 'kdb-claude-review-pr))
+  (should (fboundp 'kdb-claude-queue-edit))
+  (should (fboundp 'agent-shell-prompt-queue-remove))         ; on the menu before a session
+  (should (featurep 'init-local-models))
+  (should (eq (key-binding (kbd "C-c a s")) 'kdb-local-models-setup))
   (should (assoc "\\*\\(claude blocks\\|claude \\(bash\\|pwsh\\): .*\\|Org-Babel Error Output\\)\\*"
                  display-buffer-alist))
   (require 'agent-shell)

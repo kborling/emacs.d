@@ -15,7 +15,11 @@
 (declare-function agent-shell-anthropic-start-claude-code "agent-shell-anthropic")
 (declare-function agent-shell-insert "agent-shell")
 (declare-function agent-shell-send-dwim "agent-shell")
+(defvar agent-shell--state)
 (declare-function agent-shell--start "agent-shell")
+(declare-function agent-shell--prompt-queue-read "agent-shell")
+(declare-function agent-shell--prompt-queue-migrate "agent-shell")
+(declare-function agent-shell--shell-buffer "agent-shell")
 (declare-function agent-shell--context "agent-shell")
 (declare-function agent-shell--display-buffer "agent-shell")
 (declare-function agent-shell--insert-to-shell-buffer "agent-shell")
@@ -271,6 +275,44 @@ entry at point are carried over, as with `kdb-claude-new'."
   (let ((dir (file-name-as-directory (expand-file-name "claude-scratch" temporary-file-directory))))
     (make-directory dir t)
     (kdb-claude--new-in dir)))
+
+;;;###autoload
+(defun kdb-claude-queue-edit ()
+  "Change a message waiting in this project's session queue, in place.
+Emptied, it is taken out of the queue."
+  (interactive)
+  (require 'agent-shell)
+  (with-current-buffer (agent-shell--shell-buffer :no-create t)
+    (agent-shell--prompt-queue-migrate)
+    (let* ((pending (or (map-elt agent-shell--state :pending-prompts)
+                        (user-error "Nothing is queued")))
+           (choices (seq-map-indexed
+                     (lambda (p i)
+                       (cons (format "%d: %s" (1+ i)
+                                     (truncate-string-to-width
+                                      (replace-regexp-in-string "\n" " " (substring-no-properties p))
+                                      70 nil nil "…"))
+                             i))
+                     pending))
+           (i (cdr (assoc (completing-read
+                           "Edit queued: "
+                           (lambda (s p a)
+                             (if (eq a 'metadata)
+                                 '(metadata (display-sort-function . identity)
+                                            (cycle-sort-function . identity))
+                               (complete-with-action a choices s p)))
+                           nil t)
+                          choices)))
+           (text (string-trim (agent-shell--prompt-queue-read :initial (nth i pending))))
+           ;; Read again: the turn may have ended, and the queue gone out, meanwhile.
+           (now (map-elt agent-shell--state :pending-prompts)))
+      (unless (equal (nth i now) (nth i pending))
+        (user-error "That message has already been sent"))
+      (map-put! agent-shell--state :pending-prompts
+                (if (string-empty-p text)
+                    (append (seq-take now i) (seq-drop now (1+ i)))
+                  (append (seq-take now i) (list text) (seq-drop now (1+ i)))))
+      (message (if (string-empty-p text) "Removed from the queue" "Queued message changed")))))
 
 ;;;###autoload
 (defun kdb-claude-send ()
@@ -1591,6 +1633,11 @@ or the session ends.  Run again in a watched session to stop."
     ("w" "Watch PR CI, auto-fix (toggle)" kdb-claude-watch-pr)
     ("y" "Copy session id" kdb-claude-copy-session-id)
     ("D" "Share live / stop (web, apps)" kdb-claude-remote-control)]
+   ["Queue (this project's session)"
+    ("q" "Add a message" agent-shell-prompt-queue)
+    ("E" "Edit a queued one" kdb-claude-queue-edit)
+    ("k" "Remove queued" agent-shell-prompt-queue-remove)
+    ("g" "Send queued now" agent-shell-prompt-queue-resume)]
    ["History"
     ("c" "Continue a recent session" kdb-claude-recent)
     ("h" "All sessions" kdb-claude-history)

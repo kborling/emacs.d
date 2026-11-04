@@ -28,7 +28,7 @@
                  kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review
                  kdb-claude-watch-pr kdb-claude-schedule kdb-claude-run-block
                  kdb-claude-reply-to-org kdb-claude-usage kdb-claude-open-artifact
-                 kdb-claude-copy-session-id kdb-claude-remote-control
+                 kdb-claude-copy-session-id kdb-claude-remote-control kdb-claude-queue-edit
                  kdb-claude-set-busy-indicator kdb-claude-start-model
                  kdb-claude-reveal-artifact kdb-reveal-in-file-manager kdb-claude-scratch
                  kdb-claude-review-pr)
@@ -39,6 +39,9 @@
                  kdb-claude-setup)))
   (dolist (fn (cdr spec))
     (autoload fn (car spec) nil t)))
+;; agent-shell's queue commands, on the C-c l menu before any session runs.
+(dolist (fn '(agent-shell-prompt-queue agent-shell-prompt-queue-remove agent-shell-prompt-queue-resume))
+  (autoload fn "agent-shell" nil t))
 
 (use-package agent-shell
   :ensure t
