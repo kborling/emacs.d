@@ -398,4 +398,41 @@ a folder a shell is still in."
     (should (eq (kdb-claude--block-shell-kind "console") 'bash))
     (should (eq (kdb-claude--block-shell-kind "powershell") 'pwsh))))   ; named, it's PowerShell
 
+(ert-deftest run-block-picks-the-block-you-are-on ()
+  ;; Anywhere on a block, its label included, takes that block, not the
+  ;; one before it.
+  (require 'agent-shell-markdown)
+  (with-current-buffer (generate-new-buffer "*rendered*")
+    (insert (agent-shell-markdown-convert
+             "First:\n\n```elisp\n(+ 1 1)\n```\n\nSecond:\n\n```elisp\n(+ 2 2)\n(+ 3 3)\n```\n\nDone.\n"))
+    (let (picked)
+      (cl-letf (((symbol-function 'kdb-claude--block-to-org)
+                 (lambda (_lang code &rest _) (setq picked code))))
+        (cl-flet ((at (move) (goto-char (point-min)) (funcall move) (kdb-claude-run-block) picked))
+          (should (equal (at (lambda () (search-forward "elisp ⧉" nil t 2) (beginning-of-line)))
+                         "(+ 2 2)\n(+ 3 3)"))                     ; on its label
+          (should (equal (at (lambda () (search-forward "elisp ⧉" nil t 2) (forward-line 1)))
+                         "(+ 2 2)\n(+ 3 3)"))                     ; the blank line under it
+          (should (equal (at (lambda () (search-forward "(+ 2")))
+                         "(+ 2 2)\n(+ 3 3)"))                     ; in it
+          (should (equal (at (lambda () (search-forward "(+ 3 3)")))
+                         "(+ 2 2)\n(+ 3 3)"))                     ; its end
+          (should (equal (at (lambda () (search-forward "(+ 1")))
+                         "(+ 1 1)"))                               ; the first one
+          (should (equal (at (lambda () (search-forward "Done")))
+                         "(+ 2 2)\n(+ 3 3)")))))                  ; after: the last before
+    (kill-buffer))
+  ;; Raw fences: the opening fence is the block's.
+  (with-temp-buffer
+    (insert "```elisp\n(a)\n```\n```elisp\n(b)\n```\n")
+    (let (picked)
+      (cl-letf (((symbol-function 'kdb-claude--block-to-org)
+                 (lambda (_lang code &rest _) (setq picked code))))
+        (goto-char (point-min)) (forward-line 3)        ; second opening fence
+        (kdb-claude-run-block)
+        (should (equal picked "(b)"))
+        (goto-char (point-min)) (forward-line 2)        ; first closing fence
+        (kdb-claude-run-block)
+        (should (equal picked "(a)"))))))
+
 ;;; claude-run-block-test.el ends here

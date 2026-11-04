@@ -1064,6 +1064,18 @@ for the next block, so cd and variables carry over."
       (when run (comint-send-input)))
     buf))
 
+(defun kdb-claude--block-start (block)
+  "Where BLOCK (LANG BODY-BEG BODY-END) starts, its label or fence included.
+In agent-shell, its \"LANG ⧉\" label and the blank line under it;
+elsewhere its opening fence.  Point there means this block, not the
+one before it."
+  (if (equal (car block) "org")
+      (nth 1 block)                             ; already its #+begin_src line
+    (save-excursion
+      (goto-char (nth 1 block))
+      (forward-line (if (get-text-property (point) 'agent-shell-markdown-source-block-body) -2 -1))
+      (point))))
+
 ;;;###autoload
 (defun kdb-claude-run-block (&optional run)
   "Take the code block at point, or the last one before it, to run it.
@@ -1075,7 +1087,7 @@ then \\[org-ctrl-c-ctrl-c].  With RUN, run it right away and stay here."
   (pcase-let* ((pos (point))
                (blocks (kdb-claude--code-blocks))
                (`(,lang ,beg ,end)
-                (or (seq-find (lambda (b) (<= (nth 1 b) pos (nth 2 b))) blocks)
+                (or (seq-find (lambda (b) (<= (kdb-claude--block-start b) pos (nth 2 b))) blocks)
                     (car (last (seq-filter (lambda (b) (<= (nth 2 b) pos)) blocks)))
                     (user-error "No code block at or before point")))
                (code (string-trim-right (buffer-substring-no-properties beg end)))
