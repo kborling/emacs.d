@@ -411,4 +411,38 @@ under a path limit that makes LONG's transcripts too long to open."
   (let ((system-type 'gnu/linux))
     (should-not (kdb-claude--path-within-p "/Home/Me/API/" "/home/me/api/"))))
 
+(ert-deftest history-copy-id-and-open-in-desktop ()
+  (let* ((root (file-name-as-directory (make-temp-file "hist" t)))
+         (code (expand-file-name "s.org" root))
+         (chat (expand-file-name "c.org" root))
+         (interprogram-cut-function nil) (interprogram-paste-function nil)
+         at opened live)
+    (with-temp-file code
+      (insert "#+TITLE: Work\n#+SOURCE: /x/projects/-p/abc-123.jsonl\n#+CWD: " root "\n"))
+    (with-temp-file chat (insert "#+TITLE: A chat\n#+DATE: 2026-01-01 10:00\n"))
+    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () at))
+              ((symbol-function 'kdb-claude--live-sessions) (lambda () live))
+              ((symbol-function 'kdb-claude--open-in-desktop) (lambda (id dir) (setq opened (list id dir)))))
+      (setq at code)
+      (kdb-claude-history-copy-id)
+      (should (equal (current-kill 0) "abc-123"))
+      (kdb-claude-history-open-in-desktop)
+      (should (equal opened (list "abc-123" root)))
+      ;; Open in Emacs: Claude won't take it, so say how to share it instead.
+      (setq live (list (cons "abc-123" (current-buffer))) opened nil)
+      (should-error (kdb-claude-history-open-in-desktop) :type 'user-error)
+      (should-not opened)
+      ;; An imported chat has no id.
+      (setq at chat live nil)
+      (should-error (kdb-claude-history-copy-id) :type 'user-error)
+      (should-error (kdb-claude-history-open-in-desktop) :type 'user-error))
+    ;; On Windows, through the shell, from the session's folder.
+    (let ((system-type 'windows-nt) ran)
+      (cl-letf (((symbol-function 'executable-find) (lambda (_) "C:/bin/claude.exe"))
+                ((symbol-function 'w32-shell-execute)
+                 (lambda (&rest args) (setq ran (cons default-directory args)))))
+        (kdb-claude--open-in-desktop "abc-123" root))
+      (should (equal ran (list root "open" "C:/bin/claude.exe" "--desktop --resume abc-123"))))
+    (delete-directory root t)))
+
 ;;; claude-sync-test.el ends here

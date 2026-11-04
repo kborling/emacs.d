@@ -489,6 +489,8 @@ Reads only the end of the file, unless the last message is longer."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'kdb-claude-history-open)
     (define-key map (kbd "u") #'kdb-claude-history-resume)
+    (define-key map (kbd "w") #'kdb-claude-history-copy-id)
+    (define-key map (kbd "D") #'kdb-claude-history-open-in-desktop)
     (define-key map (kbd "/") #'kdb-claude-history-filter)
     (define-key map (kbd "s") #'kdb-claude-search)
     (define-key map (kbd "A") #'kdb-claude-ask-archive)
@@ -511,7 +513,7 @@ onto a session shows its last message, size, branch and directory.
   (add-hook 'tabulated-list-revert-hook #'kdb-claude--history-refresh nil t)
   (setq-local header-line-format
               (substitute-command-keys
-               "\\<kdb-claude-history-mode-map>\\[kdb-claude-history-open] open  \\[kdb-claude-history-resume] resume  \\[kdb-claude-history-filter] filter  \\[kdb-claude-search] search text  \\[kdb-claude-ask-archive] ask  \\[revert-buffer] refresh")))
+               "\\<kdb-claude-history-mode-map>\\[kdb-claude-history-open] open  \\[kdb-claude-history-resume] resume  \\[kdb-claude-history-copy-id] copy id  \\[kdb-claude-history-open-in-desktop] desktop  \\[kdb-claude-history-filter] filter  \\[kdb-claude-search] search text  \\[kdb-claude-ask-archive] ask  \\[revert-buffer] refresh")))
 
 ;;;###autoload
 (defun kdb-claude-history ()
@@ -550,6 +552,56 @@ Empty input shows everything."
   "Continue the session at point, switching to it if it is already open."
   (interactive)
   (kdb-claude--resume (or (tabulated-list-get-id) (user-error "No session here"))))
+
+(defun kdb-claude--archived-session (file)
+  "(ID . DIRECTORY) of the Claude Code session archived in FILE."
+  (let ((source (kdb-claude--org-keyword file "SOURCE")))
+    (unless source
+      (user-error "Not a Claude Code session (an imported chat has no id)"))
+    (cons (file-name-base source) (kdb-claude--org-keyword file "CWD"))))
+
+(defun kdb-claude-history-copy-id ()
+  "Copy the id of the session at point, for claude --resume and the like."
+  (interactive)
+  (let ((id (car (kdb-claude--archived-session
+                  (or (tabulated-list-get-id) (user-error "No session here"))))))
+    (kill-new id)
+    (message "Copied session id %s" id)))
+
+(defun kdb-claude-history-open-in-desktop ()
+  "Open the session at point in Claude Desktop, to carry on there.
+Not one open in Emacs: Claude won't take a session running elsewhere;
+share that one live from its buffer with C-c l D instead."
+  (interactive)
+  (pcase-let ((`(,id . ,dir) (kdb-claude--archived-session
+                              (or (tabulated-list-get-id) (user-error "No session here")))))
+    (when (assoc id (kdb-claude--live-sessions))
+      (user-error "It's open in Emacs: share it live from there with C-c l D"))
+    (unless (and dir (file-directory-p dir))
+      (user-error "Its folder is gone: %s" (or dir "unknown")))
+    (kdb-claude--open-in-desktop id (file-name-as-directory dir))
+    (message "Opening in Claude Desktop…")))
+
+(declare-function w32-shell-execute "w32fns.c")
+
+(defun kdb-claude--open-in-desktop (id dir)
+  "Run claude --desktop --resume ID in DIR, where Claude keeps the session."
+  (let ((default-directory dir)
+        (claude (or (executable-find "claude") (user-error "claude not found"))))
+    (if (eq system-type 'windows-nt)
+        ;; --desktop needs a console, and Emacs' processes have none.
+        (w32-shell-execute "open" claude (format "--desktop --resume %s" id))
+      (let ((out (get-buffer-create " *claude-desktop*"))
+            (process-connection-type nil))
+        (with-current-buffer out (erase-buffer))
+        (make-process :name "claude-desktop" :buffer out :noquery t
+                      :command (list claude "--desktop" "--resume" id)
+                      :sentinel (lambda (proc _)
+                                  (when (and (memq (process-status proc) '(exit signal))
+                                             (not (zerop (process-exit-status proc))))
+                                    (message "Claude Desktop didn't open: %s"
+                                             (with-current-buffer out
+                                               (string-trim (buffer-string)))))))))))
 
 (defun kdb-claude--goto-session (buf)
   "Go to session BUF: its window, in whichever tab shows it, or show it."
