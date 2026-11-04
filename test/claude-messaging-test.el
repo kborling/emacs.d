@@ -209,4 +209,61 @@
       (should-error (kdb-claude-queue-edit) :type 'user-error))     ; nothing queued
     (kill-buffer shell)))
 
+(defun test-permission (call respond)
+  "A permission request for tool CALL, answered by calling RESPOND with an option id."
+  (list (cons :tool-call call)
+        (cons :options (list '((:kind . "allow_once") (:option . "Allow") (:option-id . "yes"))
+                             '((:kind . "reject_once") (:option . "Reject") (:option-id . "no"))))
+        (cons :respond (or respond #'ignore))))
+
+(ert-deftest answer-panel-reads-at-a-glance ()
+  (let ((buf (generate-new-buffer "Claude Agent @ api")))
+    (with-current-buffer buf (setq default-directory "/tmp/api/"))
+    ;; A command: what it's for, then the command itself.
+    (let ((text (kdb-claude--permission-text
+                 buf (test-permission '((:title . "ls -la src/ && make test")
+                                        (:description . "Run the tests")
+                                        (:command . "ls -la src/ && make test"))
+                                      nil))))
+      (should (string-match-p "\\`api\n\nRun the tests\n\n\\$ ls -la src/ && make test" text)))
+    ;; An edit: the file, and its lines out and in.
+    (let ((text (kdb-claude--permission-text
+                 buf (test-permission '((:title . "Edit") (:raw-input . ((file_path . "/tmp/api/a.el")))
+                                        (:diffs . (((:old . "(foo)") (:new . "(bar)\n(baz)") (:file . "/tmp/api/a.el")))))
+                                      nil))))
+      (should (string-match-p "/tmp/api/a.el\n- (foo)\n\\+ (bar)\n\\+ (baz)" text)))
+    ;; A labeled session shows its name beside the project.
+    (with-current-buffer buf (rename-buffer "Fix flaky test"))
+    (should (string-prefix-p "api  ·  Fix flaky test"
+                             (kdb-claude--permission-text buf (test-permission '((:title . "x")) nil))))
+    (kill-buffer buf)))
+
+(ert-deftest answer-two-in-a-row-then-later ()
+  (require 'agent-shell)
+  (let* ((a (generate-new-buffer "Claude Agent @ a"))
+         (answered nil)
+         (respond (lambda (id) (push id answered)))
+         (kdb-claude--permissions
+          (list (list "r1" a (test-permission '((:title . "one") (:command . "echo 1")) respond))
+                (list "r2" a (test-permission '((:title . "two") (:command . "echo 2")) respond))
+                (list "r3" a (test-permission '((:title . "three") (:command . "echo 3")) respond))))
+         (keys (list ?y ?y ?q))
+         prompts panels)
+    (cl-letf (((symbol-function 'read-multiple-choice)
+               (lambda (prompt _choices &rest _)
+                 (push prompt prompts)
+                 (push (with-current-buffer kdb-claude--permission-panel (buffer-string)) panels)
+                 (should (get-buffer-window kdb-claude--permission-panel))   ; shown while asking
+                 (list (pop keys))))
+              ((symbol-function 'agent-shell-attention-jump) (lambda () (error "Shouldn't jump"))))
+      (kdb-claude-answer))
+    (should (equal answered '("yes" "yes")))
+    (should (equal (reverse prompts) '("Answer (2 more waiting)" "Answer (1 more waiting)" "Answer")))
+    (should (string-match-p "echo 1" (car (last panels))))
+    (should (string-match-p "echo 3" (car panels)))
+    ;; "later" leaves it queued, and the panel goes.
+    (should (equal (mapcar #'car kdb-claude--permissions) '("r3")))
+    (should-not (get-buffer-window kdb-claude--permission-panel))
+    (kill-buffer a)))
+
 ;;; claude-messaging-test.el ends here

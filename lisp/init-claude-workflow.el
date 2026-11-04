@@ -84,16 +84,26 @@ Return nil so agent-shell still shows its inline card."
 (defconst kdb-claude--permission-keys
   '(("allow_once" . ?y) ("allow_always" . ?!) ("reject_once" . ?n) ("reject_always" . ?N)))
 
+(defconst kdb-claude--permission-panel "*Claude permission*")
+
 ;;;###autoload
 (defun kdb-claude-answer ()
   "Answer the oldest permission request from any session, without leaving
-the current buffer, then the next one.  With none pending, jump to the
-next session waiting on you."
+the current buffer, then the next one.  Each is shown in a panel: the
+session, what it wants to do, and the command or the change.  With none
+pending, jump to the next session waiting on you."
   (interactive)
+  (unwind-protect (kdb-claude--answer-next)
+    (when-let* ((win (get-buffer-window kdb-claude--permission-panel)))
+      (quit-window t win))))
+
+(defun kdb-claude--answer-next ()
+  "Answer the oldest pending permission request, then the next."
   (setq kdb-claude--permissions (seq-filter (lambda (e) (buffer-live-p (nth 1 e)))
                                             kdb-claude--permissions))
   (pcase (car kdb-claude--permissions)
-    ('nil (agent-shell-attention-jump))
+    ('nil (unless (get-buffer-window kdb-claude--permission-panel) ; none were waiting
+            (agent-shell-attention-jump)))
     (`(,id ,buf ,perm)
      (let* ((options (seq-filter (lambda (o) (assoc (map-elt o :kind) kdb-claude--permission-keys))
                                  (map-elt perm :options)))
@@ -102,23 +112,73 @@ next session waiting on you."
                                              (map-elt o :option) o))
                                      options)
                              '((?g "go to session") (?q "later"))))
-            (more (1- (length kdb-claude--permissions)))
-            (key (car (read-multiple-choice
-                       (format "%s%s: %s" (buffer-name buf)
-                               (if (> more 0) (format " (+%d waiting)" more) "")
-                               (or (map-elt (map-elt perm :tool-call) :title) "tool"))
-                       (mapcar (lambda (c) (seq-take c 2)) choices))))
-            (opt (nth 2 (assq key choices))))
-       (cond (opt
-              (with-current-buffer buf
-                (funcall (map-elt perm :respond) (map-elt opt :option-id))
-                (when (equal (map-elt opt :kind) "reject_once")
-                  (agent-shell-interrupt t)))
-              (kdb-claude--forget-permission id)
-              (when kdb-claude--permissions (kdb-claude-answer)))
-             ((eq key ?g)
-              (pop-to-buffer buf)
-              (agent-shell-jump-to-latest-permission-button-row)))))))
+            (more (1- (length kdb-claude--permissions))))
+       (kdb-claude--show-permission buf perm)
+       (let* ((key (car (read-multiple-choice
+                         (if (> more 0) (format "Answer (%d more waiting)" more) "Answer")
+                         (mapcar (lambda (c) (seq-take c 2)) choices))))
+              (opt (nth 2 (assq key choices))))
+         (cond (opt
+                (with-current-buffer buf
+                  (funcall (map-elt perm :respond) (map-elt opt :option-id))
+                  (when (equal (map-elt opt :kind) "reject_once")
+                    (agent-shell-interrupt t)))
+                (kdb-claude--forget-permission id)
+                (when kdb-claude--permissions (kdb-claude--answer-next)))
+               ((eq key ?g)
+                (pop-to-buffer buf)
+                (agent-shell-jump-to-latest-permission-button-row))))))))
+
+(defun kdb-claude--permission-text (buf perm)
+  "What session BUF asks to do in permission request PERM, to read at a glance."
+  (let* ((call (map-elt perm :tool-call))
+         (input (map-elt call :raw-input))
+         (project (file-name-nondirectory
+                   (directory-file-name (kdb-claude--project-dir
+                                         (buffer-local-value 'default-directory buf)))))
+         (session (string-remove-prefix "Claude Agent @ " (buffer-name buf)))
+         (command (let ((c (or (map-elt call :command) (map-elt input 'command))))
+                    (and (stringp c) (not (string-empty-p c)) c)))
+         (file (or (map-elt input 'file_path) (map-elt input 'notebook_path)))
+         (lines (lambda (text face prefix)
+                  (let* ((ls (split-string (or text "") "\n"))
+                         (shown (seq-take ls 8)))
+                    (concat (mapconcat (lambda (l) (propertize (concat prefix l) 'face face)) shown "\n")
+                            (if (> (length ls) 8)
+                                (propertize (format "\n%s… %d more lines" prefix (- (length ls) 8)) 'face 'shadow)
+                              ""))))))
+    (concat
+     (propertize project 'face 'bold)
+     (if (equal session project) "" (concat (propertize "  ·  " 'face 'shadow) session))
+     "\n\n"
+     (propertize (or (map-elt call :description) (map-elt input 'description)
+                     (map-elt call :title) "Use a tool")
+                 'face 'font-lock-keyword-face)
+     "\n"
+     (cond (command (concat "\n" (propertize "$ " 'face 'shadow)
+                            (propertize command 'face 'font-lock-string-face) "\n"))
+           ((map-elt call :diffs)
+            (mapconcat (lambda (d)
+                         (concat "\n" (propertize (abbreviate-file-name (or (map-elt d :file) file "")) 'face 'bold)
+                                 "\n" (funcall lines (map-elt d :old) 'diff-removed "- ")
+                                 "\n" (funcall lines (map-elt d :new) 'diff-added "+ ") "\n"))
+                       (seq-take (map-elt call :diffs) 2) ""))
+           (file (concat "\n" (propertize (abbreviate-file-name file) 'face 'bold) "\n"))
+           (t "")))))
+
+(defun kdb-claude--show-permission (buf perm)
+  "Show permission request PERM from session BUF in the panel above the prompt."
+  (with-current-buffer (get-buffer-create kdb-claude--permission-panel)
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (insert (kdb-claude--permission-text buf perm))
+      (goto-char (point-min)))
+    (setq buffer-read-only t)
+    (visual-line-mode 1)
+    (display-buffer (current-buffer)
+                    '((display-buffer-in-side-window)
+                      (side . bottom) (slot . 1)
+                      (window-height . fit-window-to-buffer)))))
 
 (defvar kdb-claude--notification nil
   "Id of the last Windows notification, which must be closed before the next.")
