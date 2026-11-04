@@ -660,41 +660,59 @@ each time a turn starts or ends."
 (defvar agent-shell-attention--pending)
 (declare-function tabspaces--buffer-list "tabspaces")
 (declare-function agent-shell-attention--tab-displays-buffer-p "agent-shell-attention")
+(declare-function agent-shell-attention--pending-entry-permission-p "agent-shell-attention")
 
-(defun kdb-claude--tab-waiting-p (tab index)
-  "Non-nil if a session in TAB, number INDEX from 0, is waiting for you.
-Waiting means what agent-shell-attention counts: a permission request
-or a finished turn."
-  (when-let* (((boundp 'agent-shell-attention--pending))
-              (waiting (seq-filter #'buffer-live-p
-                                   (hash-table-keys agent-shell-attention--pending))))
-    (if (bound-and-true-p tabspaces-mode)
-        (seq-some (lambda (b) (memq b waiting)) (tabspaces--buffer-list nil index))
-      (seq-some (lambda (b) (if (eq (car tab) 'current-tab)
-                                (get-buffer-window b)
-                              (agent-shell-attention--tab-displays-buffer-p tab b)))
-                waiting))))
+(defun kdb-claude--waiting ()
+  "Sessions waiting for you, as (BUFFER . KIND), newest first.
+KIND is `input' for a permission request, `done' for a finished reply."
+  (when (boundp 'agent-shell-attention--pending)
+    (let (waiting)
+      (maphash (lambda (b entry)
+                 (when (buffer-live-p b)
+                   (push (cons b (if (agent-shell-attention--pending-entry-permission-p entry)
+                                     'input
+                                   'done))
+                         waiting)))
+               agent-shell-attention--pending)
+      waiting)))
+
+(defun kdb-claude--tab-waiting (tab index)
+  "What a session in TAB, number INDEX from 0, waits for: `input', `done' or nil.
+A request for input outranks a finished reply."
+  (when-let* ((waiting (kdb-claude--waiting))
+              (kinds (mapcar #'cdr
+                             (seq-filter
+                              (lambda (w)
+                                (if (bound-and-true-p tabspaces-mode)
+                                    (memq (car w) (tabspaces--buffer-list nil index))
+                                  (if (eq (car tab) 'current-tab)
+                                      (get-buffer-window (car w))
+                                    (agent-shell-attention--tab-displays-buffer-p tab (car w)))))
+                              waiting))))
+    (if (memq 'input kinds) 'input 'done)))
 
 ;;;###autoload
 (defun kdb-claude--tab-name-waiting (name tab i)
-  "NAME with a marker when TAB, number I, has a session waiting for you.
+  "NAME marked when TAB, number I, has a session waiting for you.
+● in the warning color: it needs your input (a permission request).
+✓ in the success color: it has finished a reply.
 For `tab-bar-tab-name-format-functions'."
-  (if (kdb-claude--tab-waiting-p tab (1- i))
-      (concat (propertize "● " 'face '(:inherit warning :weight bold)) name)
-    name))
+  (pcase (kdb-claude--tab-waiting tab (1- i))
+    ('input (concat (propertize "● " 'face '(:inherit warning :weight bold)) name))
+    ('done (concat (propertize "✓ " 'face '(:inherit success :weight bold)) name))
+    (_ name)))
 
 (defvar kdb-claude--waiting-drawn nil
-  "The sessions waiting for you when the tab bar was last redrawn.")
+  "The sessions waiting for you, and on what, when the tab bar was last drawn.")
 
 ;;;###autoload
 (defun kdb-claude--redraw-tabs (&rest _)
-  "Redraw the tab bar when which sessions wait for you has changed.
+  "Redraw the tab bar when which sessions wait for you, or on what, changed.
 It can change with the count unchanged.  Runs every second, so it
 redraws only on a change."
-  (let ((waiting (and (boundp 'agent-shell-attention--pending)
-                      (seq-filter #'buffer-live-p (hash-table-keys agent-shell-attention--pending)))))
+  (let ((waiting (kdb-claude--waiting)))
     (unless (and (= (length waiting) (length kdb-claude--waiting-drawn))
-                 (seq-every-p (lambda (b) (memq b kdb-claude--waiting-drawn)) waiting))
+                 (seq-every-p (lambda (w) (member w kdb-claude--waiting-drawn)) waiting))
       (setq kdb-claude--waiting-drawn waiting)
       (force-mode-line-update t))))
 

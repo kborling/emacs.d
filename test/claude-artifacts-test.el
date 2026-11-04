@@ -300,16 +300,28 @@
                                           "x" tab (1+ (seq-position (frame-parameter nil 'tabs) tab)))))
                                       (frame-parameter nil 'tabs))))
             (should (equal (names) '("x" "x")))     ; nobody waiting
-            (puthash a 'end_turn agent-shell-attention--pending)
-            (should (equal (names) '("● x" "x")))   ; the hidden tab with a
+            ;; Entries as agent-shell-attention stores them.
+            (puthash a (cons "Turn complete" 1.0) agent-shell-attention--pending)
+            (should (equal (names) '("✓ x" "x")))   ; the hidden tab with a: a reply
             (remhash a agent-shell-attention--pending)
-            (puthash b 'permission agent-shell-attention--pending)
-            (should (equal (names) '("x" "● x")))   ; now the current tab
+            (puthash b (list :label "Permission: Bash ls" :timestamp 1.0 :request-id 7)
+                     agent-shell-attention--pending)
+            (should (equal (names) '("x" "● x")))   ; now the current tab: wants input
+            ;; Each its own color.
+            (should (eq (plist-get (get-text-property 0 'face (kdb-claude--tab-name-waiting
+                                                                  "x" (nth 1 (frame-parameter nil 'tabs)) 2))
+                                   :inherit)
+                        'warning))
+            ;; Input outranks a reply in the same tab.
+            (puthash a (cons "Turn complete" 1.0) agent-shell-attention--pending)
+            (cl-letf (((symbol-function 'tabspaces--buffer-list) (lambda (&rest _) (list a b))))
+              (let ((tabspaces-mode t))
+                (should (equal (names) '("● x" "● x")))))
             ;; With tabspaces, each tab's buffers come from it, hidden or not.
             (cl-letf (((symbol-function 'tabspaces--buffer-list)
                        (lambda (_frame index) (list (if (= index 0) a b)))))
               (let ((tabspaces-mode t))
-                (should (equal (names) '("x" "● x")))))))
+                (should (equal (names) '("✓ x" "● x")))))))
       (ignore-errors (tab-bar-close-other-tabs))
       (tab-bar-mode -1)
       (kill-buffer a) (kill-buffer b))))
@@ -377,6 +389,7 @@
       (should (= made 1)))))
 
 (ert-deftest tabs-redrawn-only-when-waiting-changes ()
+  (require 'agent-shell-attention)
   (let ((agent-shell-attention--pending (make-hash-table :test #'eq))
         (kdb-claude--waiting-drawn nil)
         (a (generate-new-buffer "a")) (b (generate-new-buffer "b"))
@@ -390,7 +403,12 @@
       (remhash a agent-shell-attention--pending)   ; same count, another session
       (puthash b t agent-shell-attention--pending)
       (kdb-claude--redraw-tabs)
-      (should (= redraws 2)))
+      (should (= redraws 2))
+      ;; The same session, from a reply to wanting input: its mark changes.
+      (puthash b (list :label "Permission: Edit" :timestamp 2.0 :request-id 3)
+               agent-shell-attention--pending)
+      (kdb-claude--redraw-tabs)
+      (should (= redraws 3)))
     (kill-buffer a) (kill-buffer b)))
 
 (ert-deftest heartbeat-rate-is-set ()
