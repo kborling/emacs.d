@@ -17,6 +17,7 @@
 (declare-function agent-shell-send-dwim "agent-shell")
 (defvar agent-shell--state)
 (declare-function agent-shell--start "agent-shell")
+(declare-function kdb-claude--goto-session "init-claude")
 (declare-function agent-shell--prompt-queue-read "agent-shell")
 (declare-function agent-shell--prompt-queue-migrate "agent-shell")
 (declare-function agent-shell--shell-buffer "agent-shell")
@@ -126,7 +127,7 @@ pending, jump to the next session waiting on you."
                 (kdb-claude--forget-permission id)
                 (when kdb-claude--permissions (kdb-claude--answer-next)))
                ((eq key ?g)
-                (pop-to-buffer buf)
+                (kdb-claude--goto-session buf)   ; in its tab, if it has one
                 (agent-shell-jump-to-latest-permission-button-row))))))))
 
 (defun kdb-claude--permission-text (buf perm)
@@ -723,7 +724,7 @@ each time a turn starts or ends."
 (declare-function agent-shell-attention--pending-entry-permission-p "agent-shell-attention")
 
 (defun kdb-claude--waiting ()
-  "Sessions waiting for you, as (BUFFER . KIND), newest first.
+  "Sessions waiting for you, as (BUFFER . KIND).
 KIND is `input' for a permission request, `done' for a finished reply."
   (when (boundp 'agent-shell-attention--pending)
     (let (waiting)

@@ -264,6 +264,13 @@
     ;; "later" leaves it queued, and the panel goes.
     (should (equal (mapcar #'car kdb-claude--permissions) '("r3")))
     (should-not (get-buffer-window kdb-claude--permission-panel))
+    ;; g: to the session, by way of its tab.
+    (let (went)
+      (cl-letf (((symbol-function 'read-multiple-choice) (lambda (&rest _) (list ?g)))
+                ((symbol-function 'kdb-claude--goto-session) (lambda (b) (setq went b)))
+                ((symbol-function 'agent-shell-jump-to-latest-permission-button-row) #'ignore))
+        (kdb-claude-answer))
+      (should (eq went a)))
     (kill-buffer a)))
 
 ;;; claude-messaging-test.el ends here
