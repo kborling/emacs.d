@@ -1003,13 +1003,9 @@ Elsewhere, raw fenced blocks."
             (push (list "org" beg (min (1+ (point)) (point-max))) blocks)))))
     (sort blocks (lambda (a b) (< (nth 1 a) (nth 1 b))))))
 
-;; Markdown fence languages -> org babel languages.  Blocks that don't
-;; name a shell run in this machine's: pwsh on Windows, bash elsewhere.
-(defconst kdb-claude--babel-langs
-  (let ((sh (if (eq system-type 'windows-nt) "powershell" "bash")))
-    `(("" . ,sh) ("shell" . ,sh) ("console" . ,sh)
-      ("sh" . "bash") ("zsh" . "bash")
-      ("elisp" . "emacs-lisp") ("pwsh" . "powershell") ("ps1" . "powershell") ("ps" . "powershell"))))
+;; Markdown fence languages -> org babel languages, where they differ.
+;; Shell blocks never get here: they run in a project shell.
+(defconst kdb-claude--babel-langs '(("elisp" . "emacs-lisp")))
 
 (declare-function org-escape-code-in-string "org-src")
 (defvar explicit-shell-file-name)
@@ -1018,11 +1014,12 @@ Elsewhere, raw fenced blocks."
 
 (defun kdb-claude--block-shell-kind (lang)
   "The shell, bash or pwsh, that runs a block in LANG, or nil if none does.
-Blocks naming no shell run in this machine's: pwsh on Windows, bash elsewhere."
+Blocks naming no shell run in bash (Git Bash on Windows, which works
+better in Emacs than PowerShell), or pwsh where there's no bash."
   (pcase lang
     ((or "powershell" "pwsh" "ps1" "ps") 'pwsh)
     ((or "bash" "sh" "zsh") 'bash)
-    ((or "" "shell" "console") (if (eq system-type 'windows-nt) 'pwsh 'bash))))
+    ((or "" "shell" "console") (if (kdb-claude--bash) 'bash 'pwsh))))
 
 (defvar-local kdb-claude--shell-for nil
   "(KIND . DIR) of the project shell this buffer is.")
@@ -1071,7 +1068,7 @@ for the next block, so cd and variables carry over."
 (defun kdb-claude-run-block (&optional run)
   "Take the code block at point, or the last one before it, to run it.
 Shell blocks go to the prompt of this project's shell in the bottom panel
-\(pwsh on Windows, bash elsewhere, or as the block names), to edit, then
+\(bash, Git Bash on Windows, or as the block names), to edit, then
 RET.  Others are appended to *claude blocks* as an org src block, to edit,
 then \\[org-ctrl-c-ctrl-c].  With RUN, run it right away and stay here."
   (interactive)

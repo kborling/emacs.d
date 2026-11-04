@@ -136,9 +136,9 @@ a folder a shell is still in."
     (delete-directory root t)))
 
 (ert-deftest run-block-plain-block-is-machine-shell ()
-  ;; A block naming no language runs in this machine's shell.
-  (should (eq (kdb-claude--block-shell-kind "") (if (eq system-type 'windows-nt) 'pwsh 'bash)))
-  (unless (eq system-type 'windows-nt)            ; the body is a bash heredoc
+  ;; A block naming no language runs in bash (Git Bash on Windows).
+  (should (eq (kdb-claude--block-shell-kind "") (if (kdb-claude--bash) 'bash 'pwsh)))
+  (when (kdb-claude--bash)                        ; the body is a bash heredoc
     (test-kill-shells)
     (let* ((buf (test-buffer))
            (dir (buffer-local-value 'default-directory buf)))
@@ -175,7 +175,7 @@ a folder a shell is still in."
   (test-kill-shells))
 
 (ert-deftest run-block-shell-names-map-per-machine ()
-  (let ((sh (if (eq system-type 'windows-nt) 'pwsh 'bash)))
+  (let ((sh (if (kdb-claude--bash) 'bash 'pwsh)))
     (dolist (case `(("" . ,sh) ("console" . ,sh) ("shell" . ,sh) ("sh" . bash) ("bash" . bash)
                     ("zsh" . bash) ("pwsh" . pwsh) ("powershell" . pwsh) ("ps1" . pwsh)
                     ("elisp" . nil) ("python" . nil) ("org" . nil)))
@@ -390,5 +390,12 @@ a folder a shell is still in."
   (with-current-buffer (test-buffer)
     (goto-char (point-min))
     (should-error (kdb-claude-run-block) :type 'user-error)))
+
+(ert-deftest run-block-plain-goes-to-pwsh-only-without-bash ()
+  (cl-letf (((symbol-function 'kdb-claude--bash) (lambda () nil)))
+    (should (eq (kdb-claude--block-shell-kind "") 'pwsh)))
+  (cl-letf (((symbol-function 'kdb-claude--bash) (lambda () "C:/Program Files/Git/bin/bash.exe")))
+    (should (eq (kdb-claude--block-shell-kind "console") 'bash))
+    (should (eq (kdb-claude--block-shell-kind "powershell") 'pwsh))))   ; named, it's PowerShell
 
 ;;; claude-run-block-test.el ends here
