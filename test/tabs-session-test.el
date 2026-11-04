@@ -344,10 +344,10 @@
        ;; Run: in the project shell, in the session's tab; output readable.
        (let ((shell (kdb-claude-run "api-1" "echo hi-from-claude")))
          (let ((end (+ (float-time) 10)))
-           (while (and (not (string-match-p "\\(^\\|\\$ \\)hi-from-claude$" (kdb-claude-output shell)))
+           (while (and (not (string-match-p "\\(^\\|[$>] \\)hi-from-claude\r?$" (kdb-claude-output shell)))
                        (< (float-time) end))
              (accept-process-output nil 0.05)))
-         (should (string-match-p "\\(^\\|\\$ \\)hi-from-claude$" (kdb-claude-output shell)))
+         (should (string-match-p "\\(^\\|[$>] \\)hi-from-claude\r?$" (kdb-claude-output shell)))
          (should (eq (selected-window) here))
          ;; Cleanup: what it opened goes; your file stays, and so does unsaved work.
          (with-current-buffer (get-file-buffer notes) (insert "edit"))
@@ -368,5 +368,12 @@
          (should-not (get-file-buffer later))
          (should (one-window-p t)))
        (kill-buffer mine-buf)))))
+
+(ert-deftest bash-is-never-wsl ()
+  ;; On Windows, System32\bash.exe starts WSL, not Git Bash.
+  (cl-letf (((symbol-function 'executable-find) (lambda (_) "C:\\Windows\\System32\\bash.exe")))
+    (should-not (kdb-claude--bash)))
+  (cl-letf (((symbol-function 'executable-find) (lambda (_) "C:/Program Files/Git/bin/bash.exe")))
+    (should (equal (kdb-claude--bash) "C:/Program Files/Git/bin/bash.exe"))))
 
 ;;; tabs-session-test.el ends here

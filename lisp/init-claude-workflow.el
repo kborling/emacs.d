@@ -1028,6 +1028,12 @@ Blocks naming no shell run in this machine's: pwsh on Windows, bash elsewhere."
   "(KIND . DIR) of the project shell this buffer is.")
 (put 'kdb-claude--shell-for 'permanent-local t)
 
+(defun kdb-claude--bash ()
+  "Bash's path, or nil.  Not Windows' System32\\bash.exe: that one runs WSL."
+  (when-let* ((bash (executable-find "bash")))
+    (unless (string-match-p "/system32/" (downcase (subst-char-in-string ?\\ ?/ bash)))
+      bash)))
+
 (defun kdb-claude--block-shell (kind dir)
   "DIR's shell of KIND, started if need be and shown in the bottom panel."
   (let ((buf (or (seq-find (lambda (b) (equal (buffer-local-value 'kdb-claude--shell-for b)
@@ -1042,7 +1048,7 @@ Blocks naming no shell run in this machine's: pwsh on Windows, bash elsewhere."
       (let ((explicit-shell-file-name
              (or (pcase kind
                    ('pwsh (or (executable-find "pwsh") (executable-find "powershell")))
-                   ('bash (executable-find "bash")))
+                   ('bash (kdb-claude--bash)))
                  (user-error "No %s on this machine" kind))))
         (save-window-excursion (shell buf))))
     (display-buffer buf)
@@ -1477,16 +1483,21 @@ Your tab, window and cursor stay where they are.  Meant for
           (format "Showing %s beside session %s" (buffer-name shown) id)))))
 
 ;;;###autoload
-(defun kdb-claude-run (id command &optional dir)
+(defun kdb-claude-run (id command &optional dir shell)
   "Run COMMAND in the project shell of session ID, shown in its tab.
-DIR defaults to the session's directory; the shell is pwsh on Windows,
-bash elsewhere, and is kept, so cd and variables carry over.  Return the
-shell's buffer name, for `kdb-claude-output'.  Meant for `emacsclient --eval'."
+DIR defaults to the session's directory.  SHELL is \"bash\" or \"pwsh\";
+by default bash (Git Bash on Windows, as Claude's own Bash tool uses),
+else pwsh.  The shell is kept, so cd and variables carry over.  Return
+the shell's buffer name, for `kdb-claude-output'.  Meant for
+`emacsclient --eval'."
   (kdb-claude--in-session-tab
    id (lambda (buf)
         (let* ((dir (file-name-as-directory
                      (expand-file-name (or dir (buffer-local-value 'default-directory buf)))))
-               (kind (if (eq system-type 'windows-nt) 'pwsh 'bash))
+               (kind (pcase shell
+                       ("pwsh" 'pwsh)
+                       ("bash" 'bash)
+                       (_ (if (kdb-claude--bash) 'bash 'pwsh))))
                (had (seq-find (lambda (b) (and (equal (buffer-local-value 'kdb-claude--shell-for b)
                                                       (cons kind dir))
                                                (get-buffer-process b)))
