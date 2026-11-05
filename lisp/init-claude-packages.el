@@ -17,6 +17,7 @@
 (dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify
               kdb-claude--start-with kdb-claude-spawn kdb-claude-message
               kdb-claude-show kdb-claude-run kdb-claude-output kdb-claude-cleanup
+              kdb-claude--rename-keeps-tab
               kdb-claude--tag-client kdb-claude--render-markdown
               kdb-claude--track-artifacts kdb-claude--track-emacs-session
               kdb-claude--header-symbol-fonts kdb-claude--tab-name-waiting
@@ -87,6 +88,7 @@
   (setq agent-shell-busy-indicator-frames #'kdb-claude--busy-frames)
   (advice-add 'agent-shell--busy-indicator-frame :filter-return #'kdb-claude--steady-busy-frame)
   (advice-add 'agent-shell-heartbeat-make :filter-args #'kdb-claude--heartbeat-rate)
+  (advice-add 'rename-buffer :around #'kdb-claude--rename-keeps-tab)
   (advice-add 'agent-shell--fetch-agent-icon :before-until #'kdb-claude--logo-icon)
   (dolist (fn '(agent-shell--make-header-model agent-shell--header-model-refresh-frame))
     (advice-add fn :filter-return #'kdb-claude--logo-header))

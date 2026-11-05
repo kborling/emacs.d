@@ -896,6 +896,31 @@ And name it after its title once it has one, to tell it from others."
                    (kdb-claude--note-emacs-session id)
                    (kdb-claude--name-session buf))))))
 
+(defun kdb-claude--rename-in-tab-states (old new)
+  "Rename buffer OLD to NEW in the saved layouts of tabs you aren't in.
+They name their buffers, so a session renamed while its tab is hidden
+can't be found there, and showing it again opens a second tab."
+  (cl-labels ((walk (tree)
+                (when (consp tree)
+                  (when (and (eq (car tree) 'buffer) (equal (car-safe (cdr tree)) old))
+                    (setcar (cdr tree) new))
+                  (walk (car tree))
+                  (walk (cdr tree)))))
+    (dolist (frame (frame-list))
+      (dolist (tab (funcall tab-bar-tabs-function frame))
+        (unless (eq (car tab) 'current-tab)
+          (walk (alist-get 'ws tab)))))))
+
+;;;###autoload
+(defun kdb-claude--rename-keeps-tab (rename &rest args)
+  "Around `rename-buffer': a renamed session stays findable in its tab."
+  (let ((old (buffer-name)))
+    (prog1 (apply rename args)
+      (when (and (derived-mode-p 'agent-shell-mode)
+                 (bound-and-true-p tab-bar-mode)
+                 (not (equal old (buffer-name))))
+        (kdb-claude--rename-in-tab-states old (buffer-name))))))
+
 (defvar-local kdb-claude--auto-name nil
   "(BASE . NAME): the name `kdb-claude--name-session' last gave this buffer.")
 (put 'kdb-claude--auto-name 'permanent-local t)

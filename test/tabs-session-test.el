@@ -426,4 +426,32 @@
        (let ((kill-buffer-query-functions nil)) (kill-buffer shell)))
      (kill-buffer a) (kill-buffer b))))
 
+(ert-deftest renamed-while-hidden-still-found-in-its-tab ()
+  ;; A review's session, titled while you're in another tab, then shown
+  ;; again (a reply, C-c ' g, C-c l c): back to its tab, not a second one.
+  (require 'agent-shell)
+  (test-with-tabs
+   (let ((r (test-claude-buffer (test-project "apps-review-1") "r")))
+     (tab-bar-new-tab)
+     (tab-bar-rename-tab "PR apps#1")
+     (switch-to-buffer r)
+     (tab-bar-switch-to-tab (car (test-tab-names)))
+     (with-current-buffer r (rename-buffer "apps-review-1 · Review PR 1"))
+     (should (tab-bar-get-buffer-tab r))
+     (let ((count (length (test-tab-names))))
+       (kdb-claude--display-in-project-tab r nil)
+       (should (= count (length (test-tab-names))))
+       (should (equal (alist-get 'name (tab-bar--current-tab)) "PR apps#1")))
+     ;; The same by the title naming, a default-named session's tab hidden.
+     (let ((r2 (test-claude-buffer (test-project "apps-review-2") "r2")))
+       (tab-bar-new-tab)
+       (tab-bar-rename-tab "PR apps#2")
+       (switch-to-buffer r2)
+       (tab-bar-switch-to-tab (car (test-tab-names)))
+       (with-current-buffer r2
+         (setq-local agent-shell--state (list (cons :session (list (cons :title "Reviewing the parser"))))))
+       (kdb-claude--name-session r2)
+       (should (string-match-p "Reviewing the parser" (buffer-name r2)))
+       (should (tab-bar-get-buffer-tab r2))))))
+
 ;;; tabs-session-test.el ends here
