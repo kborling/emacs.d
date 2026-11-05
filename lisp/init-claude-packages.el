@@ -36,7 +36,7 @@
                 ("init-claude-print" kdb-claude-print)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
                  kdb-claude-search kdb-claude-import-export
-                 kdb-claude-ask-archive kdb-claude-resume-archived kdb-claude-history kdb-claude-recent
+                 kdb-claude-ask-archive kdb-claude-resume-archived kdb-claude-history kdb-claude-recent kdb-claude-transcript
                  kdb-claude-setup)))
   (dolist (fn (cdr spec))
     (autoload fn (car spec) nil t)))

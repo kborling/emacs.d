@@ -101,6 +101,55 @@ code page."
                                "-NoProfile" "-NonInteractive" "-Command" "-"))))
     (seq-filter (lambda (p) (file-exists-p (cdr p))) pairs)))
 
+(declare-function org-overview "org")
+(declare-function org-back-to-heading "org")
+(declare-function org-fold-show-entry "org-fold")
+
+(defun kdb-claude--session-jsonl (id)
+  "Claude Code's transcript of session ID, or nil."
+  (let ((dir (kdb-claude--projects-dir)))
+    (and (file-directory-p dir)
+         (car (directory-files-recursively dir (concat "\\`" (regexp-quote id) "\\.jsonl\\'"))))))
+
+(defun kdb-claude--jsonl-title (file)
+  "The name session FILE was given with /rename, else Claude's title for it.
+Nil until Claude has titled it, after its first exchange."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (seq-some (lambda (type)
+                (goto-char (point-max))
+                (when (search-backward (format "\"type\":\"%s-title\"" type) nil t)
+                  (alist-get (intern (format "%sTitle" type))
+                             (ignore-errors
+                               (json-parse-string (buffer-substring (pos-bol) (pos-eol))
+                                                  :object-type 'alist)))))
+              '("custom" "ai"))))
+
+;;;###autoload
+(defun kdb-claude-transcript ()
+  "Show this session's whole conversation so far beside it, as org.
+Everything, from before a resume too, folded by message: TAB opens one,
+and the archive keeps the copy."
+  (interactive)
+  (let* ((id (or (and (derived-mode-p 'agent-shell-mode) (agent-shell-session-id))
+                 (user-error "Run this in a Claude session")))
+         (jsonl (or (kdb-claude--session-jsonl id) (user-error "Nothing said yet")))
+         (org (kdb-claude--archive-file
+               (expand-file-name "code-sessions/" (kdb-claude--ensure-archive))
+               (file-name-nondirectory (directory-file-name (file-name-directory jsonl)))
+               id)))
+    (make-directory (file-name-directory org) t)
+    (kdb-claude--jsonl-to-org jsonl org jsonl t)
+    (let ((buf (find-file-noselect org)))
+      (with-current-buffer buf
+        (revert-buffer t t t)
+        (read-only-mode 1)
+        (org-overview)
+        (goto-char (point-max))
+        (ignore-errors (org-back-to-heading) (org-fold-show-entry)))
+      (pop-to-buffer buf '((display-buffer-reuse-window display-buffer-in-direction)
+                           (direction . right))))))
+
 (defun kdb-claude--archive-file (dest project-name session-id)
   "Org file for SESSION-ID of PROJECT-NAME under DEST, short enough to open.
 A long project name is cut down and given a hash, so it stays unique.

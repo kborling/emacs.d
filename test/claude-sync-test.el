@@ -445,4 +445,54 @@ under a path limit that makes LONG's transcripts too long to open."
       (should (equal ran (list root "open" "C:/bin/claude.exe" "--desktop --resume abc-123"))))
     (delete-directory root t)))
 
+(ert-deftest session-title-name-and-transcript ()
+  (require 'init-claude-workflow)
+  (let* ((root (file-name-as-directory (make-temp-file "proj" t)))
+         (projects (expand-file-name "projects/" root))
+         (archive (file-name-as-directory (expand-file-name "archive" root)))
+         (api (file-name-as-directory (expand-file-name "api" root)))
+         (jsonl (expand-file-name "-x-api/sess-1.jsonl" projects))
+         (shell (generate-new-buffer "Claude Agent @ api")))
+    (make-directory api t)
+    (make-directory archive t)
+    (test-jsonl-lines jsonl
+                      `((type . "user") (cwd . ,api) (message . ((role . "user") (content . "Earlier question"))))
+                      '((type . "assistant") (message . ((role . "assistant") (content . "Earlier answer")))))
+    (cl-letf (((symbol-function 'kdb-claude--projects-dir) (lambda () projects))
+              ((symbol-function 'kdb-claude--ensure-archive) (lambda () archive))
+              ((symbol-function 'agent-shell-session-id) (lambda (&rest _) "sess-1")))
+      (should (equal (kdb-claude--session-jsonl "sess-1") jsonl))
+      ;; No title yet: left alone.
+      (should-not (kdb-claude--jsonl-title jsonl))
+      (with-current-buffer shell (setq default-directory api))
+      (kdb-claude--name-session shell "sess-1")
+      (should (equal (buffer-name shell) "Claude Agent @ api"))
+      ;; Claude's title, then yours from /rename, which wins.
+      (with-temp-buffer
+        (insert "{\"type\":\"ai-title\",\"aiTitle\":\"Fix flaky parser test\"}\n")
+        (append-to-file (point-min) (point-max) jsonl))
+      (should (equal (kdb-claude--jsonl-title jsonl) "Fix flaky parser test"))
+      (kdb-claude--name-session shell "sess-1")
+      (should (equal (buffer-name shell) "api · Fix flaky parser test"))
+      (with-temp-buffer
+        (insert "{\"type\":\"custom-title\",\"customTitle\":\"Parser work\"}\n")
+        (append-to-file (point-min) (point-max) jsonl))
+      (should (equal (kdb-claude--jsonl-title jsonl) "Parser work"))
+      ;; Named already (by us, or by you): not renamed again.
+      (kdb-claude--name-session shell "sess-1")
+      (should (equal (buffer-name shell) "api · Fix flaky parser test"))
+      ;; The whole conversation, from before a resume too, as org beside it.
+      (with-current-buffer shell
+        (setq major-mode 'agent-shell-mode)
+        (kdb-claude-transcript))
+      (let ((org (window-buffer (selected-window))))
+        (with-current-buffer org
+          (should (derived-mode-p 'org-mode))
+          (should buffer-read-only)
+          (should (string-match-p "Earlier question" (buffer-string)))
+          (should (string-match-p "Earlier answer" (buffer-string))))
+        (kill-buffer org)))
+    (kill-buffer shell)
+    (delete-directory root t)))
+
 ;;; claude-sync-test.el ends here

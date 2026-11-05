@@ -19,6 +19,8 @@
 (declare-function agent-shell--start "agent-shell")
 (declare-function comint-osc-process-output "comint")
 (declare-function kdb-claude--goto-session "init-claude")
+(declare-function kdb-claude--session-jsonl "init-claude")
+(declare-function kdb-claude--jsonl-title "init-claude")
 (declare-function agent-shell--prompt-queue-read "agent-shell")
 (declare-function agent-shell--prompt-queue-migrate "agent-shell")
 (declare-function agent-shell--shell-buffer "agent-shell")
@@ -881,14 +883,29 @@ many) and are left alone."
 
 ;;;###autoload
 (defun kdb-claude--track-emacs-session ()
-  "Remember this shell's session as an Emacs one, for the history's Source."
+  "Remember this shell's session as an Emacs one, for the history's Source.
+And name it after its title once it has one, to tell it from others."
   (let ((buf (current-buffer)))
     (agent-shell-subscribe-to
      :shell-buffer buf :event 'prompt-ready
      :on-event (lambda (_)
                  (when-let* (((buffer-live-p buf))
                              (id (agent-shell-session-id :shell-buffer buf)))
-                   (kdb-claude--note-emacs-session id))))))
+                   (kdb-claude--note-emacs-session id)
+                   (kdb-claude--name-session buf id))))))
+
+(defun kdb-claude--name-session (buf id)
+  "Name session BUF, with id ID, \"PROJECT · TITLE\" once Claude has titled it.
+Not one you named: only the default \"Claude Agent @ …\" is replaced."
+  (when-let* (((string-prefix-p "Claude Agent @ " (buffer-name buf)))
+              (jsonl (kdb-claude--session-jsonl id))
+              (title (kdb-claude--jsonl-title jsonl)))
+    (with-current-buffer buf
+      (rename-buffer
+       (generate-new-buffer-name
+        (format "%s · %s"
+                (file-name-nondirectory (directory-file-name (kdb-claude--project-dir default-directory)))
+                (truncate-string-to-width (string-trim title) 40 nil nil "…")))))))
 
 ;;;###autoload
 (defun kdb-claude--track-artifacts ()
@@ -1887,6 +1904,7 @@ or the session ends.  Run again in a watched session to stop."
     ("a" "Artifacts: open a file Claude created" kdb-claude-open-artifact)
     ("e" "Artifacts: open their folder" kdb-claude-reveal-artifact)
     ("w" "Watch PR CI, auto-fix (toggle)" kdb-claude-watch-pr)
+    ("T" "Transcript, all of it (org)" kdb-claude-transcript)
     ("y" "Copy session id" kdb-claude-copy-session-id)
     ("D" "Share live / stop (web, apps)" kdb-claude-remote-control)]
    ["Queue (this project's session)"
