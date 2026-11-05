@@ -1053,13 +1053,15 @@ better in Emacs than PowerShell), or pwsh where there's no bash."
         (set-process-query-on-exit-flag (get-buffer-process buf) nil)
         (with-current-buffer buf
           (add-hook 'comint-output-filter-functions #'comint-osc-process-output nil t))
-        (let* ((proc (get-buffer-process buf))
-               (start (marker-position (process-mark proc)))
-               (end (+ (float-time) 5)))
-          ;; Until output stops for 0.3s: the prompt is the last thing printed.
+        (let ((proc (get-buffer-process buf))
+              (end (+ (float-time) 5)))
+          ;; Until the prompt ("$", or pwsh's "? ") ends the output.
           (while (and (process-live-p proc) (< (float-time) end)
-                      (or (accept-process-output proc 0.3)
-                          (= (process-mark proc) start)))))))
+                      (not (with-current-buffer buf
+                             (save-excursion
+                               (goto-char (process-mark proc))
+                               (looking-back "[#$%>?] " (pos-bol))))))
+            (accept-process-output proc 0.05)))))
     (display-buffer buf)
     buf))
 
