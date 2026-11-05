@@ -355,7 +355,13 @@
          (should (eq (selected-window) here))
          ;; Cleanup: what it opened goes; your file stays, and so does unsaved work.
          (with-current-buffer (get-file-buffer notes) (insert "edit"))
-         (should (string-match-p "kept unsaved notes.txt" (kdb-claude-cleanup "api-1")))
+         (let (said)
+           (cl-letf (((symbol-function 'message)
+                      (lambda (fmt &rest args) (push (apply #'format fmt args) said))))
+             (should (string-match-p "kept unsaved notes.txt" (kdb-claude-cleanup "api-1"))))
+           ;; Announced, so a window vanishing isn't a mystery.
+           (should (seq-some (lambda (m) (string-match-p "closed 2 window(s), 1 buffer(s) it had opened" m))
+                             said)))
          (should-not (get-buffer shell))
          (should (buffer-live-p mine-buf))
          (tab-bar-switch-to-tab "api")

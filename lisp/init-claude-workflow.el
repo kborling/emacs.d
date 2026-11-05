@@ -1560,6 +1560,11 @@ Buffers with unsaved changes are kept.  Also run when the session ends."
     (let ((kill-buffer-query-functions nil))
       (mapc #'kill-buffer gone))
     (with-current-buffer buf (setq kdb-claude--opened nil))
+    ;; Said where you can see it: windows closing unannounced look like
+    ;; something you did.
+    (when (and (or (> windows 0) gone) (not (active-minibuffer-window)))
+      (message "%s closed %d window(s), %d buffer(s) it had opened"
+               (buffer-name buf) windows (length gone)))
     (format "Closed %d window(s), %d buffer(s)%s" windows (length gone)
             (if kept (format "; kept unsaved %s" (mapconcat #'buffer-name kept ", ")) ""))))
 
