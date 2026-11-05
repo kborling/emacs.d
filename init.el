@@ -645,6 +645,19 @@ Names buffer after the directory for easier identification."
            (eat nil (generate-new-buffer-name (format "*eat: %s*" dir))))
           (t (term (or (getenv "SHELL") "/bin/bash"))))))
 
+(defun kdb-shell--drop-bash-job-warnings (output)
+  "OUTPUT without the job-control warnings bash prints on a pipe."
+  (replace-regexp-in-string
+   "^bash: \\(cannot set terminal process group.*\\|no job control in this shell\\)\r?\n" "" output))
+
+(defun kdb-shell--quiet-bash ()
+  (add-hook 'comint-preoutput-filter-functions #'kdb-shell--drop-bash-job-warnings nil t)
+  ;; pwsh on a pipe echoes each command back; drop the copy.
+  (when-let* ((proc (get-buffer-process (current-buffer))))
+    (when (string-match-p "pwsh\\|powershell" (car (process-command proc)))
+      (setq-local comint-process-echoes t))))
+(add-hook 'shell-mode-hook #'kdb-shell--quiet-bash)
+
 
 (defun toggle-theme ()
   "Toggle between available themes."

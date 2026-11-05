@@ -435,4 +435,12 @@ a folder a shell is still in."
         (kdb-claude-run-block)
         (should (equal picked "(a)"))))))
 
+;; These are the lines Git Bash prints first in an Emacs shell.
+(ert-deftest shell-drops-bash-job-control-warnings ()
+  (should (equal (kdb-shell--drop-bash-job-warnings
+                  (concat "bash: cannot set terminal process group (1234): Inappropriate ioctl for device\r\n"
+                          "bash: no job control in this shell\n"
+                          "hi\n$ "))
+                 "hi\n$ ")))
+
 ;;; claude-run-block-test.el ends here
