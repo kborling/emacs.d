@@ -1056,8 +1056,10 @@ better in Emacs than PowerShell), or pwsh where there's no bash."
         (let* ((proc (get-buffer-process buf))
                (start (marker-position (process-mark proc)))
                (end (+ (float-time) 5)))
-          (while (and (= (process-mark proc) start) (process-live-p proc) (< (float-time) end))
-            (accept-process-output proc 0.05)))))
+          ;; Until output stops for 0.3s: the prompt is the last thing printed.
+          (while (and (process-live-p proc) (< (float-time) end)
+                      (or (accept-process-output proc 0.3)
+                          (= (process-mark proc) start)))))))
     (display-buffer buf)
     buf))
 
