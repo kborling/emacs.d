@@ -287,8 +287,8 @@ instead.  Returns the window, for `agent-shell-display-action'."
         (tab-bar-select-tab (1+ from)))
       (when (window-live-p win) (select-window win)))))
 
-(defvar kdb-claude--opened)
 (defvar kdb-claude--id)
+(defvar kdb-claude--users)
 
 ;;;###autoload
 (defun kdb-claude--close-session-window ()
@@ -1119,6 +1119,8 @@ then \\[org-ctrl-c-ctrl-c].  With RUN, run it right away and stay here."
     (pulse-momentary-highlight-region beg end)
     (if-let* ((kind (kdb-claude--block-shell-kind lang)))
         (let ((shell (kdb-claude--block-to-shell kind code dir run)))
+          ;; Yours now: no session's cleanup closes it.
+          (with-current-buffer shell (setq kdb-claude--users nil))
           (if run
               (message "Running in %s" (buffer-name shell))
             (select-window (get-buffer-window shell))
@@ -1447,8 +1449,17 @@ Delivered when TO's current turn is over.  Meant for `emacsclient --eval'."
 
 ;;; What a session shows and runs, kept in its own tab
 
-(defvar-local kdb-claude--opened nil
-  "Buffers this session opened or started, to close in `kdb-claude-cleanup'.")
+(defvar-local kdb-claude--users nil
+  "Ids of the sessions using this buffer, which one of them opened.
+Nil when it isn't Claude's to close: you opened it, or took it over.")
+(put 'kdb-claude--users 'permanent-local t)
+
+(defun kdb-claude--use (b id &optional opened)
+  "Note that session ID uses buffer B; OPENED if ID opened it.
+Only buffers a session opened are closed, and only once none uses them."
+  (with-current-buffer b
+    (when (or opened kdb-claude--users)
+      (cl-pushnew id kdb-claude--users :test #'equal))))
 
 (defun kdb-claude--in-session-tab (id fn &optional no-show)
   "Call FN with session ID's buffer, its window selected, in its tab.
@@ -1494,9 +1505,10 @@ Your tab, window and cursor stay where they are.  Meant for
                             (unless (file-exists-p file) (user-error "No file or buffer %s" what))
                             (or (get-file-buffer file)
                                 (let ((new (find-file-noselect file)))
-                                  (with-current-buffer buf (push new kdb-claude--opened))
+                                  (kdb-claude--use new id t)
                                   new)))))
                (win (kdb-claude--session-window buf id)))
+          (kdb-claude--use shown id)
           (set-window-buffer win shown)
           (when line
             (with-selected-window win
@@ -1526,7 +1538,7 @@ the shell's buffer name, for `kdb-claude-output'.  Meant for
                                                (get-buffer-process b)))
                               (buffer-list)))
                (shell (kdb-claude--block-to-shell kind command dir t)))
-          (unless had (with-current-buffer buf (push shell kdb-claude--opened)))
+          (kdb-claude--use shell id (not had))
           (buffer-name shell)))))
 
 ;;;###autoload
@@ -1541,12 +1553,20 @@ the shell's buffer name, for `kdb-claude-output'.  Meant for
 ;;;###autoload
 (defun kdb-claude-cleanup (id)
   "Close what session ID opened: its windows, and buffers it opened or started.
-Buffers with unsaved changes are kept.  Also run when the session ends."
+A buffer another session still uses stays, as do unsaved changes; those
+become yours.  Also run when the session ends."
   (let* ((buf (or (kdb-claude--session-buffer id) (user-error "No Claude session %s" id)))
-         (opened (seq-filter #'buffer-live-p (buffer-local-value 'kdb-claude--opened buf)))
-         (kept (seq-filter (lambda (b) (and (buffer-file-name b) (buffer-modified-p b))) opened))
-         (gone (seq-difference opened kept))
-         (windows 0))
+         (gone nil) (kept nil) (windows 0))
+    (dolist (b (buffer-list))
+      (with-current-buffer b
+        (when (member id kdb-claude--users)
+          (setq kdb-claude--users
+                (seq-filter (lambda (u) (and (not (equal u id)) (kdb-claude--session-buffer u)))
+                            kdb-claude--users))
+          (unless kdb-claude--users              ; no other session uses it
+            (if (and buffer-file-name (buffer-modified-p))
+                (push b kept)
+              (push b gone))))))
     ;; Windows first, in the session's tab: a buffer killed while its tab
     ;; is hidden leaves tab-bar's "Old buffer" placeholder behind.
     (kdb-claude--in-session-tab
@@ -1559,7 +1579,6 @@ Buffers with unsaved changes are kept.  Also run when the session ends."
      t)
     (let ((kill-buffer-query-functions nil))
       (mapc #'kill-buffer gone))
-    (with-current-buffer buf (setq kdb-claude--opened nil))
     ;; Said where you can see it: windows closing unannounced look like
     ;; something you did.
     (when (and (or (> windows 0) gone) (not (active-minibuffer-window)))

@@ -386,4 +386,44 @@
   (cl-letf (((symbol-function 'executable-find) (lambda (_) "C:/Program Files/Git/bin/bash.exe")))
     (should (equal (kdb-claude--bash) "C:/Program Files/Git/bin/bash.exe"))))
 
+(ert-deftest sessions-sharing-a-tab-dont-close-each-others-things ()
+  (test-with-tabs
+   (let* ((api (test-project "api"))
+          (notes (expand-file-name "notes.txt" api))
+          (a (test-claude-buffer api "a"))
+          (b (test-claude-buffer api "b")))
+     (with-temp-file notes (insert "x\n"))
+     (with-current-buffer a (setq kdb-claude--id "api-a"))
+     (with-current-buffer b (setq kdb-claude--id "api-b"))
+     (kdb-claude--display-in-project-tab a nil)
+     (kdb-claude--display-in-project-tab b nil)            ; both in the "api" tab
+     ;; Both use the project's one shell, and the same file.
+     (let ((shell (kdb-claude-run "api-a" "true")))
+       (should (equal (kdb-claude-run "api-b" "true") shell))
+       (kdb-claude-show "api-a" "notes.txt")
+       (kdb-claude-show "api-b" "notes.txt")
+       (let ((b-win (seq-find (lambda (w) (equal (window-parameter w 'kdb-claude-session) "api-b"))
+                              (window-list))))
+         ;; a is done: its window goes; what b still uses stays.
+         (kdb-claude-cleanup "api-a")
+         (should (get-buffer shell))
+         (should (get-file-buffer notes))
+         (should (window-live-p b-win))
+         (should-not (seq-find (lambda (w) (equal (window-parameter w 'kdb-claude-session) "api-a"))
+                               (window-list)))
+         ;; b done too: now they go.
+         (kdb-claude-cleanup "api-b")
+         (should-not (get-buffer shell))
+         (should-not (get-file-buffer notes))))
+     ;; A shell you ran a block in (C-c l x) is yours: no session closes it.
+     (let ((shell (kdb-claude-run "api-a" "true")))
+       (with-temp-buffer
+         (setq default-directory api)
+         (insert "```bash\necho mine\n```\n")
+         (kdb-claude-run-block t))
+       (kdb-claude-cleanup "api-a")
+       (should (get-buffer shell))
+       (let ((kill-buffer-query-functions nil)) (kill-buffer shell)))
+     (kill-buffer a) (kill-buffer b))))
+
 ;;; tabs-session-test.el ends here
