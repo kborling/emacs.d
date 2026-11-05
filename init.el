@@ -1264,7 +1264,10 @@ and refresh it in the background."
    minibuffer-visible-completions nil
    enable-recursive-minibuffers t
    completions-sort 'historical
-   read-answer-short t))
+   read-answer-short t
+   ;; Leaving a prompt keeps windows opened meanwhile (by a Claude session,
+   ;; say) instead of putting back the layout it started with.
+   read-minibuffer-restore-windows nil))
 
 ;;; ============================================================
 ;;;                   DEVELOPMENT TOOLS
