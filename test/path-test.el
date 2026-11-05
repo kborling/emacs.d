@@ -42,4 +42,11 @@
     (should (string-suffix-p "/ccusage"
                              (string-trim (shell-command-to-string "command -v ccusage"))))))
 
+(ert-deftest display-buffer-by-name-is-fine ()
+  ;; The *Messages* scroll advice takes a buffer's name as well as the buffer.
+  (let ((b (get-buffer-create "*by name*")))
+    (should (windowp (display-buffer "*by name*")))
+    (kill-buffer b))
+  (should (windowp (display-buffer "*Messages*"))))
+
 ;;; path-test.el ends here

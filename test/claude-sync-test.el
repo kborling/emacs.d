@@ -447,6 +447,7 @@ under a path limit that makes LONG's transcripts too long to open."
 
 (ert-deftest session-title-name-and-transcript ()
   (require 'init-claude-workflow)
+  (require 'agent-shell)
   (let* ((root (file-name-as-directory (make-temp-file "proj" t)))
          (projects (expand-file-name "projects/" root))
          (archive (file-name-as-directory (expand-file-name "archive" root)))
@@ -462,25 +463,33 @@ under a path limit that makes LONG's transcripts too long to open."
               ((symbol-function 'kdb-claude--ensure-archive) (lambda () archive))
               ((symbol-function 'agent-shell-session-id) (lambda (&rest _) "sess-1")))
       (should (equal (kdb-claude--session-jsonl "sess-1") jsonl))
-      ;; No title yet: left alone.
-      (should-not (kdb-claude--jsonl-title jsonl))
-      (with-current-buffer shell (setq default-directory api))
-      (kdb-claude--name-session shell "sess-1")
-      (should (equal (buffer-name shell) "Claude Agent @ api"))
-      ;; Claude's title, then yours from /rename, which wins.
-      (with-temp-buffer
-        (insert "{\"type\":\"ai-title\",\"aiTitle\":\"Fix flaky parser test\"}\n")
-        (append-to-file (point-min) (point-max) jsonl))
-      (should (equal (kdb-claude--jsonl-title jsonl) "Fix flaky parser test"))
-      (kdb-claude--name-session shell "sess-1")
-      (should (equal (buffer-name shell) "api · Fix flaky parser test"))
-      (with-temp-buffer
-        (insert "{\"type\":\"custom-title\",\"customTitle\":\"Parser work\"}\n")
-        (append-to-file (point-min) (point-max) jsonl))
-      (should (equal (kdb-claude--jsonl-title jsonl) "Parser work"))
-      ;; Named already (by us, or by you): not renamed again.
-      (kdb-claude--name-session shell "sess-1")
-      (should (equal (buffer-name shell) "api · Fix flaky parser test"))
+      (with-current-buffer shell
+        (setq default-directory api)
+        (setq-local agent-shell--state (list (cons :session (list (cons :title nil))))))
+      (cl-flet ((title (s) (with-current-buffer shell
+                             (map-put! (map-elt agent-shell--state :session) :title s))))
+        ;; No title yet: left alone.
+        (kdb-claude--name-session shell)
+        (should (equal (buffer-name shell) "Claude Agent @ api"))
+        ;; Claude titles it; its viewport follows the new name.
+        (let ((viewport (get-buffer-create (concat "Claude Agent @ api" agent-shell-viewport--suffix))))
+          (title "Fix flaky parser test")
+          (kdb-claude--name-session shell)
+          (should (equal (buffer-name shell) "api · Fix flaky parser test"))
+          (should (equal (buffer-name viewport) (concat "api · Fix flaky parser test" agent-shell-viewport--suffix)))
+          (kill-buffer viewport))
+        ;; Same title next turn: unchanged, no <2>.
+        (kdb-claude--name-session shell)
+        (should (equal (buffer-name shell) "api · Fix flaky parser test"))
+        ;; /rename: the name follows.
+        (title "Parser work")
+        (kdb-claude--name-session shell)
+        (should (equal (buffer-name shell) "api · Parser work"))
+        ;; A name you chose stays, whatever the title does.
+        (with-current-buffer shell (rename-buffer "my parser session"))
+        (title "Something else")
+        (kdb-claude--name-session shell)
+        (should (equal (buffer-name shell) "my parser session")))
       ;; The whole conversation, from before a resume too, as org beside it.
       (with-current-buffer shell
         (setq major-mode 'agent-shell-mode)

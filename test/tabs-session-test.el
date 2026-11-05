@@ -229,7 +229,7 @@
                    (lambda (_p table &rest _) (setq offered (all-completions "" table)) (car offered))))
           (kdb-claude-send))
         (should (= 3 (length offered)))
-        (should (string-match-p "\\`api +Claude Agent @ test" (nth 0 offered)))
+        (should (string-match-p "\\`api +test" (nth 0 offered)))      ; project once, then its name
         (should (equal sent (list :text "the region" :shell-buffer a)))
         (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) (nth 1 offered))))
           (kdb-claude-send))

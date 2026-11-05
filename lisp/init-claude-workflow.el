@@ -19,8 +19,7 @@
 (declare-function agent-shell--start "agent-shell")
 (declare-function comint-osc-process-output "comint")
 (declare-function kdb-claude--goto-session "init-claude")
-(declare-function kdb-claude--session-jsonl "init-claude")
-(declare-function kdb-claude--jsonl-title "init-claude")
+
 (declare-function agent-shell--prompt-queue-read "agent-shell")
 (declare-function agent-shell--prompt-queue-migrate "agent-shell")
 (declare-function agent-shell--shell-buffer "agent-shell")
@@ -133,6 +132,11 @@ pending, jump to the next session waiting on you."
                 (kdb-claude--goto-session buf)   ; in its tab, if it has one
                 (agent-shell-jump-to-latest-permission-button-row))))))))
 
+(defun kdb-claude--session-label (buf project)
+  "Session BUF's name without PROJECT, which is shown beside it."
+  (string-remove-prefix (concat project " · ")
+                        (string-remove-prefix "Claude Agent @ " (buffer-name buf))))
+
 (defun kdb-claude--permission-text (buf perm)
   "What session BUF asks to do in permission request PERM, to read at a glance."
   (let* ((call (map-elt perm :tool-call))
@@ -140,7 +144,7 @@ pending, jump to the next session waiting on you."
          (project (file-name-nondirectory
                    (directory-file-name (kdb-claude--project-dir
                                          (buffer-local-value 'default-directory buf)))))
-         (session (string-remove-prefix "Claude Agent @ " (buffer-name buf)))
+         (session (kdb-claude--session-label buf project))
          (command (let ((c (or (map-elt call :command) (map-elt input 'command))))
                     (and (stringp c) (not (string-empty-p c)) c)))
          (file (or (map-elt input 'file_path) (map-elt input 'notebook_path)))
@@ -395,14 +399,12 @@ Or hand it off to a new session, in this project or another."
          (new-here (format "+ New session in %s" (abbreviate-file-name here)))
          (new-other "+ New session in another project…")
          (sessions (mapcar (lambda (b)
-                             (cons (format "%-16s %s"
-                                           (truncate-string-to-width
-                                            (file-name-nondirectory
+                             (let ((project (file-name-nondirectory
                                              (directory-file-name
-                                              (kdb-claude--project-dir (buffer-local-value 'default-directory b))))
-                                            16 nil nil "…")
-                                           (buffer-name b))
-                                   b))
+                                              (kdb-claude--project-dir (buffer-local-value 'default-directory b))))))
+                               (cons (format "%-16s %s" (truncate-string-to-width project 16 nil nil "…")
+                                             (kdb-claude--session-label b project))
+                                     b)))
                            (remq (current-buffer) (agent-shell-buffers))))
          (pick (completing-read
                 "Send to: "
@@ -892,20 +894,37 @@ And name it after its title once it has one, to tell it from others."
                  (when-let* (((buffer-live-p buf))
                              (id (agent-shell-session-id :shell-buffer buf)))
                    (kdb-claude--note-emacs-session id)
-                   (kdb-claude--name-session buf id))))))
+                   (kdb-claude--name-session buf))))))
 
-(defun kdb-claude--name-session (buf id)
-  "Name session BUF, with id ID, \"PROJECT · TITLE\" once Claude has titled it.
-Not one you named: only the default \"Claude Agent @ …\" is replaced."
-  (when-let* (((string-prefix-p "Claude Agent @ " (buffer-name buf)))
-              (jsonl (kdb-claude--session-jsonl id))
-              (title (kdb-claude--jsonl-title jsonl)))
-    (with-current-buffer buf
-      (rename-buffer
-       (generate-new-buffer-name
-        (format "%s · %s"
-                (file-name-nondirectory (directory-file-name (kdb-claude--project-dir default-directory)))
-                (truncate-string-to-width (string-trim title) 40 nil nil "…")))))))
+(defvar-local kdb-claude--auto-name nil
+  "(BASE . NAME): the name `kdb-claude--name-session' last gave this buffer.")
+(put 'kdb-claude--auto-name 'permanent-local t)
+
+(defvar agent-shell-viewport--suffix)
+
+(defun kdb-claude--name-session (buf)
+  "Name session BUF \"PROJECT · TITLE\", after the title Claude gave it.
+The title is agent-shell's, kept current, so /rename renames it too.
+Only a default \"Claude Agent @ …\" name or one given here is replaced,
+never one you chose."
+  (with-current-buffer buf
+    (when-let* ((title (map-nested-elt agent-shell--state '(:session :title)))
+                ((not (string-blank-p title)))
+                (base (format "%s · %s"
+                              (file-name-nondirectory
+                               (directory-file-name (kdb-claude--project-dir default-directory)))
+                              (truncate-string-to-width (string-trim title) 40 nil nil "…")))
+                (old (buffer-name))
+                ((or (string-prefix-p "Claude Agent @ " old)
+                     (equal old (cdr kdb-claude--auto-name))))
+                ((not (equal base (car kdb-claude--auto-name)))))
+      (rename-buffer (generate-new-buffer-name base))
+      (setq kdb-claude--auto-name (cons base (buffer-name)))
+      ;; Its viewport is found by the shell's name, so it follows.
+      (when-let* (((boundp 'agent-shell-viewport--suffix))
+                  (viewport (get-buffer (concat old agent-shell-viewport--suffix))))
+        (with-current-buffer viewport
+          (rename-buffer (concat (buffer-name buf) agent-shell-viewport--suffix) t))))))
 
 ;;;###autoload
 (defun kdb-claude--track-artifacts ()

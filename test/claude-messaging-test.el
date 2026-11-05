@@ -232,6 +232,10 @@
                                         (:diffs . (((:old . "(foo)") (:new . "(bar)\n(baz)") (:file . "/tmp/api/a.el")))))
                                       nil))))
       (should (string-match-p "/tmp/api/a.el\n- (foo)\n\\+ (bar)\n\\+ (baz)" text)))
+    ;; Named after its title, the project isn't repeated.
+    (with-current-buffer buf (rename-buffer "api · Fix flaky test"))
+    (should (string-prefix-p "api  ·  Fix flaky test\n"
+                             (kdb-claude--permission-text buf (test-permission '((:title . "x")) nil))))
     ;; A labeled session shows its name beside the project.
     (with-current-buffer buf (rename-buffer "Fix flaky test"))
     (should (string-prefix-p "api  ·  Fix flaky test"

@@ -111,20 +111,6 @@ code page."
     (and (file-directory-p dir)
          (car (directory-files-recursively dir (concat "\\`" (regexp-quote id) "\\.jsonl\\'"))))))
 
-(defun kdb-claude--jsonl-title (file)
-  "The name session FILE was given with /rename, else Claude's title for it.
-Nil until Claude has titled it, after its first exchange."
-  (with-temp-buffer
-    (insert-file-contents file)
-    (seq-some (lambda (type)
-                (goto-char (point-max))
-                (when (search-backward (format "\"type\":\"%s-title\"" type) nil t)
-                  (alist-get (intern (format "%sTitle" type))
-                             (ignore-errors
-                               (json-parse-string (buffer-substring (pos-bol) (pos-eol))
-                                                  :object-type 'alist)))))
-              '("custom" "ai"))))
-
 ;;;###autoload
 (defun kdb-claude-transcript ()
   "Show this session's whole conversation so far beside it, as org.

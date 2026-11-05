@@ -254,7 +254,7 @@
 ;; Auto-scroll Messages buffer when displayed
 (defun kdb-messages-buffer-advice (buffer &optional _action _frame)
   "Scroll *Messages* to bottom when displayed."
-  (when (and buffer (string= (buffer-name buffer) "*Messages*"))
+  (when (equal (buffer-name (get-buffer buffer)) "*Messages*")   ; BUFFER may be a name
     (with-current-buffer buffer
       (goto-char (point-max)))
     (when-let* ((window (get-buffer-window buffer)))
