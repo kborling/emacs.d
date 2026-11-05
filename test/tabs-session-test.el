@@ -348,6 +348,8 @@
                        (< (float-time) end))
              (accept-process-output nil 0.05)))
          (should (string-match-p "\\(^\\|[$>] \\)hi-from-claude\r?$" (kdb-claude-output shell)))
+         (should (string-match-p "[$>] echo hi-from-claude" (kdb-claude-output shell)))
+         (should-not (process-query-on-exit-flag (get-buffer-process shell)))
          (should (memq #'comint-osc-process-output    ; Git Bash's title codes stripped
                        (buffer-local-value 'comint-output-filter-functions (get-buffer shell))))
          (should (eq (selected-window) here))

@@ -1049,8 +1049,15 @@ better in Emacs than PowerShell), or pwsh where there's no bash."
                    ('bash (kdb-claude--bash)))
                  (user-error "No %s on this machine" kind))))
         (save-window-excursion (shell buf))
+        ;; Throwaway shells: killing one, or quitting Emacs, shouldn't ask.
+        (set-process-query-on-exit-flag (get-buffer-process buf) nil)
         (with-current-buffer buf
-          (add-hook 'comint-output-filter-functions #'comint-osc-process-output nil t))))
+          (add-hook 'comint-output-filter-functions #'comint-osc-process-output nil t))
+        (let* ((proc (get-buffer-process buf))
+               (start (marker-position (process-mark proc)))
+               (end (+ (float-time) 5)))
+          (while (and (= (process-mark proc) start) (process-live-p proc) (< (float-time) end))
+            (accept-process-output proc 0.05)))))
     (display-buffer buf)
     buf))
 
