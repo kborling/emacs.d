@@ -17,6 +17,7 @@
 (declare-function agent-shell-send-dwim "agent-shell")
 (defvar agent-shell--state)
 (declare-function agent-shell--start "agent-shell")
+(declare-function comint-osc-process-output "comint")
 (declare-function kdb-claude--goto-session "init-claude")
 (declare-function agent-shell--prompt-queue-read "agent-shell")
 (declare-function agent-shell--prompt-queue-migrate "agent-shell")
@@ -1047,7 +1048,9 @@ better in Emacs than PowerShell), or pwsh where there's no bash."
                    ('pwsh (or (executable-find "pwsh") (executable-find "powershell")))
                    ('bash (kdb-claude--bash)))
                  (user-error "No %s on this machine" kind))))
-        (save-window-excursion (shell buf))))
+        (save-window-excursion (shell buf))
+        (with-current-buffer buf
+          (add-hook 'comint-output-filter-functions #'comint-osc-process-output nil t))))
     (display-buffer buf)
     buf))
 

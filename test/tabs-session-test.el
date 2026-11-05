@@ -348,6 +348,8 @@
                        (< (float-time) end))
              (accept-process-output nil 0.05)))
          (should (string-match-p "\\(^\\|[$>] \\)hi-from-claude\r?$" (kdb-claude-output shell)))
+         (should (memq #'comint-osc-process-output    ; Git Bash's title codes stripped
+                       (buffer-local-value 'comint-output-filter-functions (get-buffer shell))))
          (should (eq (selected-window) here))
          ;; Cleanup: what it opened goes; your file stays, and so does unsaved work.
          (with-current-buffer (get-file-buffer notes) (insert "edit"))
