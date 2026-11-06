@@ -130,29 +130,58 @@
 (defun test-tab-names ()
   (mapcar (lambda (tab) (alist-get 'name tab)) (tab-bar-tabs)))
 
-(ert-deftest sessions-open-in-their-project-tab ()
+(ert-deftest each-session-in-a-tab-of-its-own ()
+  (require 'agent-shell)
   (test-with-tabs
-   (let ((api (test-project "api"))
-         (web (test-project "web")))
-     ;; First session: a new tab named after the project, the session alone.
-     (let ((a (test-claude-buffer api "a")))
-       (should (eq (kdb-claude--display-in-project-tab a nil) (selected-window)))
-       (should (equal (alist-get 'name (tab-bar--current-tab)) "api"))
-       (should (one-window-p t))
-       ;; Second in the same project, from another tab: back to it, split.
-       (tab-bar-switch-to-tab (car (test-tab-names)))
-       (let* ((b (test-claude-buffer api "b"))
-              (win (kdb-claude--display-in-project-tab b nil)))
-         (should (equal (alist-get 'name (tab-bar--current-tab)) "api"))
-         (should (eq (window-buffer win) b))
-         (should (equal (mapcar #'window-buffer (kdb-claude--session-windows)) (list a b)))
-         ;; Killing a session closes its split.
-         (kill-buffer b)
-         (should (one-window-p t))))
-     ;; Another project: its own tab.
-     (kdb-claude--display-in-project-tab (test-claude-buffer web "c") nil)
-     (should (equal (alist-get 'name (tab-bar--current-tab)) "web"))
-     (should (= 3 (length (test-tab-names)))))))
+   (let* ((api (test-project "api"))
+          (a (test-claude-buffer api "a"))
+          (b (test-claude-buffer api "b")))
+     ;; Same project, still a tab each, first named after its folder.
+     (should (eq (kdb-claude--display-in-own-tab a nil) (selected-window)))
+     (should (one-window-p t))
+     (kdb-claude--display-in-own-tab b nil)
+     (should (equal (cdr (test-tab-names)) '("api" "api")))
+     (should (one-window-p t))
+     ;; Titled: the tab takes the title too.
+     (with-current-buffer b
+       (setq-local agent-shell--state (list (cons :session (list (cons :title "Fix the parser"))))))
+     (kdb-claude--name-session b)
+     (should (equal (buffer-name b) "Fix the parser"))
+     (should (equal (alist-get 'name (tab-bar--current-tab)) "Fix the parser"))
+     ;; A tab you or a PR review named keeps its name.
+     (tab-bar-rename-tab "PR apps#9")
+     (with-current-buffer b
+       (map-put! (map-elt agent-shell--state :session) :title "Something else"))
+     (kdb-claude--name-session b)
+     (should (equal (alist-get 'name (tab-bar--current-tab)) "PR apps#9"))
+     ;; The session ends: its tab goes; never the last one.
+     (kill-buffer b)
+     (should (equal (cdr (test-tab-names)) '("api")))
+     (tab-bar-close-other-tabs)
+     (switch-to-buffer a)
+     (kill-buffer a)
+     (should (= 1 (length (test-tab-names)))))))
+
+(ert-deftest renamed-session-keeps-working ()
+  ;; shell-maker finds a session's buffer by the name it was given.  A
+  ;; renamed session must not hand its output to a new one taking that name.
+  (require 'agent-shell)
+  (let ((old (test-claude-buffer "/tmp/" "old")))
+    (with-current-buffer old
+      (rename-buffer "Claude Agent @ api" t)
+      (setq-local shell-maker--buffer-name-override (buffer-name))
+      (setq-local agent-shell--state (list (cons :session (list (cons :title "Old work"))))))
+    (kdb-claude--name-session old)
+    (let ((new (get-buffer-create "Claude Agent @ api")))   ; a new session, the freed name
+      (should-not (eq new old))
+      (with-current-buffer old
+        (should (equal (shell-maker-buffer-name nil) (buffer-name old))))
+      ;; By hand too.
+      (with-current-buffer old (rename-buffer "my name"))
+      (with-current-buffer old
+        (should (equal (shell-maker-buffer-name nil) "my name")))
+      (kill-buffer new))
+    (kill-buffer old)))
 
 (ert-deftest background-session-keeps-you-where-you-are ()
   ;; A spawned or scheduled session lands in its tab; focus doesn't move.
@@ -168,15 +197,15 @@
 
 (ert-deftest sessions-without-tabs-show-as-before ()
   (tab-bar-mode -1)
-  (should-not (kdb-claude--display-in-project-tab (test-claude-buffer "/tmp/" "x") nil)))
+  (should-not (kdb-claude--display-in-own-tab (test-claude-buffer "/tmp/" "x") nil)))
 
 (ert-deftest session-shown-in-its-tab-is-not-split-again ()
   (test-with-tabs
    (let* ((api (test-project "api"))
           (a (test-claude-buffer api "a"))
-          (win (kdb-claude--display-in-project-tab a nil)))
+          (win (kdb-claude--display-in-own-tab a nil)))
      (tab-bar-switch-to-tab (car (test-tab-names)))
-     (should (eq (kdb-claude--display-in-project-tab a nil) win))
+     (should (eq (kdb-claude--display-in-own-tab a nil) win))
      (should (one-window-p t)))))
 
 (ert-deftest session-in-a-custom-named-tab-is-gone-to ()
@@ -190,12 +219,12 @@
      (switch-to-buffer r)
      (tab-bar-switch-to-tab (car (test-tab-names)))
      (let ((count (length (test-tab-names)))
-           (win (kdb-claude--display-in-project-tab r nil)))
+           (win (kdb-claude--display-in-own-tab r nil)))
        (should (= count (length (test-tab-names))))
        (should (equal (alist-get 'name (tab-bar--current-tab)) "PR apps#1"))
        (should (eq (window-buffer win) r))
        ;; From its own tab too.
-       (should (eq (kdb-claude--display-in-project-tab r nil) win))
+       (should (eq (kdb-claude--display-in-own-tab r nil) win))
        (should (= count (length (test-tab-names))))))))
 
 (ert-deftest goto-session-in-another-tab ()
@@ -328,7 +357,7 @@
      (with-temp-file notes (insert "one\ntwo\nthree\n"))
      (with-temp-file mine (insert "my file\n"))
      (with-current-buffer s (setq kdb-claude--id "api-1"))
-     (kdb-claude--display-in-project-tab s nil)           ; the session's tab, "api"
+     (kdb-claude--display-in-own-tab s nil)           ; the session's tab, "api"
      (tab-bar-switch-to-tab (car (test-tab-names)))       ; you, elsewhere
      (let ((here (selected-window))
            (mine-buf (find-file-noselect mine)))          ; already open, yours
@@ -386,7 +415,7 @@
   (cl-letf (((symbol-function 'executable-find) (lambda (_) "C:/Program Files/Git/bin/bash.exe")))
     (should (equal (kdb-claude--bash) "C:/Program Files/Git/bin/bash.exe"))))
 
-(ert-deftest sessions-sharing-a-tab-dont-close-each-others-things ()
+(ert-deftest sessions-sharing-a-project-dont-close-each-others-things ()
   (test-with-tabs
    (let* ((api (test-project "api"))
           (notes (expand-file-name "notes.txt" api))
@@ -395,8 +424,8 @@
      (with-temp-file notes (insert "x\n"))
      (with-current-buffer a (setq kdb-claude--id "api-a"))
      (with-current-buffer b (setq kdb-claude--id "api-b"))
-     (kdb-claude--display-in-project-tab a nil)
-     (kdb-claude--display-in-project-tab b nil)            ; both in the "api" tab
+     (kdb-claude--display-in-own-tab a nil)
+     (kdb-claude--display-in-own-tab b nil)            ; a tab each
      ;; Both use the project's one shell, and the same file.
      (let ((shell (kdb-claude-run "api-a" "true")))
        (should (equal (kdb-claude-run "api-b" "true") shell))
@@ -439,7 +468,7 @@
      (with-current-buffer r (rename-buffer "apps-review-1 · Review PR 1"))
      (should (tab-bar-get-buffer-tab r))
      (let ((count (length (test-tab-names))))
-       (kdb-claude--display-in-project-tab r nil)
+       (kdb-claude--display-in-own-tab r nil)
        (should (= count (length (test-tab-names))))
        (should (equal (alist-get 'name (tab-bar--current-tab)) "PR apps#1")))
      ;; The same by the title naming, a default-named session's tab hidden.

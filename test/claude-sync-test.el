@@ -475,16 +475,16 @@ under a path limit that makes LONG's transcripts too long to open."
         (let ((viewport (get-buffer-create (concat "Claude Agent @ api" agent-shell-viewport--suffix))))
           (title "Fix flaky parser test")
           (kdb-claude--name-session shell)
-          (should (equal (buffer-name shell) "api · Fix flaky parser test"))
-          (should (equal (buffer-name viewport) (concat "api · Fix flaky parser test" agent-shell-viewport--suffix)))
+          (should (equal (buffer-name shell) "Fix flaky parser test"))
+          (should (equal (buffer-name viewport) (concat "Fix flaky parser test" agent-shell-viewport--suffix)))
           (kill-buffer viewport))
         ;; Same title next turn: unchanged, no <2>.
         (kdb-claude--name-session shell)
-        (should (equal (buffer-name shell) "api · Fix flaky parser test"))
+        (should (equal (buffer-name shell) "Fix flaky parser test"))
         ;; /rename: the name follows.
         (title "Parser work")
         (kdb-claude--name-session shell)
-        (should (equal (buffer-name shell) "api · Parser work"))
+        (should (equal (buffer-name shell) "Parser work"))
         ;; A name you chose stays, whatever the title does.
         (with-current-buffer shell (rename-buffer "my parser session"))
         (title "Something else")

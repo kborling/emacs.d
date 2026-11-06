@@ -23,7 +23,7 @@
               kdb-claude--header-symbol-fonts kdb-claude--tab-name-waiting
               kdb-claude--redraw-tabs kdb-claude--tab-save kdb-claude--tab-restore
               kdb-claude--busy-frames kdb-claude--logo-icon kdb-claude--logo-header
-              kdb-claude--steady-busy-frame kdb-claude--heartbeat-rate kdb-claude--display-in-project-tab
+              kdb-claude--steady-busy-frame kdb-claude--heartbeat-rate kdb-claude--display-in-own-tab
               kdb-claude--close-session-window))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
@@ -61,8 +61,8 @@
         agent-shell-markdown-render-function #'kdb-claude--render-markdown
         ;; Resume from the history list (C-c l h), not a picker on every start.
         agent-shell-session-strategy 'new
-        ;; Each project's sessions share a tab named after it, side by side.
-        agent-shell-display-action '((kdb-claude--display-in-project-tab display-buffer-same-window))
+        ;; Each session in a tab of its own, named after it.
+        agent-shell-display-action '((kdb-claude--display-in-own-tab display-buffer-same-window))
         ;; Keep conversation data out of projects and this repo: the private
         ;; archive already has every transcript, so agent-shell's copy is off.
         agent-shell-transcript-file-path-function nil

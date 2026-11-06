@@ -222,8 +222,6 @@ The region, Dired files or org entry at point become its first input."
   (let ((agent-shell-cwd-function (if dir (lambda () dir) agent-shell-cwd-function)))
     (agent-shell-anthropic-start-claude-code)))
 
-(declare-function tabspaces--list-tabspaces "tabspaces")
-(declare-function tabspaces-generate-descriptive-tab-name "tabspaces")
 
 (defvar project-find-functions)
 (declare-function project-try-vc "project")
@@ -237,58 +235,36 @@ project would put a session outside any project in whatever tab you're in."
       (project-root project)
     dir))
 
-(defun kdb-claude--project-tab (root)
-  "Name of the tab for project ROOT, or nil if there is none."
-  (let ((names (mapcar (lambda (tab) (alist-get 'name tab)) (tab-bar-tabs))))
-    (seq-find (lambda (name) (member name names))
-              (list (cdr (seq-find (lambda (e) (and (kdb-claude--path-within-p (car e) root)
-                                                    (kdb-claude--path-within-p root (car e))))
-                                   (bound-and-true-p tabspaces-project-tab-map)))
-                    (file-name-nondirectory (directory-file-name root))))))
-
-(defun kdb-claude--session-windows ()
-  "Windows in this tab showing a Claude session."
-  (seq-filter (lambda (w) (with-current-buffer (window-buffer w) (derived-mode-p 'agent-shell-mode)))
-              (window-list)))
+(defvar-local kdb-claude--tab-auto nil
+  "Name given to this session's tab here, renamed with the title.
+Nil when the tab was named otherwise (a PR review's, say).")
+(put 'kdb-claude--tab-auto 'permanent-local t)
 
 ;;;###autoload
-(defun kdb-claude--display-in-project-tab (buffer _alist)
-  "Show Claude session BUFFER in its project's tab, split beside the others.
-With no tab for the project yet, open one named after it.  A tab already
-showing BUFFER, whatever its name (a PR review's, say), is gone to
-instead.  Returns the window, for `agent-shell-display-action'."
+(defun kdb-claude--display-in-own-tab (buffer _alist)
+  "Show Claude session BUFFER in a tab of its own, named after it.
+A tab already showing it is gone to instead.  The tab is first named
+after the session's folder, then after its title once it has one.
+Returns the window, for `agent-shell-display-action'."
   (when (bound-and-true-p tab-bar-mode)
     (if-let* ((shown (tab-bar-get-buffer-tab buffer)))
         (progn (tab-bar-select-tab (1+ (alist-get 'index shown)))
                (get-buffer-window buffer))
-      (let* ((root (kdb-claude--project-dir (buffer-local-value 'default-directory buffer)))
-             (tab (kdb-claude--project-tab root)))
-        (if (not tab)
-            (progn
-              (tab-bar-new-tab)
-              (tab-bar-rename-tab
-               (if (bound-and-true-p tabspaces-mode)
-                   (tabspaces-generate-descriptive-tab-name (abbreviate-file-name root)
-                                                            (tabspaces--list-tabspaces))
-                 (file-name-nondirectory (directory-file-name root))))
-              (delete-other-windows)
-              (switch-to-buffer buffer nil t)
-              (selected-window))
-          (tab-bar-switch-to-tab tab)
-          (or (get-buffer-window buffer)
-              (let* ((beside (or (car (last (kdb-claude--session-windows))) (selected-window)))
-                     (win (or (ignore-errors
-                                (split-window beside nil (if (>= (window-total-width beside) 160) 'right 'below)))
-                              beside)))
-                (set-window-buffer win buffer)
-                (unless (eq win beside) (balance-windows (window-parent win)))
-                win)))))))
+      (let ((name (file-name-nondirectory
+                   (directory-file-name
+                    (kdb-claude--project-dir (buffer-local-value 'default-directory buffer))))))
+        (tab-bar-new-tab)
+        (tab-bar-rename-tab name)
+        (with-current-buffer buffer (setq kdb-claude--tab-auto name))
+        (delete-other-windows)
+        (switch-to-buffer buffer nil t)
+        (selected-window)))))
 
 (defun kdb-claude--show-in-background (buf)
-  "Show session BUF in its project tab, then come back to this tab and window."
+  "Show session BUF in its tab, then come back to this tab and window."
   (let ((from (tab-bar--current-tab-index))
         (win (selected-window)))
-    (when (kdb-claude--display-in-project-tab buf nil)
+    (when (kdb-claude--display-in-own-tab buf nil)
       (unless (eql from (tab-bar--current-tab-index))
         (tab-bar-select-tab (1+ from)))
       (when (window-live-p win) (select-window win)))))
@@ -298,15 +274,26 @@ instead.  Returns the window, for `agent-shell-display-action'."
 
 ;;;###autoload
 (defun kdb-claude--close-session-window ()
-  "When a session is killed, close its split rather than show another buffer.
+  "When a session is killed, close its tab, or its window if it shares one.
 What it opened (`kdb-claude-show', `kdb-claude-run') is closed too."
   (add-hook 'kill-buffer-hook
             (lambda ()
               (when kdb-claude--id
                 (ignore-errors (kdb-claude-cleanup kdb-claude--id)))
+              (ignore-errors (kdb-claude--close-session-tab (current-buffer)))
               (dolist (w (get-buffer-window-list (current-buffer) nil))
                 (ignore-errors (delete-window w))))
             nil t))
+
+(defun kdb-claude--close-session-tab (buf)
+  "Close the tab showing session BUF, when BUF is all it shows."
+  (when-let* (((bound-and-true-p tab-bar-mode))
+              ((cdr (tab-bar-tabs)))                 ; never the last tab
+              (tab (tab-bar-get-buffer-tab buf)))
+    (when (if (eq (car tab) 'current-tab)
+              (and (one-window-p t) (eq (window-buffer) buf))
+            (equal (window-state-buffers (alist-get 'ws tab)) (list (buffer-name buf))))
+      (tab-bar-close-tab (1+ (alist-get 'index tab))))))
 
 (defun kdb-claude--start-with (dir &optional prompt session-id quietly)
   "Start a Claude shell in DIR, resuming SESSION-ID if non-nil.
@@ -913,38 +900,46 @@ can't be found there, and showing it again opens a second tab."
 
 ;;;###autoload
 (defun kdb-claude--rename-keeps-tab (rename &rest args)
-  "Around `rename-buffer': a renamed session stays findable in its tab."
+  "Around `rename-buffer': a renamed session keeps working, and its tab.
+shell-maker finds a session's buffer by the name it was given, so that
+is updated too.  Else a new session taking the old name gets the
+renamed one's output, and the renamed one freezes."
   (let ((old (buffer-name)))
     (prog1 (apply rename args)
       (when (and (derived-mode-p 'agent-shell-mode)
-                 (bound-and-true-p tab-bar-mode)
                  (not (equal old (buffer-name))))
-        (kdb-claude--rename-in-tab-states old (buffer-name))))))
+        (setq-local shell-maker--buffer-name-override (buffer-name))
+        (when (bound-and-true-p tab-bar-mode)
+          (kdb-claude--rename-in-tab-states old (buffer-name)))))))
 
 (defvar-local kdb-claude--auto-name nil
   "(BASE . NAME): the name `kdb-claude--name-session' last gave this buffer.")
 (put 'kdb-claude--auto-name 'permanent-local t)
 
 (defvar agent-shell-viewport--suffix)
+(defvar shell-maker--buffer-name-override)
 
 (defun kdb-claude--name-session (buf)
-  "Name session BUF \"PROJECT · TITLE\", after the title Claude gave it.
-The title is agent-shell's, kept current, so /rename renames it too.
+  "Name session BUF, and its tab, after the title Claude gave it.
+The title is agent-shell's, kept current, so /rename renames them too.
 Only a default \"Claude Agent @ …\" name or one given here is replaced,
-never one you chose."
+never one you chose; the same for the tab."
   (with-current-buffer buf
     (when-let* ((title (map-nested-elt agent-shell--state '(:session :title)))
                 ((not (string-blank-p title)))
-                (base (format "%s · %s"
-                              (file-name-nondirectory
-                               (directory-file-name (kdb-claude--project-dir default-directory)))
-                              (truncate-string-to-width (string-trim title) 40 nil nil "…")))
+                (base (truncate-string-to-width (string-trim title) 40 nil nil "…"))
                 (old (buffer-name))
                 ((or (string-prefix-p "Claude Agent @ " old)
                      (equal old (cdr kdb-claude--auto-name))))
                 ((not (equal base (car kdb-claude--auto-name)))))
       (rename-buffer (generate-new-buffer-name base))
       (setq kdb-claude--auto-name (cons base (buffer-name)))
+      (when-let* ((kdb-claude--tab-auto)
+                  ((bound-and-true-p tab-bar-mode))
+                  (tab (tab-bar-get-buffer-tab buf))
+                  ((equal (alist-get 'name tab) kdb-claude--tab-auto)))
+        (tab-bar-rename-tab base (1+ (alist-get 'index tab)))
+        (setq kdb-claude--tab-auto base))
       ;; Its viewport is found by the shell's name, so it follows.
       (when-let* (((boundp 'agent-shell-viewport--suffix))
                   (viewport (get-buffer (concat old agent-shell-viewport--suffix))))

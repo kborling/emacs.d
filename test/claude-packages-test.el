@@ -19,7 +19,7 @@
                  display-buffer-alist))
   (require 'agent-shell)
   (should (equal agent-shell-display-action
-                 '((kdb-claude--display-in-project-tab display-buffer-same-window))))
+                 '((kdb-claude--display-in-own-tab display-buffer-same-window))))
   (should (equal agent-shell-anthropic-default-session-mode-id "auto"))
   (should (memq 'kdb-claude--tab-name-waiting tab-bar-tab-name-format-functions))
   (require 'tabspaces)
