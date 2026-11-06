@@ -259,7 +259,8 @@
                  (push (with-current-buffer kdb-claude--permission-panel (buffer-string)) panels)
                  (should (get-buffer-window kdb-claude--permission-panel))   ; shown while asking
                  (list (pop keys))))
-              ((symbol-function 'agent-shell-attention-jump) (lambda () (error "Shouldn't jump"))))
+              ((symbol-function 'agent-shell-attention-jump) (lambda () (error "Shouldn't jump")))
+              ((symbol-function 'kdb-claude--permission-open-p) #'always))
       (kdb-claude-answer))
     (should (equal answered '("yes" "yes")))
     (should (equal (reverse prompts) '("Answer (2 more waiting)" "Answer (1 more waiting)" "Answer")))
@@ -271,10 +272,21 @@
     ;; g: to the session, by way of its tab.
     (let (went)
       (cl-letf (((symbol-function 'read-multiple-choice) (lambda (&rest _) (list ?g)))
+                ((symbol-function 'kdb-claude--permission-open-p) #'always)
                 ((symbol-function 'kdb-claude--goto-session) (lambda (b) (setq went b)))
                 ((symbol-function 'agent-shell-jump-to-latest-permission-button-row) #'ignore))
         (kdb-claude-answer))
       (should (eq went a)))
     (kill-buffer a)))
+
+(ert-deftest permission-ids-are-per-session ()
+  "Two sessions can both have a request 11; answering one keeps the other."
+  (let* ((a (generate-new-buffer "Claude Agent @ a"))
+         (b (generate-new-buffer "Claude Agent @ b"))
+         (kdb-claude--permissions (list (list 11 a 'pa) (list 11 b 'pb))))
+    (kdb-claude--forget-permission a 11)
+    (should (equal kdb-claude--permissions (list (list 11 b 'pb))))
+    (kill-buffer a)
+    (kill-buffer b)))
 
 ;;; claude-messaging-test.el ends here

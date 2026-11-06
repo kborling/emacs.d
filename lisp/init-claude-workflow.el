@@ -60,11 +60,17 @@ Return nil so agent-shell still shows its inline card."
            permission kdb-claude--responders)
   nil)
 
-(defun kdb-claude--forget-permission (id)
-  "Drop permission request ID from the queue."
-  (remhash id kdb-claude--responders)
-  (setq kdb-claude--permissions (seq-remove (lambda (e) (equal (car e) id))
+(defun kdb-claude--forget-permission (buf id)
+  "Drop session BUF's permission request ID from the queue.
+Each session numbers its own requests, so another session's ID is kept."
+  (setq kdb-claude--permissions (seq-remove (lambda (e) (and (equal (car e) id) (eq (nth 1 e) buf)))
                                             kdb-claude--permissions)))
+
+(defun kdb-claude--permission-open-p (buf id)
+  "Whether session BUF still waits on permission request ID.
+A request the agent cancels sends no response event, so it'd stay queued."
+  (seq-some (lambda (tc) (equal (map-elt (cdr tc) :permission-request-id) id))
+            (map-elt (buffer-local-value 'agent-shell--state buf) :tool-calls)))
 
 ;;;###autoload
 (defun kdb-claude--track-permissions ()
@@ -76,13 +82,15 @@ Return nil so agent-shell still shows its inline card."
                  (let ((id (map-elt (map-elt event :data) :request-id)))
                    (pcase (map-elt event :event)
                      ('permission-request
+                      ;; Captured just now, in this same request: take it before another session reuses the id.
                       (when-let* ((perm (gethash id kdb-claude--responders)))
+                        (remhash id kdb-claude--responders)
                         (setq kdb-claude--permissions
                               (append kdb-claude--permissions (list (list id buf perm))))))
-                     ('permission-response (kdb-claude--forget-permission id))
+                     ('permission-response (kdb-claude--forget-permission buf id))
                      ('clean-up
-                      (dolist (e kdb-claude--permissions)
-                        (when (eq (nth 1 e) buf) (kdb-claude--forget-permission (car e)))))))))))
+                      (setq kdb-claude--permissions
+                            (seq-remove (lambda (e) (eq (nth 1 e) buf)) kdb-claude--permissions)))))))))
 
 (defconst kdb-claude--permission-keys
   '(("allow_once" . ?y) ("allow_always" . ?!) ("reject_once" . ?n) ("reject_always" . ?N)))
@@ -102,7 +110,8 @@ pending, jump to the next session waiting on you."
 
 (defun kdb-claude--answer-next ()
   "Answer the oldest pending permission request, then the next."
-  (setq kdb-claude--permissions (seq-filter (lambda (e) (buffer-live-p (nth 1 e)))
+  (setq kdb-claude--permissions (seq-filter (lambda (e) (and (buffer-live-p (nth 1 e))
+                                                             (kdb-claude--permission-open-p (nth 1 e) (car e))))
                                             kdb-claude--permissions))
   (pcase (car kdb-claude--permissions)
     ('nil (unless (get-buffer-window kdb-claude--permission-panel) ; none were waiting
@@ -126,7 +135,7 @@ pending, jump to the next session waiting on you."
                   (funcall (map-elt perm :respond) (map-elt opt :option-id))
                   (when (equal (map-elt opt :kind) "reject_once")
                     (agent-shell-interrupt t)))
-                (kdb-claude--forget-permission id)
+                (kdb-claude--forget-permission buf id)
                 (when kdb-claude--permissions (kdb-claude--answer-next)))
                ((eq key ?g)
                 (kdb-claude--goto-session buf)   ; in its tab, if it has one
