@@ -289,4 +289,45 @@
     (kill-buffer a)
     (kill-buffer b)))
 
+(ert-deftest permission-notice-in-plain-words ()
+  (require 'agent-shell-attention)
+  (let ((buf (generate-new-buffer "Fix the parser"))
+        shown notified passed)
+    (with-current-buffer buf
+      (setq-local agent-shell--state
+                  (list (cons :tool-calls
+                              (list (cons "toolu_1" (list (cons :title "```console\nnpm test -- --runInBand\n```")
+                                                          (cons :description "Run the parser tests")
+                                                          (cons :permission-request-id 7))))))))
+    (cl-letf (((symbol-function 'agent-shell-attention--should-notify-buffer) #'always)
+              ((symbol-function 'agent-shell-attention--maybe-notify)
+               (lambda (_b title body) (setq notified (list title body))))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args) (setq shown (substring-no-properties (apply #'format fmt args)))))
+              ((symbol-function 'active-minibuffer-window) #'ignore))
+      (cl-flet ((orig (b text) (setq passed (list b text))))
+        ;; A permission request: who asks, for what, and the key.
+        (kdb-claude--permission-message #'orig buf "Permission: ```console npm test``` (execute)")
+        (should (equal shown "Fix the parser asks: Run the parser tests  (C-c ' to answer)"))
+        (should (equal notified '("Fix the parser" "Fix the parser asks: Run the parser tests")))
+        (should-not passed)
+        ;; Anything else is agent-shell-attention's as before.
+        (kdb-claude--permission-message #'orig buf "Turn complete")
+        (should (equal passed (list buf "Turn complete")))
+        ;; Not over a prompt you're answering; the notification still goes.
+        (setq shown nil notified nil)
+        (cl-letf (((symbol-function 'active-minibuffer-window) #'always))
+          (kdb-claude--permission-message #'orig buf "Permission: x"))
+        (should-not shown)
+        (should notified)))
+    ;; No description: the command, without its fence.
+    (should (equal (kdb-claude--permission-gist '((:title . "```console\nls -la\n```"))) "ls -la"))
+    (kill-buffer buf))
+  ;; The card: what it's for, above the command.
+  (let ((orig (lambda (&rest _) "```console\nnpm test\n```")))
+    (should (equal (kdb-claude--permission-title orig :tool-call '((:description . "Run the tests")))
+                   "Run the tests\n\n```console\nnpm test\n```"))
+    (should (equal (kdb-claude--permission-title orig :tool-call '((:title . "x")))
+                   "```console\nnpm test\n```"))))
+
 ;;; claude-messaging-test.el ends here

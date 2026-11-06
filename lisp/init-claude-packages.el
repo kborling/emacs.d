@@ -17,7 +17,8 @@
 (dolist (fn '(kdb-claude--capture-permission kdb-claude--track-permissions kdb-claude--notify
               kdb-claude--start-with kdb-claude-spawn kdb-claude-message
               kdb-claude-show kdb-claude-run kdb-claude-output kdb-claude-cleanup
-              kdb-claude--rename-keeps-tab
+              kdb-claude--rename-keeps-tab kdb-claude--permission-message
+              kdb-claude--permission-title
               kdb-claude--tag-client kdb-claude--render-markdown
               kdb-claude--track-artifacts kdb-claude--track-emacs-session
               kdb-claude--header-symbol-fonts kdb-claude--tab-name-waiting
@@ -89,6 +90,7 @@
   (advice-add 'agent-shell--busy-indicator-frame :filter-return #'kdb-claude--steady-busy-frame)
   (advice-add 'agent-shell-heartbeat-make :filter-args #'kdb-claude--heartbeat-rate)
   (advice-add 'rename-buffer :around #'kdb-claude--rename-keeps-tab)
+  (advice-add 'agent-shell--permission-title :around #'kdb-claude--permission-title)
   (advice-add 'agent-shell--fetch-agent-icon :before-until #'kdb-claude--logo-icon)
   (dolist (fn '(agent-shell--make-header-model agent-shell--header-model-refresh-frame))
     (advice-add fn :filter-return #'kdb-claude--logo-header))
@@ -117,6 +119,7 @@
   ;; A marker on each tab with a session waiting for you.
   (add-to-list 'tab-bar-tab-name-format-functions #'kdb-claude--tab-name-waiting t)
   (advice-add 'agent-shell-attention--update-indicator :after #'kdb-claude--redraw-tabs)
+  (advice-add 'agent-shell-attention--message :around #'kdb-claude--permission-message)
   (agent-shell-attention-mode 1))
 
 (global-set-key (kbd "C-c l") #'kdb-claude)

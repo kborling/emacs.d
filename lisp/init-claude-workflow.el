@@ -146,6 +146,45 @@ pending, jump to the next session waiting on you."
   (string-remove-prefix (concat project " · ")
                         (string-remove-prefix "Claude Agent @ " (buffer-name buf))))
 
+(defun kdb-claude--permission-gist (call)
+  "One line saying what tool CALL is for: its description, else its title."
+  (string-trim
+   (replace-regexp-in-string
+    "[ \t\n]+" " "
+    (replace-regexp-in-string "```[a-z]*" ""
+                              (or (map-elt call :description)
+                                  (map-elt (map-elt call :raw-input) 'description)
+                                  (map-elt call :title)
+                                  "use a tool")))))
+
+;;;###autoload
+(defun kdb-claude--permission-message (message buffer text)
+  "Around agent-shell-attention's notice: a permission request in plain words.
+Instead of its raw \"Permission: <command>\", say which session asks for
+what, and how to answer; not over a prompt you're answering."
+  (if-let* (((string-prefix-p "Permission:" text))
+            ((buffer-live-p buffer))
+            ((agent-shell-attention--should-notify-buffer buffer))
+            (call (seq-some (lambda (tc) (and (map-elt (cdr tc) :permission-request-id) (cdr tc)))
+                            (reverse (map-elt (buffer-local-value 'agent-shell--state buffer)
+                                              :tool-calls)))))
+      (let* ((session (string-remove-prefix "Claude Agent @ " (buffer-name buffer)))
+             (asks (format "%s asks: %s" session (kdb-claude--permission-gist call))))
+        (unless (active-minibuffer-window)
+          (message "%s  %s" (truncate-string-to-width asks (max 20 (- (frame-width) 22)) nil nil "…")
+                   (propertize "(C-c ' to answer)" 'face 'shadow)))
+        (agent-shell-attention--maybe-notify buffer session asks))
+    (funcall message buffer text)))
+
+;;;###autoload
+(defun kdb-claude--permission-title (title-fn &rest args)
+  "Around agent-shell's permission card title: what it's for, then the command."
+  (let ((title (apply title-fn args))
+        (what (map-elt (plist-get args :tool-call) :description)))
+    (if (and what title (not (string-match-p (regexp-quote what) title)))
+        (concat what "\n\n" title)
+      title)))
+
 (defun kdb-claude--permission-text (buf perm)
   "What session BUF asks to do in permission request PERM, to read at a glance."
   (let* ((call (map-elt perm :tool-call))
@@ -729,6 +768,8 @@ each time a turn starts or ends."
 (declare-function tabspaces--buffer-list "tabspaces")
 (declare-function agent-shell-attention--tab-displays-buffer-p "agent-shell-attention")
 (declare-function agent-shell-attention--pending-entry-permission-p "agent-shell-attention")
+(declare-function agent-shell-attention--should-notify-buffer "agent-shell-attention")
+(declare-function agent-shell-attention--maybe-notify "agent-shell-attention")
 
 (defun kdb-claude--waiting ()
   "Sessions waiting for you, as (BUFFER . KIND).
