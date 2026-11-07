@@ -507,18 +507,13 @@ under a path limit that makes LONG's transcripts too long to open."
 (ert-deftest new-session-in-any-folder ()
   (require 'init-claude-workflow)
   (let* ((root (file-name-as-directory (make-temp-file "notes" t)))
-         offered started)
-    (cl-letf (((symbol-function 'kdb-claude--session-dirs) (lambda () nil))
-              ((symbol-function 'completing-read)
-               (lambda (_p table &rest _) (setq offered (all-completions "" table)) "Other folder…"))
-              ((symbol-function 'read-directory-name) (lambda (&rest _) root))
+         asked started)
+    (cl-letf (((symbol-function 'read-directory-name)
+               (lambda (prompt &rest _) (setq asked prompt) (directory-file-name root)))
               ((symbol-function 'kdb-claude--new-in) (lambda (dir) (setq started dir))))
-      ;; "Other folder…" is offered last, and asks with folder completion.
-      (should (equal (kdb-claude-read-directory "Project: ") root))
-      (should (equal (car (last offered)) "Other folder…"))
-      ;; C-c l p: a new session there, project or not.
-      (kdb-claude-new-in-folder)
+      ;; C-c l p: Emacs's own folder prompt; a session there, project or not.
+      (call-interactively #'kdb-claude-new-in-folder)
+      (should (equal asked "Start Claude in: "))
       (should (equal started root)))
     (delete-directory root t)))
-
 ;;; claude-sync-test.el ends here

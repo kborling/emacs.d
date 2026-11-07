@@ -375,11 +375,12 @@ outside any project, pick the directory."
                         (kdb-claude-read-directory "Project: "))))
 
 ;;;###autoload
-(defun kdb-claude-new-in-folder ()
-  "Start a new Claude session in a folder you pick, project or not.
-The region, Dired files or org entry at point are carried over."
-  (interactive)
-  (kdb-claude-new t))
+(defun kdb-claude-new-in-folder (dir)
+  "Start a new Claude session in folder DIR, project or not.
+Asked with Emacs's usual folder prompt, from the current folder.  The
+region, Dired files or org entry at point are carried over."
+  (interactive (list (read-directory-name "Start Claude in: " nil nil t)))
+  (kdb-claude--new-in (file-name-as-directory (expand-file-name dir))))
 
 ;;;###autoload
 (defun kdb-claude-scratch ()

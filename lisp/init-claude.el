@@ -418,8 +418,7 @@ as a directory name."
          (dirs (seq-uniq (append (mapcar #'car claude)
                                  (mapcar (lambda (d) (file-name-as-directory (expand-file-name d)))
                                          (seq-filter #'file-directory-p others)))))
-         (other "Other folder…")
-         (cands (append (mapcar #'abbreviate-file-name dirs) (list other)))
+         (cands (mapcar #'abbreviate-file-name dirs))
          (here (and (project-current) (abbreviate-file-name (project-root (project-current)))))
          (choice (completing-read
                   (format-prompt (string-remove-suffix ": " prompt) here)
@@ -436,9 +435,7 @@ as a directory name."
                   nil nil nil nil here)))
     (file-name-as-directory
      (expand-file-name
-      (cond ((equal choice other) (read-directory-name "Folder: " default-directory nil t))
-            ((file-directory-p choice) choice)
-            (t (read-directory-name "Folder: " choice)))))))
+      (if (file-directory-p choice) choice (read-directory-name "Folder: " choice))))))
 
 ;;; ============================================================
 ;;; History
