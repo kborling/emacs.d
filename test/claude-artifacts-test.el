@@ -530,9 +530,6 @@
       (104 (ppid . 101) (comm . "npm") (args . "npm exec @playwright/mcp") (start . ,(funcall at 2)))
       (105 (ppid . 104) (comm . "node") (args . "node playwright-mcp") (start . ,(funcall at 3)))
       (106 (ppid . 102) (comm . "conhost.exe") (start . ,(funcall at 60)))
-      ;; Windows, no command lines: started with Claude Code is kept, later is work.
-      (107 (ppid . 101) (comm . "node.exe") (start . ,(funcall at 3)))
-      (108 (ppid . 101) (comm . "bash.exe") (start . ,(funcall at 90)))
       ;; Someone else's.
       (200 (ppid . 1) (comm . "bash") (args . "bash") (start . ,(funcall at 5))))))
 
@@ -554,7 +551,7 @@
   (require 'agent-shell)
   (let ((buf (generate-new-buffer "Run the tests")))
     (test-with-processes buf
-      (should (equal (mapcar #'car (kdb-claude--session-work buf)) '(102 103 108))))
+      (should (equal (mapcar #'car (kdb-claude--session-work buf)) '(102 103))))
     (kill-buffer buf)))
 
 (ert-deftest ready-session-with-background-work-marked-working ()
@@ -621,5 +618,86 @@
       (should (seq-some (lambda (w) (equal (alist-get 'comm (cdr w)) "sleep")) work)))
     (delete-process agent)
     (kill-buffer buf)))
+
+(ert-deftest session-work-on-windows ()
+  ;; Windows: cmd.exe > node.exe > claude.exe, and no command lines from
+  ;; Emacs: PowerShell's, once read, decide what is work.
+  (require 'agent-shell)
+  (let* ((buf (generate-new-buffer "Run the tests"))
+         (t0 (time-subtract nil 600))
+         (at (lambda (sec) (time-add t0 sec)))
+         (tree `((101 (ppid . 100) (comm . "node.exe") (start . ,(funcall at -1)))
+                 (102 (ppid . 101) (comm . "claude.exe") (start . ,(funcall at 0)))
+                 (103 (ppid . 102) (comm . "bash.exe") (start . ,(funcall at 90)))      ; tests
+                 (109 (ppid . 103) (comm . "node.exe") (start . ,(funcall at 91)))
+                 (104 (ppid . 102) (comm . "cmd.exe") (start . ,(funcall at 300)))      ; TS server
+                 (105 (ppid . 104) (comm . "node.exe") (start . ,(funcall at 301)))
+                 (106 (ppid . 102) (comm . "csharp-ls.exe") (start . ,(funcall at 400)))
+                 (107 (ppid . 102) (comm . "node.exe") (start . ,(funcall at 3)))       ; MCP
+                 (108 (ppid . 102) (comm . "node.exe") (start . ,(funcall at 500)))))   ; not read yet
+         (kdb-claude--command-lines (make-hash-table))
+         (agent (make-process :name "agent" :command (list "sleep" "30") :noquery t))
+         asked)
+    (cl-flet ((known (pid line) (puthash pid (cons (alist-get 'start (cdr (assq pid tree))) line)
+                                         kdb-claude--command-lines)))
+      (known 103 "bash.exe -c \"npm test\"")
+      (known 104 "cmd.exe /c typescript-language-server --stdio")
+      (known 106 "csharp-ls.exe")
+      (known 107 nil))                                   ; unreadable: the 20 seconds decide
+    (cl-letf (((symbol-function 'process-id) (lambda (_) 100))
+              ((symbol-function 'list-system-processes) (lambda () (mapcar #'car tree)))
+              ((symbol-function 'process-attributes) (lambda (pid) (cdr (assq pid tree))))
+              ((symbol-function 'kdb-claude--read-command-lines)
+               (lambda (pids &rest _) (setq asked pids))))
+      (with-current-buffer buf
+        (setq-local agent-shell--state (list (cons :client (list (cons :process agent))))))
+      (should (equal (mapcar #'car (kdb-claude--session-work buf)) '(103 109)))
+      (should (equal asked '(108))))                     ; read in the background
+    (delete-process agent)
+    (kill-buffer buf)))
+
+(ert-deftest command-lines-read-and-kept ()
+  (let ((kdb-claude--command-lines (make-hash-table))
+        (table (make-hash-table))
+        (t1 (current-time)))
+    (puthash 7 (list (cons 'start t1)) table)
+    (puthash 8 (list (cons 'start t1)) table)
+    (kdb-claude--store-command-lines '(7 8) "7\tbash.exe -c \"npm test\"\r\n" table)
+    (should (equal (kdb-claude--args 7 (gethash 7 table)) "bash.exe -c \"npm test\""))
+    (should (eq (kdb-claude--args 8 (gethash 8 table)) 'unreadable))   ; not asked again
+    ;; A reused PID is a different process.
+    (should-not (kdb-claude--args 7 (list (cons 'start (time-add t1 5)))))))
+
+(ert-deftest stop-process-and-what-it-started ()
+  (let (ran signalled)
+    (let ((system-type 'windows-nt))
+      (cl-letf (((symbol-function 'call-process) (lambda (&rest args) (setq ran args) 0)))
+        (kdb-claude--stop-process 42))
+      (should (equal ran '("taskkill" nil nil nil "/PID" "42" "/T" "/F"))))
+    (let ((system-type 'gnu/linux)
+          (table (make-hash-table)))
+      (puthash 42 '((ppid . 1)) table)
+      (puthash 43 '((ppid . 42)) table)
+      (puthash 44 '((ppid . 43)) table)
+      (cl-letf (((symbol-function 'kdb-claude--process-table) (lambda () table))
+                ((symbol-function 'signal-process) (lambda (pid _) (push pid signalled))))
+        (kdb-claude--stop-process 42))
+      (should (equal (reverse signalled) '(44 43 42))))))      ; children first
+
+(ert-deftest stop-process-real ()
+  ;; A real parent and child: stopping the parent stops the child too.
+  (skip-unless (and (not (eq system-type 'windows-nt)) (executable-find "sh")))
+  (let* ((parent (make-process :name "parent" :noquery t
+                               :command (list "sh" "-c" "sleep 30 & wait")))
+         (pid (process-id parent)))
+    (sleep-for 0.3)
+    (let ((child (seq-find (lambda (p) (eql (alist-get 'ppid (process-attributes p)) pid))
+                           (list-system-processes))))
+      (should child)
+      (kdb-claude--stop-process pid)
+      (let ((end (+ (float-time) 3)))
+        (while (and (process-attributes child) (< (float-time) end)) (sleep-for 0.05)))
+      (should-not (memq (alist-get 'state (process-attributes child)) '("R" "S" "D")))
+      (should-not (process-live-p parent)))))
 
 ;;; claude-artifacts-test.el ends here

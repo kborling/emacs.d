@@ -1696,7 +1696,7 @@ the shell's buffer name, for `kdb-claude-output'.  Meant for
 ;;; What a session's commands are still running
 
 (defvar kdb-claude-permanent-processes
-  "mcp\\|language-server\\|langserver\\|lsp\\|omnisharp\\|pyright\\|gopls\\|rust-analyzer\\|clangd\\|tsserver\\|conhost\\|chrome\\|chromium\\|msedge\\|firefox\\|playwright"
+  "mcp\\|language-server\\|langserver\\|lsp\\|csharp-ls\\|omnisharp\\|pyright\\|gopls\\|rust-analyzer\\|clangd\\|tsserver\\|conhost\\|chrome\\|chromium\\|msedge\\|firefox\\|playwright"
   "Regexp for what a session keeps running throughout, not work:
 MCP servers, language servers, browsers, Windows' console hosts.")
 
@@ -1708,35 +1708,125 @@ MCP servers, language servers, browsers, Windows' console hosts.")
         (puthash pid attrs table)))
     table))
 
-(defun kdb-claude--session-work (buf &optional table)
+(defvar kdb-claude--command-lines (make-hash-table)
+  "PID -> (START . LINE): command lines read by PowerShell (Windows).
+LINE is nil when it couldn't be read; START tells a reused PID apart.")
+
+(defvar kdb-claude--command-lines-reading nil
+  "The PowerShell process reading command lines, while it runs.")
+
+(defun kdb-claude--args (pid attrs)
+  "PID's command line: a string, `unreadable', or nil if not known yet.
+Windows doesn't give Emacs command lines; those come from
+`kdb-claude--read-command-lines'."
+  (or (alist-get 'args attrs)
+      (when-let* ((known (gethash pid kdb-claude--command-lines))
+                  ((equal (car known) (alist-get 'start attrs))))
+        (or (cdr known) 'unreadable))))
+
+(defun kdb-claude--command-lines-query (pids)
+  "PowerShell printing PID<TAB>command line for each of PIDS."
+  (format "Get-CimInstance Win32_Process -Filter '%s' | %% { \"$($_.ProcessId)`t$($_.CommandLine)\" }"
+          (mapconcat (lambda (p) (format "ProcessId=%d" p)) pids " or ")))
+
+(defun kdb-claude--store-command-lines (pids output table)
+  "Keep the command lines PowerShell printed in OUTPUT for PIDS.
+PIDS it didn't print are kept as unreadable, so they aren't asked again."
+  (let ((read (make-hash-table)))
+    (dolist (line (split-string (or output "") "\n" t "\r"))
+      (when (string-match "\\`\\([0-9]+\\)\t\\(.*\\)" line)
+        (puthash (string-to-number (match-string 1 line)) (match-string 2 line) read)))
+    (dolist (pid pids)
+      (puthash pid (cons (alist-get 'start (gethash pid table))
+                         (let ((l (gethash pid read))) (and l (not (string-empty-p l)) l)))
+               kdb-claude--command-lines))))
+
+(defun kdb-claude--read-command-lines (pids table &optional wait)
+  "Read the command lines of PIDS (from process TABLE) with PowerShell.
+In the background, so Emacs never stops for it; with WAIT, now."
+  (when (and pids (eq system-type 'windows-nt))
+    (if wait
+        (kdb-claude--store-command-lines
+         pids (ignore-errors
+                (with-output-to-string
+                  (call-process "powershell" nil standard-output nil
+                                "-NoProfile" "-NonInteractive" "-Command"
+                                (kdb-claude--command-lines-query pids))))
+         table)
+      (unless (process-live-p kdb-claude--command-lines-reading)
+        (let ((out (generate-new-buffer " *claude command lines*")))
+          (setq kdb-claude--command-lines-reading
+                (ignore-errors
+                  (make-process
+                   :name "claude-command-lines" :buffer out :noquery t
+                   :command (list "powershell" "-NoProfile" "-NonInteractive" "-Command"
+                                  (kdb-claude--command-lines-query pids))
+                   :sentinel (lambda (proc _)
+                               (unless (process-live-p proc)
+                                 (kdb-claude--store-command-lines
+                                  pids (with-current-buffer out (buffer-string)) table)
+                                 (kill-buffer out)))))))))))
+
+(defun kdb-claude--session-work (buf &optional table wait)
   "What session BUF's commands are running, as (PID . ATTRIBUTES).
 Everything under its Claude Code, except what it keeps throughout (see
-`kdb-claude-permanent-processes').  Where command lines can't be read
-(Windows), what Claude Code started in its first 20 seconds counts as
-kept too: that's when it starts its MCP servers."
+`kdb-claude-permanent-processes').  On Windows, Claude Code sits under
+cmd.exe and node.exe, and command lines are read by PowerShell, in the
+background unless WAIT: until one is read, that process isn't counted.
+One that can't be read is kept if Claude Code started it in its first 20
+seconds, when it starts its MCP servers."
   (when-let* ((proc (map-nested-elt (buffer-local-value 'agent-shell--state buf) '(:client :process)))
               ((process-live-p proc))
               (root (process-id proc)))
     (let ((table (or table (kdb-claude--process-table)))
-          (children (make-hash-table))
-          work)
+          (children (make-hash-table)))
       (maphash (lambda (pid attrs) (push pid (gethash (alist-get 'ppid attrs) children))) table)
-      (cl-labels ((label (attrs) (concat (alist-get 'comm attrs) " " (alist-get 'args attrs)))
-                  (kept (attrs) (string-match-p kdb-claude-permanent-processes (label attrs)))
-                  (add (pid)
-                    (let ((attrs (gethash pid table)))
-                      (unless (kept attrs)
-                        (push (cons pid attrs) work)
-                        (mapc #'add (gethash pid children))))))
-        (dolist (claude (gethash root children))
-          (let ((born (alist-get 'start (gethash claude table))))
-            (dolist (top (gethash claude children))
+      (cl-labels ((kept (pid attrs)
+                    (let ((args (kdb-claude--args pid attrs)))
+                      (string-match-p kdb-claude-permanent-processes
+                                      (concat (alist-get 'comm attrs) " " (and (stringp args) args)))))
+                  ;; Claude Code itself, however deep: on Windows cmd > node > claude.exe.
+                  (claudes (pid)
+                    (if (string-prefix-p "claude" (or (alist-get 'comm (gethash pid table)) ""))
+                        (list pid)
+                      (mapcan #'claudes (gethash pid children))))
+                  (tops ()
+                    (mapcan (lambda (claude)
+                              (mapcar (lambda (top) (list top (alist-get 'start (gethash claude table))))
+                                      (gethash claude children)))
+                            (or (mapcan #'claudes (gethash root children)) (gethash root children)))))
+        (let ((unknown (seq-filter (lambda (top) (null (kdb-claude--args (car top) (gethash (car top) table))))
+                                   (tops))))
+          (when unknown
+            (kdb-claude--read-command-lines (mapcar #'car unknown) table wait)))
+        (let (work)
+          (cl-labels ((add (pid)
+                        (let ((attrs (gethash pid table)))
+                          (unless (kept pid attrs)
+                            (push (cons pid attrs) work)
+                            (mapc #'add (gethash pid children))))))
+            (pcase-dolist (`(,top ,born) (tops))
               (let* ((attrs (gethash top table))
+                     (args (kdb-claude--args top attrs))
                      (start (alist-get 'start attrs)))
-                (unless (and (not (alist-get 'args attrs)) born start
-                             (< (float-time (time-subtract start born)) 20))
-                  (add top)))))))
-      (sort work (lambda (a b) (< (car a) (car b)))))))
+                (unless (or (null args)          ; not read yet: not counted
+                            (and (eq args 'unreadable) born start
+                                 (< (float-time (time-subtract start born)) 20)))
+                  (add top)))))
+          (sort work (lambda (a b) (< (car a) (car b)))))))))
+
+(defun kdb-claude--stop-process (pid)
+  "Stop process PID and what it started.
+On Windows, `taskkill /T /F': `signal-process' doesn't stop a console
+program there, and children outlive their parent."
+  (if (eq system-type 'windows-nt)
+      (call-process "taskkill" nil nil nil "/PID" (number-to-string pid) "/T" "/F")
+    (let ((table (kdb-claude--process-table)))
+      (cl-labels ((below (p) (let (kids)
+                               (maphash (lambda (k a) (when (eql (alist-get 'ppid a) p) (push k kids))) table)
+                               (mapcan (lambda (k) (append (below k) (list k))) kids))))
+        (dolist (p (append (below pid) (list pid)))
+          (ignore-errors (signal-process p 'term)))))))
 
 (defvar kdb-claude--background nil
   "(TIME . SESSIONS): sessions found running work while not busy, and when.")
@@ -1760,20 +1850,6 @@ when some session is ready."
            (table (and idle (kdb-claude--process-table))))
       (setq kdb-claude--background
             (cons (current-time) (seq-filter (lambda (b) (kdb-claude--session-work b table)) idle))))))
-
-(defun kdb-claude--command-lines (pids)
-  "PID -> command line for PIDS where Emacs can't read them (Windows).
-One PowerShell query; nil elsewhere, or if it fails."
-  (when (and pids (eq system-type 'windows-nt))
-    (let ((table (make-hash-table)))
-      (ignore-errors
-        (dolist (line (process-lines
-                       "powershell" "-NoProfile" "-NonInteractive" "-Command"
-                       (format "Get-CimInstance Win32_Process -Filter '%s' | %% { \"$($_.ProcessId)`t$($_.CommandLine)\" }"
-                               (mapconcat (lambda (p) (format "ProcessId=%d" p)) pids " or "))))
-          (when (string-match "\\`\\([0-9]+\\)\t\\(.*\\)" line)
-            (puthash (string-to-number (match-string 1 line)) (match-string 2 line) table))))
-      table)))
 
 (defun kdb-claude--task-outputs (buf)
   "Output files of session BUF's background tasks, newest first."
@@ -1812,9 +1888,13 @@ MCP servers, language servers and browsers a session keeps are left out."
   (interactive)
   (require 'agent-shell)
   (let* ((table (kdb-claude--process-table))
-         (sessions (mapcar (lambda (b) (cons b (kdb-claude--session-work b table)))
-                           (agent-shell-buffers)))
-         (lines (kdb-claude--command-lines (mapcar #'car (mapcan (lambda (s) (copy-sequence (cdr s))) sessions)))))
+         (sessions (mapcar (lambda (b) (cons b (kdb-claude--session-work b table t)))
+                           (agent-shell-buffers))))
+    ;; Windows: the command lines of what's shown, read now.
+    (kdb-claude--read-command-lines
+     (seq-remove (lambda (pid) (kdb-claude--args pid (gethash pid table)))
+                 (mapcar #'car (mapcan (lambda (s) (copy-sequence (cdr s))) sessions)))
+     table t)
     (with-current-buffer (get-buffer-create "*Claude processes*")
       (let ((inhibit-read-only t) (pos (point)))
         (erase-buffer)
@@ -1832,9 +1912,9 @@ MCP servers, language servers and browsers a session keeps are left out."
                   (insert (propertize
                            (format "  %7d  %8s  %s\n" (car w) (kdb-claude--elapsed attrs)
                                    (truncate-string-to-width
-                                    (string-trim (or (and lines (gethash (car w) lines))
-                                                     (alist-get 'args attrs)
-                                                     (alist-get 'comm attrs) ""))
+                                    (string-trim (let ((args (kdb-claude--args (car w) attrs)))
+                                                   (if (stringp args) args
+                                                     (or (alist-get 'comm attrs) ""))))
                                     (max 20 (- (window-width) 22)) nil nil "…"))
                            'kdb-pid (car w) 'kdb-session buf)))))
             (dolist (file (seq-take (kdb-claude--task-outputs buf) 3))
@@ -1859,8 +1939,8 @@ MCP servers, language servers and browsers a session keeps are left out."
   "Stop the process on this line (asks first)."
   (interactive)
   (let ((pid (or (get-text-property (point) 'kdb-pid) (user-error "No process on this line"))))
-    (when (y-or-n-p (format "Stop process %d? " pid))
-      (signal-process pid 'term)
+    (when (y-or-n-p (format "Stop process %d and what it started? " pid))
+      (kdb-claude--stop-process pid)
       (sit-for 0.5)
       (kdb-claude-processes))))
 
