@@ -116,6 +116,9 @@
 (setq package-install-upgrade-built-in t
       package-vc-register-as-project nil)
 
+;; A new window takes its share from all those beside it, not half of one.
+(setq window-combination-resize t)
+
 ;; Popup/window management — consistent buffer placement
 (setq display-buffer-alist
       '(;; Hide noise

@@ -808,6 +808,13 @@ A request for input outranks a finished reply."
                               waiting))))
     (if (memq 'input kinds) 'input 'done)))
 
+(defface kdb-claude-tab-input '((t :inherit warning :weight bold))
+  "Tab mark: a session there needs your input."
+  :group 'tab-bar)
+(defface kdb-claude-tab-done '((t :inherit success :weight bold))
+  "Tab mark: a session there has finished a reply."
+  :group 'tab-bar)
+
 ;;;###autoload
 (defun kdb-claude--tab-name-waiting (name tab i)
   "NAME marked when TAB, number I, has a session waiting for you.
@@ -815,8 +822,8 @@ A request for input outranks a finished reply."
 ✓ in the success color: it has finished a reply.
 For `tab-bar-tab-name-format-functions'."
   (pcase (kdb-claude--tab-waiting tab (1- i))
-    ('input (concat (propertize "● " 'face '(:inherit warning :weight bold)) name))
-    ('done (concat (propertize "✓ " 'face '(:inherit success :weight bold)) name))
+    ('input (concat (propertize "● " 'face 'kdb-claude-tab-input) name))
+    ('done (concat (propertize "✓ " 'face 'kdb-claude-tab-done) name))
     (_ name)))
 
 (defvar kdb-claude--waiting-drawn nil

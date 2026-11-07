@@ -14,6 +14,7 @@
   (should (fboundp 'kdb-claude-queue-edit))
   (should (fboundp 'agent-shell-prompt-queue-remove))         ; on the menu before a session
   (should (featurep 'init-local-models))
+  (should window-combination-resize)
   (should (eq (key-binding (kbd "C-c a s")) 'kdb-local-models-setup))
   (should (assoc "\\*\\(claude blocks\\|claude \\(bash\\|pwsh\\): .*\\|Org-Babel Error Output\\)\\*"
                  display-buffer-alist))

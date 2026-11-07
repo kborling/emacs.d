@@ -308,10 +308,9 @@
                      agent-shell-attention--pending)
             (should (equal (names) '("x" "● x")))   ; now the current tab: wants input
             ;; Each its own color.
-            (should (eq (plist-get (get-text-property 0 'face (kdb-claude--tab-name-waiting
-                                                                  "x" (nth 1 (frame-parameter nil 'tabs)) 2))
-                                   :inherit)
-                        'warning))
+            (should (eq (get-text-property 0 'face (kdb-claude--tab-name-waiting
+                                                     "x" (nth 1 (frame-parameter nil 'tabs)) 2))
+                        'kdb-claude-tab-input))
             ;; Input outranks a reply in the same tab.
             (puthash a (cons "Turn complete" 1.0) agent-shell-attention--pending)
             (cl-letf (((symbol-function 'tabspaces--buffer-list) (lambda (&rest _) (list a b))))
@@ -461,5 +460,18 @@
     (with-temp-buffer
       (should-error (kdb-claude-copy-session-id) :type 'user-error)
       (should-error (kdb-claude-remote-control) :type 'user-error))))
+
+(ert-deftest marked-tabs-sized-like-the-others ()
+  ;; Tab width goes by the face a tab's name starts with (Emacs 30 always,
+  ;; 31 once the face list is extended): a marked tab must still count.
+  (require 'agent-shell-attention)
+  (dolist (face '(kdb-claude-tab-input kdb-claude-tab-done))
+    (should (memq face tab-bar-auto-width-faces))
+    (let ((item (list 'tab-2 'menu-item (concat (propertize "● " 'face face)
+                                                (propertize "2 Fix the parser" 'face 'tab-bar-tab-inactive)))))
+      (should (tab-bar-auto-width-predicate-default item))))
+  ;; Plain tabs still count too.
+  (should (tab-bar-auto-width-predicate-default
+           (list 'tab-1 'menu-item (propertize "1 api" 'face 'tab-bar-tab-inactive)))))
 
 ;;; claude-artifacts-test.el ends here
