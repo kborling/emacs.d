@@ -825,16 +825,23 @@ reply, which outranks working."
 
 ;;;###autoload
 (defun kdb-claude--tab-name-waiting (name tab i)
-  "NAME marked when TAB, number I, has a session waiting for you.
+  "NAME marked when TAB, number I, has a session waiting for you or working.
 ● in the warning color: it needs your input (a permission request).
 ✓ in the success color: it has finished a reply.
 ◌ dimmed: it is still working.
-For `tab-bar-tab-name-format-functions'."
-  (pcase (kdb-claude--tab-waiting tab (1- i))
-    ('input (concat (propertize "● " 'face 'kdb-claude-tab-input) name))
-    ('done (concat (propertize "✓ " 'face 'kdb-claude-tab-done) name))
-    ('busy (concat (propertize "◌ " 'face 'kdb-claude-tab-busy) name))
-    (_ name)))
+The mark goes after the tab's number, on the tab's own face, so it is
+highlighted with the tab it belongs to.  For
+`tab-bar-tab-name-format-functions'."
+  (if-let* ((state (kdb-claude--tab-waiting tab (1- i)))
+            (mark (pcase state ('input "● ") ('done "✓ ") ('busy "◌ ")))
+            (face (pcase state ('input 'kdb-claude-tab-input) ('done 'kdb-claude-tab-done)
+                    ('busy 'kdb-claude-tab-busy))))
+      (let ((tab-face (get-text-property 0 'face name))
+            (at (if (string-match "\\`[0-9]+ " name) (match-end 0) 0)))
+        (concat (substring name 0 at)
+                (propertize mark 'face (if tab-face (list face tab-face) face))
+                (substring name at)))
+    name))
 
 (defvar kdb-claude--waiting-drawn nil
   "The sessions waiting for you, and on what, when the tab bar was last drawn.")

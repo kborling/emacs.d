@@ -462,18 +462,24 @@
       (should-error (kdb-claude-copy-session-id) :type 'user-error)
       (should-error (kdb-claude-remote-control) :type 'user-error))))
 
-(ert-deftest marked-tabs-sized-like-the-others ()
-  ;; Tab width goes by the face a tab's name starts with (Emacs 30 always,
-  ;; 31 once the face list is extended): a marked tab must still count.
+(ert-deftest marked-tab-mark-sits-in-its-tab ()
+  ;; After the tab's number, on the tab's own face: highlighted with its tab,
+  ;; and the name still starts as a tab's does, so it's sized like the rest
+  ;; (Emacs 30 goes by that first face).
   (require 'agent-shell-attention)
-  (dolist (face '(kdb-claude-tab-input kdb-claude-tab-done kdb-claude-tab-busy))
-    (should (memq face tab-bar-auto-width-faces))
-    (let ((item (list 'tab-2 'menu-item (concat (propertize "● " 'face face)
-                                                (propertize "2 Fix the parser" 'face 'tab-bar-tab-inactive)))))
-      (should (tab-bar-auto-width-predicate-default item))))
-  ;; Plain tabs still count too.
-  (should (tab-bar-auto-width-predicate-default
-           (list 'tab-1 'menu-item (propertize "1 api" 'face 'tab-bar-tab-inactive)))))
+  (let ((a (generate-new-buffer "*claude a*"))
+        (agent-shell-attention--pending (make-hash-table :test #'eq))
+        (agent-shell-attention--busy (make-hash-table :test #'eq)))
+    (switch-to-buffer a)
+    (puthash a 1 agent-shell-attention--busy)
+    (let ((name (kdb-claude--tab-name-waiting
+                 (propertize "2 Fix the parser" 'face 'tab-bar-tab) '(current-tab) 2)))
+      (should (equal (substring-no-properties name) "2 ◌ Fix the parser"))
+      (should (eq (get-text-property 0 'face name) 'tab-bar-tab))
+      (should (equal (get-text-property 2 'face name) '(kdb-claude-tab-busy tab-bar-tab)))
+      (let ((tab-bar-auto-width-faces '(tab-bar-tab tab-bar-tab-inactive)))  ; face-based, as Emacs 30
+        (should (tab-bar-auto-width-predicate-default (list 'current-tab 'menu-item name)))))
+    (kill-buffer a)))
 
 (ert-deftest tabs-mark-sessions-still-working ()
   (require 'agent-shell-attention)
