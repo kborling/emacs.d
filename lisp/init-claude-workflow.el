@@ -375,6 +375,13 @@ outside any project, pick the directory."
                         (kdb-claude-read-directory "Project: "))))
 
 ;;;###autoload
+(defun kdb-claude-new-in-folder ()
+  "Start a new Claude session in a folder you pick, project or not.
+The region, Dired files or org entry at point are carried over."
+  (interactive)
+  (kdb-claude-new t))
+
+;;;###autoload
 (defun kdb-claude-scratch ()
   "Start a throwaway session for a one-off question, outside any project.
 It runs in a scratch folder under the temp directory, gets its own tab,
@@ -1973,7 +1980,8 @@ or the session ends.  Run again in a watched session to stop."
 (transient-define-prefix kdb-claude-menu ()
   "Claude"
   [["Start"
-    ("n" "New here (C-u pick project)" kdb-claude-new)
+    ("n" "New here (C-u pick folder)" kdb-claude-new)
+    ("p" "New in a folder…" kdb-claude-new-in-folder)
     ("N" "New on project + branch" kdb-claude-start)
     ("z" "Throwaway (one-off question)" kdb-claude-scratch)
     ("t" "Schedule a session" kdb-claude-schedule)

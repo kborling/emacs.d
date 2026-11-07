@@ -504,4 +504,21 @@ under a path limit that makes LONG's transcripts too long to open."
     (kill-buffer shell)
     (delete-directory root t)))
 
+(ert-deftest new-session-in-any-folder ()
+  (require 'init-claude-workflow)
+  (let* ((root (file-name-as-directory (make-temp-file "notes" t)))
+         offered started)
+    (cl-letf (((symbol-function 'kdb-claude--session-dirs) (lambda () nil))
+              ((symbol-function 'completing-read)
+               (lambda (_p table &rest _) (setq offered (all-completions "" table)) "Other folder…"))
+              ((symbol-function 'read-directory-name) (lambda (&rest _) root))
+              ((symbol-function 'kdb-claude--new-in) (lambda (dir) (setq started dir))))
+      ;; "Other folder…" is offered last, and asks with folder completion.
+      (should (equal (kdb-claude-read-directory "Project: ") root))
+      (should (equal (car (last offered)) "Other folder…"))
+      ;; C-c l p: a new session there, project or not.
+      (kdb-claude-new-in-folder)
+      (should (equal started root)))
+    (delete-directory root t)))
+
 ;;; claude-sync-test.el ends here

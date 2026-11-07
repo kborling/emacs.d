@@ -33,7 +33,7 @@
                  kdb-claude-reply-to-org kdb-claude-usage kdb-claude-open-artifact
                  kdb-claude-copy-session-id kdb-claude-remote-control kdb-claude-queue-edit
                  kdb-claude-set-busy-indicator kdb-claude-start-model
-                 kdb-claude-reveal-artifact kdb-reveal-in-file-manager kdb-claude-scratch
+                 kdb-claude-reveal-artifact kdb-reveal-in-file-manager kdb-claude-scratch kdb-claude-new-in-folder
                  kdb-claude-review-pr)
                 ("init-claude-print" kdb-claude-print)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
