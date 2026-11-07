@@ -56,9 +56,9 @@ lisp/
 
 Sessions run in [agent-shell](https://github.com/xenodium/agent-shell) over ACP, using the `claude` CLI login (works with a Max subscription, Linux and native Windows). Requires node and `npm install -g @agentclientprotocol/claude-agent-acp`.
 
-- **Start** — new session at the project root, pre-filled with the region, Dired files or org entry at point; or pick any project (recent Claude directories first) and branch, which opens in its own git worktree
-- **Send** — region, note, files or a file to a session you pick; `C-c l v` has Claude review your uncommitted changes ([agent-review](https://github.com/nineluj/agent-review)): `RET` jumps to an issue, `m` marks, `S` sends marked findings to a session to fix
-- **Sessions** — `C-c '` answers the oldest permission request from any session right in the minibuffer (`y` allow, `!` always, `n` reject, `g` go there, `q` later), then the next; with none pending it jumps to the next session that finished. [agent-shell-attention](https://github.com/ultronozm/agent-shell-attention.el) shows `AS:n` in the mode line, echoes when a session needs you, and sends a desktop notification only while Emacs isn't focused; `C-c ;` opens [agent-shell-hq](https://github.com/SreenivasVRao/agent-shell-hq)'s peek: every session grouped by project with live status, previewed as you move (`n`/`p`, `RET` switch, `s` new); `C-c l r` has Claude name the current session
+- **Start** — each session in a tab of its own, named after its title; in a git repo you pick a branch, which gets its own worktree, so several sessions work on one project without colliding. The region, Dired files, org entry or file at point become its first message
+- **Send & review** — hand the same to a session you pick, or a new one; `C-c l v` has Claude review your uncommitted changes ([agent-review](https://github.com/nineluj/agent-review)), `C-c l R` reviews a GitHub PR in its own worktree and tab
+- **Sessions** — tabs mark a session that needs you (`●`), has finished (`✓`) or is still working (`◌`); `C-c '` answers the oldest permission request from any session (`y` allow, `!` always, `n` reject, `g` go there, `q` later), then the next. [agent-shell-attention](https://github.com/ultronozm/agent-shell-attention.el) notifies when a session needs you and Emacs isn't focused
 - **History** — every past session (agent-shell, CLI, Desktop's Code tab, imported Desktop chats) in one list: filter, full-text search, ask Claude about them, resume
 
 **New machine** (see [Claude setup checklist](#claude-setup-checklist)): install node and the Claude Code CLI, log in, then `C-c l !`.
@@ -154,22 +154,24 @@ Small coding models via [Ollama](https://ollama.com), sized for a 4 GB GPU; noth
 
 `C-c l` opens the Claude transient. All keys below follow `C-c l`.
 
-| | **Start** | | **Send** | | **Sessions** | | **History** |
+| | **Start** | | **Send & review** | | **Replies** |
+|---|---|---|---|---|---|
+| `n` | New here, on a branch (worktree) | `s` | Region/files/note/this file → session | `x` | Run a code block |
+| `p` | New in a folder… | `v` | Review my changes | `o` | Last reply → org |
+| `z` | Throwaway (one-off question) | `R` | Review a GitHub PR (URL) | `a` | Open a file Claude created |
+| `t` | Schedule a session | `w` | Watch PR CI, auto-fix | `e` | Open its folder |
+| `m` | New with another model | | | `T` | Transcript, all of it |
+
+| | **Sessions** | | **Queue** | | **History** | | **Setup** |
 |---|---|---|---|---|---|---|---|
-| `n` | New here (`C-u` pick project) | `s` | Region/note/files → session | `'` | Answer / next waiting | `h` | All sessions |
-| `N` | New on project + branch | `f` | File → session | `d` | Dashboard | `/` | Search text |
-| | | `v` | Review my changes | `l` | Peek / switch (by project) | `A` | Ask past sessions |
-| | | | | `r` | Name this session | `S` | Sync & commit |
-| | | | | | | `i` | Import Desktop export |
+| `c` | Switch / continue | `q` | Add a message | `h` | All sessions | `u` | Usage stats |
+| `P` | Status & processes | `E` | Edit a queued one | `/` | Search text | `S` | Sync & commit archive |
+| `D` | Share live / stop | `k` | Remove queued | `A` | Ask past sessions | `i` | Import Desktop export |
+| `y` | Copy session id | `g` | Send queued now | | | `!` | Set up this machine |
 
-In the history list (`C-c l h`): `RET` open, `u` resume (imported chats continue in a new session that reads the old one), `/` filter, `s` search, `A` ask, `g` refresh.
+In the history list (`C-c l h`): `RET` open, `u` resume (imported chats continue in a new session that reads the old one), `w` copy id, `D` open in Claude Desktop, `/` filter, `s` search, `A` ask, `g` refresh.
 
-Session shortcuts (no transient needed):
-
-| Key | Action |
-|-----|--------|
-| `C-c ;` | Peek at sessions grouped by project (live status, preview), `RET` to switch |
-| `C-c '` | Answer the oldest permission request from any session, else jump to the next waiting session |
+`C-c '` (no transient needed) answers the oldest permission request from any session, else jumps to the next waiting session. `M-1`…`M-9` go to a tab.
 
 ### Eglot / LSP (`C-c c`)
 

@@ -48,7 +48,7 @@
 
 (use-package agent-shell
   :ensure t
-  :commands (agent-shell-anthropic-start-claude-code agent-shell-send-file-to)
+  :commands agent-shell-anthropic-start-claude-code
   :config
   (setq agent-shell-anthropic-authentication
         (agent-shell-anthropic-make-authentication :login t)
@@ -99,12 +99,6 @@
   ;; Each session knows its id (KDB_CLAUDE_SESSION) for kdb-claude-message.
   (advice-add 'agent-shell-anthropic-make-claude-client :around #'kdb-claude--tag-client))
 
-;; Peek: sessions grouped by project with live status; RET switches.
-;; Label: Claude names the session.  (hq's HUD needs persp-mode; unused.)
-(use-package agent-shell-hq
-  :vc (:url "https://github.com/SreenivasVRao/agent-shell-hq" :rev :newest)
-  :commands (agent-shell-hq-peek agent-shell-hq-label))
-
 ;; Second-opinion review of uncommitted changes; send findings back with S.
 (use-package agent-review
   :vc (:url "https://github.com/nineluj/agent-review" :rev :newest)
@@ -123,7 +117,6 @@
   (agent-shell-attention-mode 1))
 
 (global-set-key (kbd "C-c l") #'kdb-claude)
-(global-set-key (kbd "C-c ;") #'agent-shell-hq-peek)
 (global-set-key (kbd "C-c '") #'kdb-claude-answer)
 
 ;; Session transcripts stay out of recent files (and so out of var/recentf).

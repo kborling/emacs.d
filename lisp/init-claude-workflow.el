@@ -262,12 +262,26 @@ what, and how to answer; not over a prompt you're answering."
              (ignore-errors (org-back-to-heading t) t))
     (org-mark-subtree)))
 
+(declare-function agent-shell--get-files-context "agent-shell")
+(defvar agent-shell-context-sources)
+
+(defun kdb-claude--this-file ()
+  "This buffer's file, as context for a session: when nothing is selected,
+the file, not agent-shell's default of the line point is on."
+  (when buffer-file-name
+    (agent-shell--get-files-context :files (list buffer-file-name))))
+
+(defconst kdb-claude--context-sources '(files region error kdb-claude--this-file)
+  "What a new or sent-to session gets: Dired files, the region, the error
+at point, else this file.")
+
 (defun kdb-claude--new-in (dir)
   "Start a new Claude shell in DIR (nil = the current project root).
 The region, Dired files or org entry at point become its first input."
   (require 'agent-shell)
   (kdb-claude--mark-org-entry)
-  (let ((agent-shell-cwd-function (if dir (lambda () dir) agent-shell-cwd-function)))
+  (let ((agent-shell-cwd-function (if dir (lambda () dir) agent-shell-cwd-function))
+        (agent-shell-context-sources kdb-claude--context-sources))
     (agent-shell-anthropic-start-claude-code)))
 
 
@@ -439,8 +453,9 @@ Emptied, it is taken out of the queue."
 
 ;;;###autoload
 (defun kdb-claude-send ()
-  "Send the region, Dired files or org entry at point to a session you pick.
-Or hand it off to a new session, in this project or another."
+  "Send the region, Dired files, org entry at point, or else this file, to a
+session you pick.  Or hand it off to a new session, in this project or
+another."
   (interactive)
   (require 'agent-shell)
   (kdb-claude--mark-org-entry)
@@ -466,7 +481,8 @@ Or hand it off to a new session, in this project or another."
           ((equal pick new-other)
            (kdb-claude--new-in (kdb-claude--read-branch-dir (kdb-claude-read-directory "Project: "))))
           (t (let* ((buf (cdr (assoc pick sessions)))
-                    (text (agent-shell--context :shell-buffer buf)))
+                    (text (let ((agent-shell-context-sources kdb-claude--context-sources))
+                            (agent-shell--context :shell-buffer buf))))
                (agent-shell--display-buffer buf)
                (when text
                  (agent-shell--insert-to-shell-buffer :text text :shell-buffer buf)))))))
@@ -1093,9 +1109,9 @@ path goes on the kill ring, to paste in an attach dialog."
 ;;;###autoload
 (defun kdb-claude-open-artifact (&optional reveal)
   "Open a file this session created, newest first, in the artifact pane.
-With prefix arg REVEAL, pick one of their folders to open in the file
-manager instead, to share from."
-  (interactive "P")
+REVEAL (`kdb-claude-reveal-artifact'): pick one of their folders to open
+in the file manager instead, to share from."
+  (interactive)
   (let* ((buf (if (derived-mode-p 'agent-shell-mode)
                   (current-buffer)
                 (or (seq-find (lambda (b) (buffer-local-value 'kdb-claude--artifacts b))
@@ -2295,37 +2311,34 @@ or the session ends.  Run again in a watched session to stop."
     ("z" "Throwaway (one-off question)" kdb-claude-scratch)
     ("t" "Schedule a session" kdb-claude-schedule)
     ("m" "New with another model" kdb-claude-start-model)]
-   ["Send"
-    ("s" "Region/note/files → session (or new)" kdb-claude-send)
-    ("f" "File → session" agent-shell-send-file-to)
+   ["Send & review"
+    ("s" "Region/files/note/this file → session" kdb-claude-send)
     ("v" "Review my changes" kdb-claude-review)
     ("R" "Review a GitHub PR (URL)" kdb-claude-review-pr)
-    ("x" "Code block → project shell / org babel" kdb-claude-run-block)
-    ("o" "Last reply → org (C-c C-e exports)" kdb-claude-reply-to-org)]
-   ["Sessions"
-    ("'" "Answer / next waiting" kdb-claude-answer)
-    ("d" "Dashboard" agent-shell-attention-dashboard)
-    ("l" "Peek / switch (by project)" agent-shell-hq-peek)
-    ("r" "Name this session" agent-shell-hq-label)
-    ("a" "Artifacts: open a file Claude created" kdb-claude-open-artifact)
-    ("e" "Artifacts: open their folder" kdb-claude-reveal-artifact)
-    ("w" "Watch PR CI, auto-fix (toggle)" kdb-claude-watch-pr)
-    ("T" "Transcript, all of it (org)" kdb-claude-transcript)
-    ("P" "Processes: what sessions run" kdb-claude-processes)
-    ("y" "Copy session id" kdb-claude-copy-session-id)
-    ("D" "Share live / stop (web, apps)" kdb-claude-remote-control)]
-   ["Queue (this project's session)"
+    ("w" "Watch PR CI, auto-fix (toggle)" kdb-claude-watch-pr)]
+   ["Replies"
+    ("x" "Run a code block" kdb-claude-run-block)
+    ("o" "Last reply → org" kdb-claude-reply-to-org)
+    ("a" "Open a file Claude created" kdb-claude-open-artifact)
+    ("e" "Open its folder" kdb-claude-reveal-artifact)
+    ("T" "Transcript, all of it" kdb-claude-transcript)]]
+  [["Sessions (C-c ' answers)"
+    ("c" "Switch / continue" kdb-claude-recent)
+    ("P" "Status & processes" kdb-claude-processes)
+    ("D" "Share live / stop" kdb-claude-remote-control)
+    ("y" "Copy session id" kdb-claude-copy-session-id)]
+   ["Queue"
     ("q" "Add a message" agent-shell-prompt-queue)
     ("E" "Edit a queued one" kdb-claude-queue-edit)
     ("k" "Remove queued" agent-shell-prompt-queue-remove)
     ("g" "Send queued now" agent-shell-prompt-queue-resume)]
    ["History"
-    ("c" "Continue a recent session" kdb-claude-recent)
     ("h" "All sessions" kdb-claude-history)
     ("/" "Search text" kdb-claude-search)
-    ("A" "Ask past sessions" kdb-claude-ask-archive)
-    ("u" "Usage stats (weeks/months)" kdb-claude-usage)
-    ("S" "Sync & commit" kdb-claude-sync)
+    ("A" "Ask past sessions" kdb-claude-ask-archive)]
+   ["Setup"
+    ("u" "Usage stats" kdb-claude-usage)
+    ("S" "Sync & commit archive" kdb-claude-sync)
     ("i" "Import Desktop export" kdb-claude-import-export)
     ("!" "Set up this machine" kdb-claude-setup)]])
 
