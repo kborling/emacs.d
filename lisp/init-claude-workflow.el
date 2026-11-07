@@ -365,14 +365,24 @@ QUIETLY `background': shown in its project tab, focus stays here;
                                  (agent-shell-insert :text prompt :submit t :shell-buffer buf))))))
     buf))
 
+(defvar kdb-claude-new-in-worktree nil
+  "Non-nil: \\[kdb-claude-new] asks for a branch, giving a session its own worktree.
+For working on several things in one project at once.  Set it in
+personal.el on the machines where you do.")
+
 ;;;###autoload
 (defun kdb-claude-new (&optional pick)
   "Start a new Claude session, carrying over the region, Dired files or
 org entry at point.  Runs at the project root; with prefix arg PICK, or
-outside any project, pick the directory."
+outside any project, pick the directory.  With
+`kdb-claude-new-in-worktree', it asks for a branch to work in."
   (interactive "P")
-  (kdb-claude--new-in (when (or pick (not (project-current)))
-                        (kdb-claude-read-directory "Project: "))))
+  (let ((dir (when (or pick (not (project-current)))
+               (kdb-claude-read-directory "Project: "))))
+    (kdb-claude--new-in
+     (if kdb-claude-new-in-worktree
+         (kdb-claude--read-branch-dir (or dir (kdb-claude--project-dir default-directory)))
+       dir))))
 
 ;;;###autoload
 (defun kdb-claude-new-in-folder (dir)
@@ -604,19 +614,39 @@ The main checkout is never switched, so parallel sessions stay put."
             (user-error "git worktree add failed for %s" branch)))
         (file-name-as-directory dir))))
 
+(defun kdb-claude--main-checkout (dir)
+  "The main checkout of the repo DIR is in, even from one of its worktrees."
+  (if-let* ((common (car (kdb-claude--git-lines dir "rev-parse" "--path-format=absolute"
+                                                "--git-common-dir")))
+            ((string-suffix-p "/.git" (directory-file-name common))))
+      (file-name-directory (directory-file-name common))
+    dir))
+
+(defun kdb-claude--read-branch-dir (dir)
+  "Where a session in DIR's repo works: a branch's worktree, or DIR itself.
+An existing branch opens its worktree, created if need be; a new name
+creates the branch in a new worktree beside the main checkout.  The
+first choice, \"(current checkout)\", stays in DIR.  Outside git, DIR."
+  (if-let* ((branches (kdb-claude--git-lines dir "branch" "--format=%(refname:short)")))
+      (let* ((here "(current checkout)")
+             (choices (cons here branches))
+             (b (completing-read
+                 "Branch (new name = new worktree; M-j for exactly what you typed): "
+                 (lambda (str pred action)
+                   (if (eq action 'metadata)
+                       '(metadata (display-sort-function . identity) (cycle-sort-function . identity))
+                     (complete-with-action action choices str pred))))))
+        (if (or (string-empty-p b) (equal b here))
+            dir
+          (kdb-claude--worktree (kdb-claude--main-checkout dir) b)))
+    dir))
+
 (defun kdb-claude-start ()
   "Start a Claude session on a project and branch of your choice.
-RET at the branch prompt keeps the current checkout; an existing branch
-opens its worktree; a new name creates the branch in a new worktree."
+\"(current checkout)\" keeps the checkout; an existing branch opens its
+worktree; a new name creates the branch in a new worktree."
   (interactive)
-  (let* ((project (kdb-claude-read-directory "Project: "))
-         (branches (kdb-claude--git-lines project "branch" "--format=%(refname:short)"))
-         (branch (when branches
-                   (let ((b (completing-read
-                             "Branch (RET = current checkout, new name = new worktree): "
-                             branches)))
-                     (unless (string-empty-p b) b)))))
-    (kdb-claude--new-in (if branch (kdb-claude--worktree project branch) project))))
+  (kdb-claude--new-in (kdb-claude--read-branch-dir (kdb-claude-read-directory "Project: "))))
 
 ;;;###autoload
 (defun kdb-claude--header-symbol-fonts (model)
