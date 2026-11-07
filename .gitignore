@@ -37,3 +37,4 @@ session.*
 personal.el
 init.el.backup
 tabsession.el
+eat-terminfo/

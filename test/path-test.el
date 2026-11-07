@@ -49,4 +49,39 @@
     (kill-buffer b))
   (should (windowp (display-buffer "*Messages*"))))
 
+(defvar eat--install-path)
+(defvar eat-term-terminfo-directory)
+
+(ert-deftest eat-terminfo-compiled-here-on-macos ()
+  ;; macOS's ncurses 5.7 can't read eat's ncurses-6 terminfo: compile it
+  ;; with the system tic, once, into a folder of our own.
+  (let* ((home (file-name-as-directory (make-temp-file "emacsd" t)))
+         (user-emacs-directory home)
+         (src-dir (file-name-as-directory (make-temp-file "eat" t)))
+         (eat--install-path src-dir)
+         (eat-term-terminfo-directory "/shipped/")
+         (runs nil))
+    (with-temp-file (expand-file-name "eat.ti" src-dir) (insert "eat-truecolor|x,\n"))
+    (cl-letf (((symbol-function 'call-process)
+               (lambda (prog &rest args)
+                 (push (cons prog (append args (list (getenv "TERMINFO")))) runs)
+                 (let ((out (expand-file-name "65/eat-truecolor" (getenv "TERMINFO"))))
+                   (make-directory (file-name-directory out) t)
+                   (with-temp-file out (insert "compiled")))
+                 0)))
+      (kdb-eat-local-terminfo)
+      (should (equal eat-term-terminfo-directory (expand-file-name "eat-terminfo/" home)))
+      (should (equal (car runs) (list "/usr/bin/tic" nil nil nil "-x"
+                                      (expand-file-name "eat.ti" src-dir)
+                                      (expand-file-name "eat-terminfo/" home))))
+      ;; Up to date: not compiled again.
+      (kdb-eat-local-terminfo)
+      (should (= 1 (length runs)))
+      ;; eat updated its source: compiled again.
+      (set-file-times (expand-file-name "eat.ti" src-dir) (time-add nil 60))
+      (kdb-eat-local-terminfo)
+      (should (= 2 (length runs))))
+    (delete-directory home t)
+    (delete-directory src-dir t)))
+
 ;;; path-test.el ends here

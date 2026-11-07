@@ -1812,6 +1812,24 @@ and refresh it in the background."
 
 ;; EAT (Terminal) ========================================== ;;
 
+(defvar eat--install-path)
+(defvar eat-term-terminfo-directory)
+
+(defun kdb-eat-local-terminfo ()
+  "Point eat at terminfo compiled here by macOS's own `tic'.
+eat ships it built by ncurses 6, which macOS's ncurses 5.7 can't read:
+zsh says \"'eat-truecolor': unknown terminal type\".  Compiled once, and
+again when eat's source changes; kept out of eat's own checkout."
+  (let ((dir (locate-user-emacs-file "eat-terminfo/"))
+        (src (expand-file-name "eat.ti" eat--install-path)))
+    (unless (seq-some (lambda (f) (file-newer-than-file-p f src))
+                      (and (file-directory-p dir)
+                           (directory-files-recursively dir "\\`eat-truecolor\\'")))
+      (make-directory dir t)
+      (let ((process-environment (cons (concat "TERMINFO=" dir) process-environment)))
+        (call-process "/usr/bin/tic" nil nil nil "-x" src)))
+    (setq eat-term-terminfo-directory dir)))
+
 (use-package eat
   :vc (:url "https://codeberg.org/akib/emacs-eat" :rev :newest)
   :ensure t
@@ -1824,6 +1842,8 @@ and refresh it in the background."
     (add-hook 'eshell-load-hook #'eat-eshell-mode)
     (add-hook 'eshell-load-hook #'eat-eshell-visual-command-mode))
   :config
+  (when (eq system-type 'darwin)
+    (kdb-eat-local-terminfo))
   ;; Performance settings
   (setq eat-kill-buffer-on-exit t
         eat-enable-yank-to-terminal t
