@@ -383,15 +383,15 @@ QUIETLY `background': shown in its project tab, focus stays here;
 (defun kdb-claude-new ()
   "Start a new Claude session in this project, on a branch you pick.
 A branch gets its own worktree, so sessions on different things don't
-collide; \"(current checkout)\", the first choice, stays put.  Outside a
-project, it asks for a folder.  The region, Dired files or org entry at
+collide; a new one starts from origin's default branch, fetched.
+\"(current checkout)\", the first choice, stays put.  Outside a project,
+it asks for a folder.  The region, Dired files, org entry or file at
 point are carried over."
   (interactive)
-  (kdb-claude--new-in
-   (kdb-claude--read-branch-dir
-    (if (project-current)
-        (kdb-claude--project-dir default-directory)
-      (file-name-as-directory (expand-file-name (read-directory-name "Start Claude in: " nil nil t)))))))
+  (kdb-claude--start-on-branch
+   (if (project-current)
+       (kdb-claude--project-dir default-directory)
+     (file-name-as-directory (expand-file-name (read-directory-name "Start Claude in: " nil nil t))))))
 
 ;;;###autoload
 (defun kdb-claude-new-in-folder (dir)
@@ -400,7 +400,7 @@ Asked with Emacs's usual folder prompt, from the current folder; in a
 git repo, then for a branch, as `kdb-claude-new' does.  The region,
 Dired files or org entry at point are carried over."
   (interactive (list (read-directory-name "Start Claude in: " nil nil t)))
-  (kdb-claude--new-in (kdb-claude--read-branch-dir (file-name-as-directory (expand-file-name dir)))))
+  (kdb-claude--start-on-branch (file-name-as-directory (expand-file-name dir))))
 
 ;;;###autoload
 (defun kdb-claude-scratch ()
@@ -477,9 +477,8 @@ another."
                       '(metadata (display-sort-function . identity) (cycle-sort-function . identity))
                     (complete-with-action a (append (mapcar #'car sessions) (list new-here new-other)) s p)))
                 nil t)))
-    (cond ((equal pick new-here) (kdb-claude--new-in (kdb-claude--read-branch-dir here)))
-          ((equal pick new-other)
-           (kdb-claude--new-in (kdb-claude--read-branch-dir (kdb-claude-read-directory "Project: "))))
+    (cond ((equal pick new-here) (kdb-claude--start-on-branch here))
+          ((equal pick new-other) (kdb-claude--start-on-branch (kdb-claude-read-directory "Project: ")))
           (t (let* ((buf (cdr (assoc pick sessions)))
                     (text (let ((agent-shell-context-sources kdb-claude--context-sources))
                             (agent-shell--context :shell-buffer buf))))
@@ -606,9 +605,9 @@ Interactively, a PR URL just copied is the default."
             ((equal line (concat "branch refs/heads/" branch)) (setq found dir))))
     (and found (file-name-as-directory found))))
 
-(defun kdb-claude--worktree (project branch)
+(defun kdb-claude--worktree (project branch &optional base)
   "Return a worktree of PROJECT on BRANCH, creating it beside PROJECT.
-A BRANCH that doesn't exist yet is created from PROJECT's HEAD.
+A BRANCH that doesn't exist yet is created from BASE, else PROJECT's HEAD.
 The main checkout is never switched, so parallel sessions stay put."
   (or (kdb-claude--branch-worktree project branch)
       (let ((dir (expand-file-name
@@ -623,7 +622,7 @@ The main checkout is never switched, so parallel sessions stay put."
                                 (if (kdb-claude--git-lines project "rev-parse" "--verify" "--quiet"
                                                            (concat "refs/heads/" branch))
                                     (list dir branch)
-                                  (list "-b" branch dir))))
+                                  (append (list "-b" branch dir) (and base (list base))))))
             (user-error "git worktree add failed for %s" branch)))
         (file-name-as-directory dir))))
 
@@ -635,24 +634,80 @@ The main checkout is never switched, so parallel sessions stay put."
       (file-name-directory (directory-file-name common))
     dir))
 
-(defun kdb-claude--read-branch-dir (dir)
-  "Where a session in DIR's repo works: a branch's worktree, or DIR itself.
-An existing branch opens its worktree, created if need be; a new name
-creates the branch in a new worktree beside the main checkout.  The
-first choice, \"(current checkout)\", stays in DIR.  Outside git, DIR."
-  (if-let* ((branches (kdb-claude--git-lines dir "branch" "--format=%(refname:short)")))
-      (let* ((here "(current checkout)")
-             (choices (cons here branches))
+(defun kdb-claude--default-base (main callback)
+  "Call CALLBACK with what a new branch in MAIN starts from.
+Origin's default branch, fetched first, in the background; if the fetch
+fails, the local default branch; without an origin, MAIN's HEAD."
+  (let* ((remote (car (kdb-claude--git-lines main "symbolic-ref" "--short" "refs/remotes/origin/HEAD")))
+         (name (if remote (string-remove-prefix "origin/" remote)
+                 (seq-find (lambda (b) (kdb-claude--git-lines main "rev-parse" "--verify" "--quiet"
+                                                               (concat "refs/heads/" b)))
+                           '("main" "master"))))
+         (local (and name (kdb-claude--git-lines main "rev-parse" "--verify" "--quiet"
+                                                  (concat "refs/heads/" name))
+                     name)))
+    (if (not remote)
+        (funcall callback local)
+      (message "Fetching origin/%s…" name)
+      (let ((default-directory main))
+        (make-process
+         :name "claude-fetch" :buffer nil :noquery t
+         :command (list "git" "fetch" "--quiet" "origin" name)
+         :sentinel (lambda (proc _)
+                     (unless (process-live-p proc)
+                       (if (zerop (process-exit-status proc))
+                           (funcall callback remote)
+                         (message "Couldn't fetch origin; starting from %s as it is here"
+                                  (or local "the current checkout"))
+                         (funcall callback local)))))))))
+
+(defun kdb-claude--pick-branch (dir callback)
+  "Ask which branch a session in DIR's repo works on; call CALLBACK with where.
+\"(current checkout)\", first, stays in DIR.  An existing branch, local or
+only on origin, opens in its worktree, made if need be; a new name gets a
+new branch from origin's default branch, fetched, in a new worktree beside
+the main checkout.  Outside git, DIR, without asking."
+  (if-let* ((locals (kdb-claude--git-lines dir "branch" "--format=%(refname:short)")))
+      (let* ((main (kdb-claude--main-checkout dir))
+             (remotes (seq-remove (lambda (r) (or (not (string-match-p "/" r))
+                                                   (string-suffix-p "/HEAD" r)
+                                                   (member (string-remove-prefix "origin/" r) locals)))
+                                  (kdb-claude--git-lines dir "branch" "-r" "--format=%(refname:short)")))
+             (worktrees (seq-keep (lambda (line) (and (string-prefix-p "branch refs/heads/" line)
+                                                      (substring line 18)))
+                                  (kdb-claude--git-lines dir "worktree" "list" "--porcelain")))
+             (here "(current checkout)")
+             (choices (append (list here) locals remotes))
              (b (completing-read
                  "Branch (new name = new worktree; M-j for exactly what you typed): "
                  (lambda (str pred action)
                    (if (eq action 'metadata)
-                       '(metadata (display-sort-function . identity) (cycle-sort-function . identity))
+                       `(metadata (display-sort-function . identity) (cycle-sort-function . identity)
+                                  (annotation-function
+                                   . ,(lambda (c) (cond ((member c worktrees) "  worktree")
+                                                        ((member c remotes) "  on origin")))))
                      (complete-with-action action choices str pred))))))
-        (if (or (string-empty-p b) (equal b here))
-            dir
-          (kdb-claude--worktree (kdb-claude--main-checkout dir) b)))
-    dir))
+        (cond ((or (string-empty-p b) (equal b here)) (funcall callback dir))
+              ((member b locals) (funcall callback (kdb-claude--worktree main b)))
+              ((member b remotes)
+               (funcall callback (kdb-claude--worktree main (string-remove-prefix "origin/" b) b)))
+              (t (kdb-claude--default-base
+                  main (lambda (base) (funcall callback (kdb-claude--worktree main b base)))))))
+    (funcall callback dir)))
+
+(defun kdb-claude--start-on-branch (dir)
+  "Start a session in DIR's repo on a branch you pick, with what's at point.
+The region, Dired files, org entry or file is taken now: a new branch
+waits for a fetch, and you may have moved on by then."
+  (require 'agent-shell)
+  (kdb-claude--mark-org-entry)
+  (let ((text (let ((agent-shell-context-sources kdb-claude--context-sources))
+                (agent-shell--context))))
+    (kdb-claude--pick-branch
+     dir (lambda (where)
+           (let ((buf (kdb-claude--start-with where)))
+             (when text
+               (agent-shell--insert-to-shell-buffer :text text :shell-buffer buf)))))))
 
 ;;;###autoload
 (defun kdb-claude--header-symbol-fonts (model)

@@ -510,7 +510,7 @@ under a path limit that makes LONG's transcripts too long to open."
          asked started)
     (cl-letf (((symbol-function 'read-directory-name)
                (lambda (prompt &rest _) (setq asked prompt) (directory-file-name root)))
-              ((symbol-function 'kdb-claude--new-in) (lambda (dir) (setq started dir))))
+              ((symbol-function 'kdb-claude--start-on-branch) (lambda (dir) (setq started dir))))
       ;; C-c l p: Emacs's own folder prompt; a session there, project or not.
       (call-interactively #'kdb-claude-new-in-folder)
       (should (equal asked "Start Claude in: "))
