@@ -313,13 +313,14 @@
                         'kdb-claude-tab-input))
             ;; Input outranks a reply in the same tab.
             (puthash a (cons "Turn complete" 1.0) agent-shell-attention--pending)
-            (cl-letf (((symbol-function 'tabspaces--buffer-list) (lambda (&rest _) (list a b))))
-              (let ((tabspaces-mode t))
-                (should (equal (names) '("● x" "● x")))))
-            ;; With tabspaces, each tab's buffers come from it, hidden or not.
-            (cl-letf (((symbol-function 'tabspaces--buffer-list)
-                       (lambda (_frame index) (list (if (= index 0) a b)))))
-              (let ((tabspaces-mode t))
+            (should (equal (names) '("✓ x" "● x")))
+            (split-window)
+            (switch-to-buffer a)                    ; tab 2 now shows a and b
+            (should (equal (names) '("✓ x" "● x")))
+            ;; Marks follow what a tab shows, not what tabspaces says was
+            ;; once visited there.
+            (let ((tabspaces-mode t))
+              (cl-letf (((symbol-function 'tabspaces--buffer-list) (lambda (&rest _) (list a b))))
                 (should (equal (names) '("✓ x" "● x")))))))
       (ignore-errors (tab-bar-close-other-tabs))
       (tab-bar-mode -1)
@@ -465,7 +466,7 @@
   ;; Tab width goes by the face a tab's name starts with (Emacs 30 always,
   ;; 31 once the face list is extended): a marked tab must still count.
   (require 'agent-shell-attention)
-  (dolist (face '(kdb-claude-tab-input kdb-claude-tab-done))
+  (dolist (face '(kdb-claude-tab-input kdb-claude-tab-done kdb-claude-tab-busy))
     (should (memq face tab-bar-auto-width-faces))
     (let ((item (list 'tab-2 'menu-item (concat (propertize "● " 'face face)
                                                 (propertize "2 Fix the parser" 'face 'tab-bar-tab-inactive)))))
@@ -473,5 +474,43 @@
   ;; Plain tabs still count too.
   (should (tab-bar-auto-width-predicate-default
            (list 'tab-1 'menu-item (propertize "1 api" 'face 'tab-bar-tab-inactive)))))
+
+(ert-deftest tabs-mark-sessions-still-working ()
+  (require 'agent-shell-attention)
+  (let ((a (generate-new-buffer "*claude a*"))
+        (b (generate-new-buffer "*claude b*"))
+        (agent-shell-attention--pending (make-hash-table :test #'eq))
+        (agent-shell-attention--busy (make-hash-table :test #'eq))
+        (kdb-claude--waiting-drawn nil)
+        (redraws 0))
+    (cl-letf (((symbol-function 'force-mode-line-update) (lambda (&rest _) (cl-incf redraws))))
+      (delete-other-windows)
+      (switch-to-buffer a)                          ; the current tab shows a, and b for index 1
+      (let ((tabspaces-mode nil))
+        (cl-flet ((mark (index) (when (= index 1) (split-window) (switch-to-buffer b))
+                    (prog1 (substring-no-properties
+                            (kdb-claude--tab-name-waiting "x" '(current-tab) (1+ index)))
+                      (when (= index 1) (delete-other-windows) (switch-to-buffer a)))))
+          (should (equal (mark 0) "x"))
+          ;; Working: dimmed ◌, and the tab bar redraws for it.
+          (puthash a 1 agent-shell-attention--busy)
+          (kdb-claude--redraw-tabs)
+          (should (= redraws 1))
+          (should (equal (mark 0) "◌ x"))
+          (should (eq (get-text-property 0 'face (kdb-claude--tab-name-waiting "x" '(current-tab) 1))
+                      'kdb-claude-tab-busy))
+          ;; In a tab with a finished reply too, the reply shows; input above all.
+          (puthash b (cons "Turn complete" 1.0) agent-shell-attention--pending)
+          (should (equal (mark 1) "✓ x"))
+          (puthash a (list :label "Permission: ls" :timestamp 1.0 :request-id 3)
+                   agent-shell-attention--pending)
+          (should (equal (mark 1) "● x"))
+          ;; Done working: the mark goes, and the bar redraws.
+          (clrhash agent-shell-attention--pending)
+          (remhash a agent-shell-attention--busy)
+          (kdb-claude--redraw-tabs)
+          (should (equal (mark 0) "x"))
+          (should (= redraws 2)))))
+    (kill-buffer a) (kill-buffer b)))
 
 ;;; claude-artifacts-test.el ends here

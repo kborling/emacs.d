@@ -120,7 +120,7 @@
   (add-to-list 'tab-bar-tab-name-format-functions #'kdb-claude--tab-name-waiting t)
   ;; A marked tab still counts as a tab, so it's sized like the others
   ;; (Emacs 30 goes by the face its name starts with).
-  (dolist (face '(kdb-claude-tab-input kdb-claude-tab-done))
+  (dolist (face '(kdb-claude-tab-input kdb-claude-tab-done kdb-claude-tab-busy))
     (add-to-list 'tab-bar-auto-width-faces face t))
   (advice-add 'agent-shell-attention--update-indicator :after #'kdb-claude--redraw-tabs)
   (advice-add 'agent-shell-attention--message :around #'kdb-claude--permission-message)

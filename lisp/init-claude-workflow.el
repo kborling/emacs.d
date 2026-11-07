@@ -773,15 +773,16 @@ each time a turn starts or ends."
 ;;; ============================================================
 
 (defvar agent-shell-attention--pending)
-(declare-function tabspaces--buffer-list "tabspaces")
+(defvar agent-shell-attention--busy)
 (declare-function agent-shell-attention--tab-displays-buffer-p "agent-shell-attention")
 (declare-function agent-shell-attention--pending-entry-permission-p "agent-shell-attention")
 (declare-function agent-shell-attention--should-notify-buffer "agent-shell-attention")
 (declare-function agent-shell-attention--maybe-notify "agent-shell-attention")
 
 (defun kdb-claude--waiting ()
-  "Sessions waiting for you, as (BUFFER . KIND).
-KIND is `input' for a permission request, `done' for a finished reply."
+  "Sessions waiting for you or still working, as (BUFFER . KIND).
+KIND is `input' for a permission request, `done' for a finished reply,
+`busy' for a request still in flight."
   (when (boundp 'agent-shell-attention--pending)
     (let (waiting)
       (maphash (lambda (b entry)
@@ -791,22 +792,26 @@ KIND is `input' for a permission request, `done' for a finished reply."
                                    'done))
                          waiting)))
                agent-shell-attention--pending)
+      (maphash (lambda (b _)
+                 (when (and (buffer-live-p b) (not (assq b waiting)))
+                   (push (cons b 'busy) waiting)))
+               agent-shell-attention--busy)
       waiting)))
 
-(defun kdb-claude--tab-waiting (tab index)
-  "What a session in TAB, number INDEX from 0, waits for: `input', `done' or nil.
-A request for input outranks a finished reply."
+(defun kdb-claude--tab-waiting (tab _index)
+  "State of the sessions TAB shows, or nil if none.
+`input', `done' or `busy': a request for input outranks a finished
+reply, which outranks working."
   (when-let* ((waiting (kdb-claude--waiting))
+              ;; Shown there, not just visited there once (tabspaces' list).
               (kinds (mapcar #'cdr
                              (seq-filter
                               (lambda (w)
-                                (if (bound-and-true-p tabspaces-mode)
-                                    (memq (car w) (tabspaces--buffer-list nil index))
-                                  (if (eq (car tab) 'current-tab)
-                                      (get-buffer-window (car w))
-                                    (agent-shell-attention--tab-displays-buffer-p tab (car w)))))
+                                (if (eq (car tab) 'current-tab)
+                                    (get-buffer-window (car w))
+                                  (agent-shell-attention--tab-displays-buffer-p tab (car w))))
                               waiting))))
-    (if (memq 'input kinds) 'input 'done)))
+    (seq-find (lambda (k) (memq k kinds)) '(input done busy))))
 
 (defface kdb-claude-tab-input '((t :inherit warning :weight bold))
   "Tab mark: a session there needs your input."
@@ -814,16 +819,21 @@ A request for input outranks a finished reply."
 (defface kdb-claude-tab-done '((t :inherit success :weight bold))
   "Tab mark: a session there has finished a reply."
   :group 'tab-bar)
+(defface kdb-claude-tab-busy '((t :inherit shadow))
+  "Tab mark: a session there is still working."
+  :group 'tab-bar)
 
 ;;;###autoload
 (defun kdb-claude--tab-name-waiting (name tab i)
   "NAME marked when TAB, number I, has a session waiting for you.
 ● in the warning color: it needs your input (a permission request).
 ✓ in the success color: it has finished a reply.
+◌ dimmed: it is still working.
 For `tab-bar-tab-name-format-functions'."
   (pcase (kdb-claude--tab-waiting tab (1- i))
     ('input (concat (propertize "● " 'face 'kdb-claude-tab-input) name))
     ('done (concat (propertize "✓ " 'face 'kdb-claude-tab-done) name))
+    ('busy (concat (propertize "◌ " 'face 'kdb-claude-tab-busy) name))
     (_ name)))
 
 (defvar kdb-claude--waiting-drawn nil
