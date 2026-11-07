@@ -365,32 +365,28 @@ QUIETLY `background': shown in its project tab, focus stays here;
                                  (agent-shell-insert :text prompt :submit t :shell-buffer buf))))))
     buf))
 
-(defvar kdb-claude-new-in-worktree nil
-  "Non-nil: \\[kdb-claude-new] asks for a branch, giving a session its own worktree.
-For working on several things in one project at once.  Set it in
-personal.el on the machines where you do.")
-
 ;;;###autoload
-(defun kdb-claude-new (&optional pick)
-  "Start a new Claude session, carrying over the region, Dired files or
-org entry at point.  Runs at the project root; with prefix arg PICK, or
-outside any project, pick the directory.  With
-`kdb-claude-new-in-worktree', it asks for a branch to work in."
-  (interactive "P")
-  (let ((dir (when (or pick (not (project-current)))
-               (kdb-claude-read-directory "Project: "))))
-    (kdb-claude--new-in
-     (if kdb-claude-new-in-worktree
-         (kdb-claude--read-branch-dir (or dir (kdb-claude--project-dir default-directory)))
-       dir))))
+(defun kdb-claude-new ()
+  "Start a new Claude session in this project, on a branch you pick.
+A branch gets its own worktree, so sessions on different things don't
+collide; \"(current checkout)\", the first choice, stays put.  Outside a
+project, it asks for a folder.  The region, Dired files or org entry at
+point are carried over."
+  (interactive)
+  (kdb-claude--new-in
+   (kdb-claude--read-branch-dir
+    (if (project-current)
+        (kdb-claude--project-dir default-directory)
+      (file-name-as-directory (expand-file-name (read-directory-name "Start Claude in: " nil nil t)))))))
 
 ;;;###autoload
 (defun kdb-claude-new-in-folder (dir)
   "Start a new Claude session in folder DIR, project or not.
-Asked with Emacs's usual folder prompt, from the current folder.  The
-region, Dired files or org entry at point are carried over."
+Asked with Emacs's usual folder prompt, from the current folder; in a
+git repo, then for a branch, as `kdb-claude-new' does.  The region,
+Dired files or org entry at point are carried over."
   (interactive (list (read-directory-name "Start Claude in: " nil nil t)))
-  (kdb-claude--new-in (file-name-as-directory (expand-file-name dir))))
+  (kdb-claude--new-in (kdb-claude--read-branch-dir (file-name-as-directory (expand-file-name dir)))))
 
 ;;;###autoload
 (defun kdb-claude-scratch ()
@@ -466,8 +462,9 @@ Or hand it off to a new session, in this project or another."
                       '(metadata (display-sort-function . identity) (cycle-sort-function . identity))
                     (complete-with-action a (append (mapcar #'car sessions) (list new-here new-other)) s p)))
                 nil t)))
-    (cond ((equal pick new-here) (kdb-claude--new-in here))
-          ((equal pick new-other) (kdb-claude--new-in (kdb-claude-read-directory "Project: ")))
+    (cond ((equal pick new-here) (kdb-claude--new-in (kdb-claude--read-branch-dir here)))
+          ((equal pick new-other)
+           (kdb-claude--new-in (kdb-claude--read-branch-dir (kdb-claude-read-directory "Project: "))))
           (t (let* ((buf (cdr (assoc pick sessions)))
                     (text (agent-shell--context :shell-buffer buf)))
                (agent-shell--display-buffer buf)
@@ -640,13 +637,6 @@ first choice, \"(current checkout)\", stays in DIR.  Outside git, DIR."
             dir
           (kdb-claude--worktree (kdb-claude--main-checkout dir) b)))
     dir))
-
-(defun kdb-claude-start ()
-  "Start a Claude session on a project and branch of your choice.
-\"(current checkout)\" keeps the checkout; an existing branch opens its
-worktree; a new name creates the branch in a new worktree."
-  (interactive)
-  (kdb-claude--new-in (kdb-claude--read-branch-dir (kdb-claude-read-directory "Project: "))))
 
 ;;;###autoload
 (defun kdb-claude--header-symbol-fonts (model)
@@ -2300,9 +2290,8 @@ or the session ends.  Run again in a watched session to stop."
 (transient-define-prefix kdb-claude-menu ()
   "Claude"
   [["Start"
-    ("n" "New here (C-u pick folder)" kdb-claude-new)
+    ("n" "New here, on a branch (worktree)" kdb-claude-new)
     ("p" "New in a folder…" kdb-claude-new-in-folder)
-    ("N" "New on project + branch" kdb-claude-start)
     ("z" "Throwaway (one-off question)" kdb-claude-scratch)
     ("t" "Schedule a session" kdb-claude-schedule)
     ("m" "New with another model" kdb-claude-start-model)]

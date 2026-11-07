@@ -28,7 +28,7 @@
               kdb-claude--close-session-window))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
-                 kdb-claude-send kdb-claude-start kdb-claude-answer kdb-claude-review
+                 kdb-claude-send kdb-claude-answer kdb-claude-review
                  kdb-claude-watch-pr kdb-claude-schedule kdb-claude-run-block
                  kdb-claude-reply-to-org kdb-claude-usage kdb-claude-open-artifact
                  kdb-claude-copy-session-id kdb-claude-remote-control kdb-claude-queue-edit kdb-claude-processes

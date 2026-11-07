@@ -487,7 +487,6 @@
   (let* ((root (file-name-as-directory (make-temp-file "wt" t)))
          (repo (file-name-as-directory (expand-file-name "apps" root)))
          (plain (file-name-as-directory (make-temp-file "notes" t)))
-         (kdb-claude-new-in-worktree t)
          answer asked started)
     (make-directory repo t)
     (let ((default-directory repo))
@@ -515,16 +514,11 @@
           (setq answer "fix/logout")
           (kdb-claude-new)
           (should (same started (expand-file-name "apps-fix-logout" root))))
-        ;; Outside git: no prompt.
+        ;; A folder outside git (C-c l p): no branch question.
         (setq asked nil)
-        (should (same (kdb-claude--read-branch-dir plain) plain))
-        (should-not asked)
-        ;; Setting off: C-c l n doesn't ask.
-        (let ((kdb-claude-new-in-worktree nil) (default-directory repo))
-          (setq asked nil)
-          (kdb-claude-new)
-          (should-not asked)
-          (should-not started))))
+        (kdb-claude-new-in-folder plain)
+        (should (same started plain))
+        (should-not asked)))
     (delete-directory root t)
     (delete-directory plain t)))
 
