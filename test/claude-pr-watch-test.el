@@ -8,6 +8,12 @@
 
 (require 'ert)
 
+;; This file replaces live functions (shell-maker-busy, the prompt queue)
+;; with stubs: loaded into a working Emacs, every session would misreport.
+(unless noninteractive
+  (user-error "Run %s in batch Emacs (emacs --batch), not in a live one"
+              (file-name-nondirectory (or load-file-name buffer-file-name "these tests"))))
+
 (defvar test-autoloaded
   (and (not (featurep 'init-claude-workflow))
        (seq-every-p (lambda (f) (autoloadp (symbol-function f)))

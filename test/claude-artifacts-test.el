@@ -519,4 +519,107 @@
           (should (= redraws 2)))))
     (kill-buffer a) (kill-buffer b)))
 
+(defun test-process-tree (agent-pid t0)
+  "A made-up process table under AGENT-PID; Claude Code started at T0."
+  (let ((at (lambda (s) (time-add t0 s))))
+    `((101 (ppid . ,agent-pid) (comm . "claude") (args . "node claude") (start . ,(funcall at 0)))
+      ;; Work: a background test run and its child.
+      (102 (ppid . 101) (comm . "bash") (args . "bash -c npm test") (start . ,(funcall at 60)))
+      (103 (ppid . 102) (comm . "node") (args . "node jest") (start . ,(funcall at 61)))
+      ;; Kept throughout: an MCP server and its child, a console host.
+      (104 (ppid . 101) (comm . "npm") (args . "npm exec @playwright/mcp") (start . ,(funcall at 2)))
+      (105 (ppid . 104) (comm . "node") (args . "node playwright-mcp") (start . ,(funcall at 3)))
+      (106 (ppid . 102) (comm . "conhost.exe") (start . ,(funcall at 60)))
+      ;; Windows, no command lines: started with Claude Code is kept, later is work.
+      (107 (ppid . 101) (comm . "node.exe") (start . ,(funcall at 3)))
+      (108 (ppid . 101) (comm . "bash.exe") (start . ,(funcall at 90)))
+      ;; Someone else's.
+      (200 (ppid . 1) (comm . "bash") (args . "bash") (start . ,(funcall at 5))))))
+
+(defmacro test-with-processes (buf &rest body)
+  "Run BODY with session BUF's agent over `test-process-tree'."
+  (declare (indent 1))
+  `(let* ((agent (make-process :name "agent" :command (list "sleep" "30") :noquery t))
+          (tree (test-process-tree 100 (time-subtract nil 120))))
+     (unwind-protect
+         (cl-letf (((symbol-function 'process-id) (lambda (p) (if (eq p agent) 100 (error "Not ours"))))
+                   ((symbol-function 'list-system-processes) (lambda () (mapcar #'car tree)))
+                   ((symbol-function 'process-attributes) (lambda (pid) (cdr (assq pid tree)))))
+           (with-current-buffer ,buf
+             (setq-local agent-shell--state (list (cons :client (list (cons :process agent))))))
+           ,@body)
+       (delete-process agent))))
+
+(ert-deftest session-work-is-what-its-commands-run ()
+  (require 'agent-shell)
+  (let ((buf (generate-new-buffer "Run the tests")))
+    (test-with-processes buf
+      (should (equal (mapcar #'car (kdb-claude--session-work buf)) '(102 103 108))))
+    (kill-buffer buf)))
+
+(ert-deftest ready-session-with-background-work-marked-working ()
+  (require 'agent-shell-attention)
+  (let ((buf (generate-new-buffer "Run the tests"))
+        (agent-shell-attention--pending (make-hash-table :test #'eq))
+        (agent-shell-attention--busy (make-hash-table :test #'eq))
+        (kdb-claude--background nil)
+        (kdb-claude--waiting-drawn nil)
+        (scans 0))
+    (test-with-processes buf
+      (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (list buf)))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        ;; Drawing the tab bar never scans; the tab bar's timer does.
+        (should-not (kdb-claude--waiting))
+        (kdb-claude--redraw-tabs)
+        (should (equal (kdb-claude--waiting) (list (cons buf 'busy))))
+        ;; Not again within 10 seconds.
+        (cl-letf (((symbol-function 'kdb-claude--process-table)
+                   (lambda () (cl-incf scans) (make-hash-table))))
+          (kdb-claude--redraw-tabs)
+          (should (= scans 0)))))
+    (kill-buffer buf)))
+
+(ert-deftest processes-view-shows-work-and-output ()
+  (require 'agent-shell)
+  (let* ((buf (generate-new-buffer "Run the tests"))
+         (temporary-file-directory (file-name-as-directory (make-temp-file "tmp" t)))
+         (out (expand-file-name "claude-1000/-proj/sess-9/tasks/abc.output" temporary-file-directory)))
+    (make-directory (file-name-directory out) t)
+    (with-temp-file out (insert "PASS parser\nPASS lexer\n3 tests passed\n"))
+    (test-with-processes buf
+      (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (list buf)))
+                ((symbol-function 'agent-shell-session-id) (lambda (&rest _) "sess-9")))
+        (kdb-claude-processes)
+        (with-current-buffer "*Claude processes*"
+          (let ((text (buffer-string)))
+            (should (string-match-p "^Run the tests  background" text))
+            (should (string-match-p "102 .* bash -c npm test" text))
+            (should-not (string-match-p "playwright-mcp" text))
+            (should (string-match-p "output: abc.output" text))
+            (should (string-match-p "3 tests passed" text)))
+          ;; On a process line: its pid; on output: its file.
+          (goto-char (point-min))
+          (search-forward "bash -c npm test")
+          (should (eq (get-text-property (point) 'kdb-pid) 102))
+          (search-forward "3 tests passed")
+          (should (equal (get-text-property (1- (point)) 'kdb-file) out)))
+        (kill-buffer "*Claude processes*")))
+    (kill-buffer buf)
+    (delete-directory temporary-file-directory t)))
+
+(ert-deftest session-work-real-processes ()
+  ;; Real processes: agent -> "Claude Code" -> a command still running.
+  (skip-unless (and (not (eq system-type 'windows-nt)) (executable-find "sh")))
+  (require 'agent-shell)
+  (let* ((agent (make-process :name "agent" :noquery t
+                              :command (list "sh" "-c" "sh -c 'sleep 30 & wait' & wait")))
+         (buf (generate-new-buffer "real")))
+    (sleep-for 0.5)
+    (with-current-buffer buf
+      (setq-local agent-shell--state (list (cons :client (list (cons :process agent))))))
+    (let ((work (kdb-claude--session-work buf)))
+      (should (seq-some (lambda (w) (equal (alist-get 'comm (cdr w)) "sleep")) work)))
+    (delete-process agent)
+    (kill-buffer buf)))
+
 ;;; claude-artifacts-test.el ends here

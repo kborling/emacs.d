@@ -782,7 +782,7 @@ each time a turn starts or ends."
 (defun kdb-claude--waiting ()
   "Sessions waiting for you or still working, as (BUFFER . KIND).
 KIND is `input' for a permission request, `done' for a finished reply,
-`busy' for a request still in flight."
+`busy' for a request still in flight or a background command running."
   (when (boundp 'agent-shell-attention--pending)
     (let (waiting)
       (maphash (lambda (b entry)
@@ -796,6 +796,10 @@ KIND is `input' for a permission request, `done' for a finished reply,
                  (when (and (buffer-live-p b) (not (assq b waiting)))
                    (push (cons b 'busy) waiting)))
                agent-shell-attention--busy)
+      ;; Ready, but a command it started is still running: working too.
+      (dolist (b (kdb-claude--working-in-background))
+        (unless (assq b waiting)
+          (push (cons b 'busy) waiting)))
       waiting)))
 
 (defun kdb-claude--tab-waiting (tab _index)
@@ -851,6 +855,7 @@ highlighted with the tab it belongs to.  For
   "Redraw the tab bar when which sessions wait for you, or on what, changed.
 It can change with the count unchanged.  Runs every second, so it
 redraws only on a change."
+  (kdb-claude--scan-background)
   (let ((waiting (kdb-claude--waiting)))
     (unless (and (= (length waiting) (length kdb-claude--waiting-drawn))
                  (seq-every-p (lambda (w) (member w kdb-claude--waiting-drawn)) waiting))
@@ -1688,6 +1693,186 @@ the shell's buffer name, for `kdb-claude-output'.  Meant for
       (forward-line (- (or lines 40)))
       (buffer-substring-no-properties (point) (point-max)))))
 
+;;; What a session's commands are still running
+
+(defvar kdb-claude-permanent-processes
+  "mcp\\|language-server\\|langserver\\|lsp\\|omnisharp\\|pyright\\|gopls\\|rust-analyzer\\|clangd\\|tsserver\\|conhost\\|chrome\\|chromium\\|msedge\\|firefox\\|playwright"
+  "Regexp for what a session keeps running throughout, not work:
+MCP servers, language servers, browsers, Windows' console hosts.")
+
+(defun kdb-claude--process-table ()
+  "PID -> attributes of every process."
+  (let ((table (make-hash-table)))
+    (dolist (pid (list-system-processes))
+      (when-let* ((attrs (ignore-errors (process-attributes pid))))
+        (puthash pid attrs table)))
+    table))
+
+(defun kdb-claude--session-work (buf &optional table)
+  "What session BUF's commands are running, as (PID . ATTRIBUTES).
+Everything under its Claude Code, except what it keeps throughout (see
+`kdb-claude-permanent-processes').  Where command lines can't be read
+(Windows), what Claude Code started in its first 20 seconds counts as
+kept too: that's when it starts its MCP servers."
+  (when-let* ((proc (map-nested-elt (buffer-local-value 'agent-shell--state buf) '(:client :process)))
+              ((process-live-p proc))
+              (root (process-id proc)))
+    (let ((table (or table (kdb-claude--process-table)))
+          (children (make-hash-table))
+          work)
+      (maphash (lambda (pid attrs) (push pid (gethash (alist-get 'ppid attrs) children))) table)
+      (cl-labels ((label (attrs) (concat (alist-get 'comm attrs) " " (alist-get 'args attrs)))
+                  (kept (attrs) (string-match-p kdb-claude-permanent-processes (label attrs)))
+                  (add (pid)
+                    (let ((attrs (gethash pid table)))
+                      (unless (kept attrs)
+                        (push (cons pid attrs) work)
+                        (mapc #'add (gethash pid children))))))
+        (dolist (claude (gethash root children))
+          (let ((born (alist-get 'start (gethash claude table))))
+            (dolist (top (gethash claude children))
+              (let* ((attrs (gethash top table))
+                     (start (alist-get 'start attrs)))
+                (unless (and (not (alist-get 'args attrs)) born start
+                             (< (float-time (time-subtract start born)) 20))
+                  (add top)))))))
+      (sort work (lambda (a b) (< (car a) (car b)))))))
+
+(defvar kdb-claude--background nil
+  "(TIME . SESSIONS): sessions found running work while not busy, and when.")
+
+(defun kdb-claude--working-in-background ()
+  "Sessions not answering but still running something they started.
+A background command outlives its turn, so agent-shell calls the session
+ready.  From the last `kdb-claude--scan-background', so drawing the tab
+bar never scans processes itself."
+  (seq-filter #'buffer-live-p (cdr kdb-claude--background)))
+
+(defun kdb-claude--scan-background ()
+  "Find the sessions working in the background, at most every 10 seconds.
+It reads every process, so only on the tab bar's own timer, and only
+when some session is ready."
+  (unless (and kdb-claude--background
+               (< (float-time (time-subtract nil (car kdb-claude--background))) 10))
+    (let* ((idle (seq-remove (lambda (b) (and (boundp 'agent-shell-attention--busy)
+                                              (gethash b agent-shell-attention--busy)))
+                             (and (fboundp 'agent-shell-buffers) (agent-shell-buffers))))
+           (table (and idle (kdb-claude--process-table))))
+      (setq kdb-claude--background
+            (cons (current-time) (seq-filter (lambda (b) (kdb-claude--session-work b table)) idle))))))
+
+(defun kdb-claude--command-lines (pids)
+  "PID -> command line for PIDS where Emacs can't read them (Windows).
+One PowerShell query; nil elsewhere, or if it fails."
+  (when (and pids (eq system-type 'windows-nt))
+    (let ((table (make-hash-table)))
+      (ignore-errors
+        (dolist (line (process-lines
+                       "powershell" "-NoProfile" "-NonInteractive" "-Command"
+                       (format "Get-CimInstance Win32_Process -Filter '%s' | %% { \"$($_.ProcessId)`t$($_.CommandLine)\" }"
+                               (mapconcat (lambda (p) (format "ProcessId=%d" p)) pids " or "))))
+          (when (string-match "\\`\\([0-9]+\\)\t\\(.*\\)" line)
+            (puthash (string-to-number (match-string 1 line)) (match-string 2 line) table))))
+      table)))
+
+(defun kdb-claude--task-outputs (buf)
+  "Output files of session BUF's background tasks, newest first."
+  (when-let* ((id (agent-shell-session-id :shell-buffer buf)))
+    (sort (file-expand-wildcards
+           (expand-file-name (format "claude*/*/%s/tasks/*.output" id) temporary-file-directory))
+          #'file-newer-than-file-p)))
+
+(defun kdb-claude--elapsed (attrs)
+  "How long the process with ATTRS has run, as 1h05m or 42s."
+  (if-let* ((start (alist-get 'start attrs)))
+      (let ((s (truncate (float-time (time-subtract nil start)))))
+        (cond ((>= s 3600) (format "%dh%02dm" (/ s 3600) (/ (% s 3600) 60)))
+              ((>= s 60) (format "%dm%02ds" (/ s 60) (% s 60)))
+              (t (format "%ds" s))))
+    "?"))
+
+(defvar-keymap kdb-claude-processes-mode-map
+  :parent special-mode-map
+  "g" #'kdb-claude-processes
+  "k" #'kdb-claude-processes-kill
+  "RET" #'kdb-claude-processes-visit)
+
+(define-derived-mode kdb-claude-processes-mode special-mode "Claude-Processes"
+  "What each Claude session is running, and its background output.
+\\{kdb-claude-processes-mode-map}"
+  (setq-local header-line-format
+              (substitute-command-keys
+               "\\<kdb-claude-processes-mode-map>\\[kdb-claude-processes-visit] go to session / open output  \\[kdb-claude-processes-kill] stop process  \\[kdb-claude-processes] refresh")))
+
+;;;###autoload
+(defun kdb-claude-processes ()
+  "Show what each Claude session's commands are running, and their output.
+Busy or not: a background command (tests, a server) outlives its turn.
+MCP servers, language servers and browsers a session keeps are left out."
+  (interactive)
+  (require 'agent-shell)
+  (let* ((table (kdb-claude--process-table))
+         (sessions (mapcar (lambda (b) (cons b (kdb-claude--session-work b table)))
+                           (agent-shell-buffers)))
+         (lines (kdb-claude--command-lines (mapcar #'car (mapcan (lambda (s) (copy-sequence (cdr s))) sessions)))))
+    (with-current-buffer (get-buffer-create "*Claude processes*")
+      (let ((inhibit-read-only t) (pos (point)))
+        (erase-buffer)
+        (kdb-claude-processes-mode)
+        (dolist (s sessions)
+          (let* ((buf (car s)) (work (cdr s))
+                 (state (or (cdr (assq buf (kdb-claude--waiting)))
+                            (if work 'background 'ready))))
+            (insert (propertize (buffer-name buf) 'face 'bold 'kdb-session buf)
+                    (propertize (format "  %s\n" state) 'face 'shadow 'kdb-session buf))
+            (if (null work)
+                (insert (propertize "  nothing running\n" 'face 'shadow))
+              (dolist (w work)
+                (let ((attrs (cdr w)))
+                  (insert (propertize
+                           (format "  %7d  %8s  %s\n" (car w) (kdb-claude--elapsed attrs)
+                                   (truncate-string-to-width
+                                    (string-trim (or (and lines (gethash (car w) lines))
+                                                     (alist-get 'args attrs)
+                                                     (alist-get 'comm attrs) ""))
+                                    (max 20 (- (window-width) 22)) nil nil "…"))
+                           'kdb-pid (car w) 'kdb-session buf)))))
+            (dolist (file (seq-take (kdb-claude--task-outputs buf) 3))
+              (insert (propertize (format "  output: %s, %s ago\n" (file-name-nondirectory file)
+                                          (kdb-claude--elapsed
+                                           (list (cons 'start (file-attribute-modification-time
+                                                               (file-attributes file))))))
+                                  'face 'shadow 'kdb-file file))
+              (let ((tail (with-temp-buffer
+                            (insert-file-contents file)
+                            (goto-char (point-max))
+                            (forward-line -4)
+                            (string-trim-right (buffer-substring-no-properties (point) (point-max))))))
+                (unless (string-empty-p tail)
+                  (insert (propertize (replace-regexp-in-string "^" "    " tail) 'kdb-file file) "\n"))))
+            (insert "\n")))
+        (when (null sessions) (insert "No Claude sessions.\n"))
+        (goto-char (min pos (point-max))))
+      (pop-to-buffer (current-buffer)))))
+
+(defun kdb-claude-processes-kill ()
+  "Stop the process on this line (asks first)."
+  (interactive)
+  (let ((pid (or (get-text-property (point) 'kdb-pid) (user-error "No process on this line"))))
+    (when (y-or-n-p (format "Stop process %d? " pid))
+      (signal-process pid 'term)
+      (sit-for 0.5)
+      (kdb-claude-processes))))
+
+(defun kdb-claude-processes-visit ()
+  "Open the background output on this line, or go to its session."
+  (interactive)
+  (cond ((get-text-property (point) 'kdb-file)
+         (view-file-other-window (get-text-property (point) 'kdb-file)))
+        ((get-text-property (point) 'kdb-session)
+         (kdb-claude--goto-session (get-text-property (point) 'kdb-session)))
+        (t (user-error "Nothing here"))))
+
 ;;;###autoload
 (defun kdb-claude-cleanup (id)
   "Close what session ID opened: its windows, and buffers it opened or started.
@@ -2027,6 +2212,7 @@ or the session ends.  Run again in a watched session to stop."
     ("e" "Artifacts: open their folder" kdb-claude-reveal-artifact)
     ("w" "Watch PR CI, auto-fix (toggle)" kdb-claude-watch-pr)
     ("T" "Transcript, all of it (org)" kdb-claude-transcript)
+    ("P" "Processes: what sessions run" kdb-claude-processes)
     ("y" "Copy session id" kdb-claude-copy-session-id)
     ("D" "Share live / stop (web, apps)" kdb-claude-remote-control)]
    ["Queue (this project's session)"
