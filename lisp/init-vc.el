@@ -17,162 +17,25 @@
         vc-git-log-edit-summary-target-len 50
         vc-git-log-edit-summary-max-len 70
         vc-suppress-confirm t
-        vc-command-messages t
-        vc-git-log-switches '("--graph"
-                              "--pretty=format:%h %s"
-                              "--abbrev-commit"
-                              "--date=short"))
-  
-  (defun kdb-vc-diff-enhanced (&optional historic not-urgent)
-    "Enhanced vc-diff with better visual presentation."
-    (interactive "P")
-    (call-interactively 'vc-diff)
-    (when (get-buffer "*vc-diff*")
-      (with-current-buffer "*vc-diff*"
-        (diff-mode)
-        (setq-local truncate-lines t)
-        (when diff-refine
-          (diff-refine-hunk))
-        (goto-char (point-min))
-        (when (re-search-forward "^@@" nil t)
-          (beginning-of-line)))))
-  
+        vc-command-messages t)
+  ;; No custom `vc-git-log-switches': a --pretty format leaves log-view no
+  ;; "commit HASH" lines, so n/p, diff, annotate and find-revision in a log
+  ;; find nothing.  The branch log (L) is one line per commit already.
+
   (add-hook 'vc-diff-finish-functions
             (lambda ()
               (when (string-match-p "\\*vc-diff\\*" (buffer-name))
                 (setq-local truncate-lines t)
                 (when diff-refine
-                  (diff-refine-hunk)))))
-  
-  (defun kdb-vc-log-next-commit ()
-    "Navigate to next commit in log."
-    (interactive)
-    (forward-line 1)
-    (while (and (not (eobp))
-                (not (looking-at "^\\*\\s-+[0-9a-f]\\{7,\\}")))
-      (forward-line 1))
-    (beginning-of-line))
-  
-  (defun kdb-vc-log-prev-commit ()
-    "Navigate to previous commit in log."
-    (interactive)
-    (forward-line -1)
-    (while (and (not (bobp))
-                (not (looking-at "^\\*\\s-+[0-9a-f]\\{7,\\}")))
-      (forward-line -1))
-    (beginning-of-line))
-  
-  (defun kdb-vc-log-enhanced ()
-    "Enhanced vc-log with better colors and navigation."
-    (interactive)
-    (call-interactively 'vc-print-log)
-    (when (get-buffer "*vc-change-log*")
-      (with-current-buffer "*vc-change-log*"
-        (local-set-key (kbd "n") 'kdb-vc-log-next-commit)
-        (local-set-key (kbd "p") 'kdb-vc-log-prev-commit)
-        (local-set-key (kbd "TAB") 'kdb-vc-log-next-commit)
-        (local-set-key (kbd "<backtab>") 'kdb-vc-log-prev-commit)
-        (font-lock-add-keywords
-         nil
-         '(;; Branch merge/split indicators (|/ or |\)
-           ("^\\(|[/\\\\]\\)\\s-*$" (0 'font-lock-warning-face t))
-           ;; Branch lines with commits (| * hash)
-           ("^\\(|\\)\\s-\\*" (1 'font-lock-warning-face t))
-           ;; Vertical lines alone
-           ("^\\(|\\)\\s-*$" (1 'font-lock-comment-face t))
-           ;; Commit hash
-           ("\\b\\([0-9a-f]\\{7,\\}\\)\\b" (1 'font-lock-type-face t))
-           ;; Commit message after hash
-           ("[0-9a-f]\\{7,\\}\\s-+\\(.*\\)$" (1 'font-lock-string-face t)))
-         t)
-        (font-lock-fontify-buffer))))
-  
-  )
+                  (diff-refine-hunk))))))
 
 ;; Log-view configuration
 (use-package log-view
   :ensure nil
   :after vc
   :config
-  ;; Match git log --graph --oneline format
-  (setq log-view-message-re "^\\*\\s-+\\([0-9a-f]\\{7,\\}\\)\\s-+\\(.*\\)$"
-        log-view-file-re "^\\*\\s-+\\([0-9a-f]\\{7,\\}\\)"
-        log-view-font-lock-keywords
-        '(("^\\*\\s-+\\([0-9a-f]\\{7,\\}\\)" (1 'log-view-message))
-          ("^\\*\\s-+[0-9a-f]\\{7,\\}\\s-+\\(.*\\)$" (1 'font-lock-string-face))))
-  
-  ;; Make commit hashes clickable and copyable
-  (defun kdb-make-hashes-clickable ()
-    "Make commit hashes clickable and copyable."
-    (save-excursion
-      (goto-char (point-min))
-      (while (re-search-forward "\\b\\([0-9a-f]\\{7,40\\}\\)\\b" nil t)
-        (let ((hash (match-string 1))
-              (start (match-beginning 1))
-              (end (match-end 1)))
-          (put-text-property start end 'mouse-face 'highlight)
-          (put-text-property start end 'help-echo "Click: show commit details | Right-click: copy hash")
-          (put-text-property start end 'keymap 
-                             (let ((map (make-sparse-keymap)))
-                               (define-key map [mouse-1] 
-                                 (lambda (e) (interactive "e") 
-                                   (kdb-vc-commit-show hash)))
-                               (define-key map [mouse-3] 
-                                 (lambda (e) (interactive "e") 
-                                   (kill-new hash) 
-                                   (message "Copied hash: %s" hash)))
-                               (define-key map (kbd "RET") 
-                                 (lambda () (interactive) 
-                                   (kdb-vc-commit-show hash)))
-                               (define-key map (kbd "c") 
-                                 (lambda () (interactive) 
-                                   (kill-new hash) 
-                                   (message "Copied hash: %s" hash)))
-                               map))))))
-  
-  ;; Add branch styling font-lock patterns
-  (defun kdb-add-log-styling ()
-    "Add font-lock patterns for branch indicators and styling."
-    (font-lock-add-keywords
-     nil
-     '(;; Branch merge/split indicators on their own line
-       ("^\\(|[/\\\\]\\|[/\\\\]|\\)\\s-*$" . 'font-lock-warning-face)
-       ;; Branch lines with commits (| * hash message)
-       ("^\\(|\\)\\s-\\*" (1 'font-lock-warning-face))
-       ;; Vertical branch lines alone
-       ("^\\(|\\)\\s-*$" . 'font-lock-comment-face)
-       ;; Commit hash (7+ hex characters)
-       ("\\b\\([0-9a-f]\\{7,\\}\\)\\b" (1 'log-view-message))
-       ;; Everything after the hash is the commit message
-       ("[0-9a-f]\\{7,\\}\\s-+\\(.*\\)$" (1 'font-lock-string-face))
-       ;; Branch/tag names in parentheses
-       ("(\\([^)]+\\))" (1 'font-lock-keyword-face))
-       ;; Merge indicators
-       ("\\<Merge:\\s-" . 'font-lock-builtin-face)
-       ;; Issue numbers
-       ("#[0-9]+" . 'font-lock-constant-face))
-     t))
-  
-  ;; Enhanced display settings
-  (add-hook 'log-view-mode-hook
-            (lambda ()
-              (setq-local truncate-lines t)
-              (hl-line-mode 1)
-              ;; Ensure proper mode setup
-              (setq-local log-view-per-file-logs nil)
-              (setq-local log-view-message-face 'log-view-message)
-              ;; Apply styling and make hashes clickable
-              (kdb-add-log-styling)
-              (font-lock-fontify-buffer)
-              (kdb-make-hashes-clickable)))
-  
-  ;; Also apply to vc-git-log-view-mode
-  (add-hook 'vc-git-log-view-mode-hook
-            (lambda ()
-              (kdb-add-log-styling)
-              (font-lock-fontify-buffer)
-              (kdb-make-hashes-clickable)))
-  
+  (add-hook 'log-view-mode-hook (lambda () (setq-local truncate-lines t) (hl-line-mode 1)))
+
   ;; Quick diff for commit at point
   (defun kdb-log-view-show-commit-diff ()
     "Show diff for the commit at point in log view."
@@ -202,8 +65,10 @@
   
   (defun kdb-vc-commit-show-diff-in-buffer (hash)
     "Show diff for commit HASH in a side buffer."
-    (let ((buf (get-buffer-create "*Commit Diff*")))
+    (let ((buf (get-buffer-create "*Commit Diff*"))
+          (root (kdb-vc-root)))
       (with-current-buffer buf
+        (setq default-directory root)
         (let ((inhibit-read-only t))
           (erase-buffer)
           (diff-mode)
@@ -215,9 +80,7 @@
                              'face 'font-lock-comment-face))
           (insert (make-string 70 ?─) "\n")
           ;; Show the commit message and diff
-          (insert (shell-command-to-string 
-                   (format "git show --stat --patch %s" 
-                          (shell-quote-argument hash))))
+          (insert (kdb-vc-git-output "show" "--stat" "--patch" hash))
           (goto-char (point-min))))
       ;; Display in side window
       (display-buffer buf
@@ -227,13 +90,13 @@
   
   (defun kdb-vc-commit-show-stat-in-buffer (hash)
     "Show commit stats for HASH in a side buffer."
-    (let ((buf (get-buffer-create "*Commit Info*")))
+    (let ((buf (get-buffer-create "*Commit Info*"))
+          (root (kdb-vc-root)))
       (with-current-buffer buf
+        (setq default-directory root)
         (let ((inhibit-read-only t))
           (erase-buffer)
-          (insert (shell-command-to-string 
-                   (format "git show --stat --format=fuller %s" 
-                          (shell-quote-argument hash))))
+          (insert (kdb-vc-git-output "show" "--stat" "--format=fuller" hash))
           (goto-char (point-min))
           (diff-mode)))
       ;; Display in side window
@@ -319,20 +182,84 @@
   (define-key vc-prefix-map (kbd "[") #'diff-hl-previous-hunk)
   (define-key vc-prefix-map (kbd "]") #'diff-hl-next-hunk))
 
-(defun kdb-vc-git-unstage ()
-  "Unstage staged changes (git reset HEAD)."
+(defun kdb-vc-root ()
+  "This repository's root, or an error outside one.
+Found from `default-directory' too, so it works from buffers visiting no
+file, such as a Claude session, where `vc-root-dir' gives nil."
+  (or (vc-root-dir)
+      (vc-find-root default-directory ".git")
+      (user-error "Not in a git repository")))
+
+(defun kdb-vc-git-output (&rest args)
+  "Output of git ARGS at the repository root.
+Arguments go to git as they are, never through a shell, so file and
+branch names need no quoting (and none goes wrong on Windows' cmd)."
+  (let ((default-directory (kdb-vc-root)))
+    (with-output-to-string
+      (with-current-buffer standard-output
+        (apply #'process-file "git" nil t nil args)))))
+
+(defun kdb-vc-git-lines (&rest args)
+  "Lines git ARGS prints at the repository root."
+  (split-string (apply #'kdb-vc-git-output args) "\n" t))
+
+(defun kdb-vc-git-run (&rest args)
+  "Run git ARGS at the repository root; error with git's own words on failure."
+  (let ((default-directory (kdb-vc-root)))
+    (with-temp-buffer
+      (unless (zerop (apply #'process-file "git" nil t nil args))
+        (user-error "git %s: %s" (car args) (string-trim (buffer-string)))))))
+
+(defun kdb-vc-files ()
+  "Files to act on, relative to the root: vc-dir's marked or current ones,
+else this buffer's file, else nil."
+  (let ((root (kdb-vc-root)))
+    (mapcar (lambda (f) (file-relative-name (expand-file-name f) root))
+            (cond ((derived-mode-p 'vc-dir-mode)
+                   (or (vc-dir-marked-files)
+                       (and (vc-dir-current-file) (list (vc-dir-current-file)))))
+                  (buffer-file-name (list buffer-file-name))))))
+
+(defun kdb-vc-refresh ()
+  "Refresh vc-dir and the fringe marks after git changed things."
+  (when (derived-mode-p 'vc-dir-mode) (vc-dir-refresh))
+  (when (and buffer-file-name (fboundp 'diff-hl-update)) (diff-hl-update)))
+
+(defun kdb-vc-git-stage ()
+  "Stage the file(s) here, tracked or not (git add), like magit's s."
   (interactive)
-  (let ((file (when buffer-file-name
-                (file-relative-name buffer-file-name (vc-root-dir)))))
-    (if file
-        (progn
-          (shell-command (format "git reset HEAD -- %s" (shell-quote-argument file)))
-          (message "Unstaged: %s" file))
-      (when (yes-or-no-p "Unstage all staged changes? ")
-        (shell-command "git reset HEAD")
-        (message "All changes unstaged")))
-    (when (derived-mode-p 'vc-dir-mode)
-      (vc-dir-refresh))))
+  (let ((files (or (kdb-vc-files) (user-error "No file here to stage"))))
+    (apply #'kdb-vc-git-run "add" "--" files)
+    (kdb-vc-refresh)
+    (message "Staged: %s" (string-join files ", "))))
+
+(defun kdb-vc-git-unstage ()
+  "Unstage the file(s) here, or everything staged when there's no file."
+  (interactive)
+  (if-let* ((files (kdb-vc-files)))
+      (progn (apply #'kdb-vc-git-run "reset" "-q" "HEAD" "--" files)
+             (message "Unstaged: %s" (string-join files ", ")))
+    (when (yes-or-no-p "Unstage all staged changes? ")
+      (kdb-vc-git-run "reset" "-q" "HEAD")
+      (message "All changes unstaged")))
+  (kdb-vc-refresh))
+
+(defun kdb-vc-fetch ()
+  "Fetch from all remotes, pruning, without touching your branch (magit's f)."
+  (interactive)
+  (let ((default-directory (kdb-vc-root)))
+    (message "Fetching…")
+    (set-process-sentinel
+     (start-file-process "git-fetch" " *git-fetch*" "git" "fetch" "--all" "--prune")
+     (lambda (proc _)
+       (unless (process-live-p proc)
+         (message (if (zerop (process-exit-status proc)) "Fetched"
+                    "Fetch failed; see buffer \" *git-fetch*\"")))))))
+
+(defun kdb-vc-push-specific ()
+  "Push, editing the git push command first (remote, branch, flags)."
+  (interactive)
+  (vc-push t))
 
 ;; VC Transient Menu - provides Magit-like interface for VC
 (defun kdb-vc-transient ()
@@ -345,14 +272,14 @@
       ("g" "Status (Root)" project-vc-dir)
       ("G" "Lazygit" kdb-lazygit)
       ("s" "Status" vc-dir)
-      ("d" "Diff (unstaged)" kdb-vc-diff-enhanced)
+      ("d" "Diff (unstaged)" vc-diff)
       ("D" "Diff vs Branch" vc-root-diff)
       ("=" "Basic Diff" vc-diff)
       ("e" "Ediff" vc-ediff)
       ("E" "Ediff Revision" vc-version-ediff)]
      
      ["Log & History"
-      ("l" "Log (current file)" kdb-vc-log-enhanced)
+      ("l" "Log (current file)" vc-print-log)
       ("L" "Log (branch)" vc-print-root-log)
       ("h h" "File History" vc-print-root-log)
       ("h s" "Show Commit" kdb-vc-commit-show)
@@ -374,9 +301,9 @@
      
      ["Remote"
       ("f" "Pull" vc-update)
-      ("F" "Fetch" vc-update)
+      ("F" "Fetch" kdb-vc-fetch)
       ("p" "Push" vc-push)
-      ("P" "Push Specific" vc-push)
+      ("P" "Push Specific" kdb-vc-push-specific)
       ""
       "-Management-"
       ("r l" "List" kdb-vc-remote-list)
@@ -385,12 +312,12 @@
       ("C" "Clone" kdb-vc-clone)]]
     
     [["Changes"
-      ("a" "Add/Stage" vc-register)
+      ("a" "Add/Stage" kdb-vc-git-stage)
       ("x" "Unstage" kdb-vc-git-unstage)
       ("c" "Commit" vc-next-action)
       ("C-c" "Amend" kdb-vc-git-amend)
       ("u" "Revert" vc-revert)
-      ("U" "Checkout" kdb-vc-revert-file)
+      ("U" "Discard changes" kdb-vc-revert-file)
       ("k" "Delete" vc-delete-file)
       ("R" "Rename" vc-rename-file)]
      
@@ -444,34 +371,33 @@ vc check-in).  \\`C-c C-e' in log-edit toggles amend on any commit."
     (vc-git-log-edit-toggle-amend)))
 
 (defun kdb-vc-revert-file ()
-  "Revert the current file to the last committed version."
+  "Discard the changes to the file(s) here, back to the last commit."
   (interactive)
-  (when (vc-backend buffer-file-name)
-    (if (yes-or-no-p (format "Revert %s to last committed version? "
-                             (file-name-nondirectory buffer-file-name)))
-        (progn
-          (vc-revert-buffer-internal t t)
-          (message "File reverted to last committed version"))
-      (message "Revert cancelled"))))
+  (let ((files (or (kdb-vc-files) (user-error "No file here to revert"))))
+    (when (yes-or-no-p (format "Discard all changes to %s? " (string-join files ", ")))
+      (apply #'kdb-vc-git-run "checkout" "HEAD" "--" files)
+      (dolist (f files)
+        (when-let* ((buf (find-buffer-visiting (expand-file-name f (kdb-vc-root)))))
+          (with-current-buffer buf (revert-buffer t t t))))
+      (kdb-vc-refresh)
+      (message "Reverted %s to the last commit" (string-join files ", ")))))
 
 (defun kdb-vc-delete-branch ()
   "Delete a git branch."
   (interactive)
-  (let* ((branches (split-string 
-                    (shell-command-to-string "git branch --format='%(refname:short)'") 
-                    "\n" t))
-         (branch (completing-read "Delete branch: " branches)))
+  (let ((branch (completing-read "Delete branch: "
+                                 (kdb-vc-git-lines "branch" "--format=%(refname:short)") nil t)))
     (when (yes-or-no-p (format "Delete branch '%s'? " branch))
-      (shell-command (format "git branch -d %s" (shell-quote-argument branch)))
+      (kdb-vc-git-run "branch" "-d" branch)
       (message "Branch '%s' deleted" branch))))
 
 (defun kdb-vc-rename-branch ()
   "Rename the current git branch."
   (interactive)
-  (let* ((current-branch (string-trim (shell-command-to-string "git branch --show-current")))
+  (let* ((current-branch (car (kdb-vc-git-lines "branch" "--show-current")))
          (new-name (read-string (format "Rename branch '%s' to: " current-branch))))
     (when (and new-name (not (string-empty-p new-name)))
-      (shell-command (format "git branch -m %s" (shell-quote-argument new-name)))
+      (kdb-vc-git-run "branch" "-m" new-name)
       (message "Branch renamed from '%s' to '%s'" current-branch new-name))))
 
 ;; Stash operations use the vc-git built-ins — see the transient.  vc-dir's
@@ -514,17 +440,10 @@ For history surgery vc doesn't cover: interactive rebase, cherry-pick."
 (defun kdb-vc-find-branch-file ()
   "Find and open a file from another branch."
   (interactive)
-  (let* ((branches (split-string 
-                    (shell-command-to-string "git branch -a --format='%(refname:short)'") 
-                    "\n" t))
-         (branch (completing-read "Branch: " branches))
-         (files (split-string 
-                 (shell-command-to-string (format "git ls-tree -r --name-only %s" branch))
-                 "\n" t))
-         (file (completing-read "File: " files)))
+  (let* ((branch (completing-read "Branch: " (kdb-vc-git-lines "branch" "-a" "--format=%(refname:short)") nil t))
+         (file (completing-read "File: " (kdb-vc-git-lines "ls-tree" "-r" "--name-only" branch) nil t)))
     (when file
-      (let ((content (shell-command-to-string 
-                      (format "git show %s:%s" branch file))))
+      (let ((content (kdb-vc-git-output "show" (concat branch ":" file))))
         (with-current-buffer (get-buffer-create (format "*%s:%s*" branch file))
           (erase-buffer)
           (insert content)
@@ -551,9 +470,10 @@ For history surgery vc doesn't cover: interactive rebase, cherry-pick."
 (defun kdb-vc-commit-show (hash)
   "Show detailed information about a commit hash."
   (interactive "sCommit hash: ")
-  (let ((output (shell-command-to-string 
-                 (format "git show --stat --pretty=fuller %s" (shell-quote-argument hash)))))
+  (let ((output (kdb-vc-git-output "show" "--stat" "--pretty=fuller" hash))
+        (root (kdb-vc-root)))
     (with-current-buffer (get-buffer-create "*Commit Details*")
+      (setq default-directory root)
       (erase-buffer)
       (insert output)
       (diff-mode)
@@ -563,9 +483,10 @@ For history surgery vc doesn't cover: interactive rebase, cherry-pick."
 (defun kdb-vc-commit-diff (hash)
   "Show diff for a specific commit HASH."
   (interactive "sCommit hash: ")
-  (let ((output (shell-command-to-string 
-                 (format "git show --format= %s" (shell-quote-argument hash)))))
+  (let ((output (kdb-vc-git-output "show" "--format=" hash))
+        (root (kdb-vc-root)))
     (with-current-buffer (get-buffer-create "*Commit Diff*")
+      (setq default-directory root)
       (erase-buffer)
       (insert output)
       (diff-mode)
@@ -575,8 +496,7 @@ For history surgery vc doesn't cover: interactive rebase, cherry-pick."
 (defun kdb-vc-commit-stats (hash)
   "Show stats for a specific commit HASH."
   (interactive "sCommit hash: ")
-  (let ((output (shell-command-to-string 
-                 (format "git show --stat --format='%%h %%s%%n%%aD %%an' %s" (shell-quote-argument hash)))))
+  (let ((output (kdb-vc-git-output "show" "--stat" "--format=%h %s%n%aD %an" hash)))
     (message "%s" (string-trim output))))
 
 (defalias 'kdb-vc-clone 'vc-clone)
@@ -600,9 +520,10 @@ For history surgery vc doesn't cover: interactive rebase, cherry-pick."
   :after vc
   :config
   ;; Better defaults for cleaner UI
-  (setq vc-dir-hide-up-to-date t           ; Hide unchanged files by default
-        vc-dir-hide-unregistered nil       ; Show untracked files
-        vc-directory-exclusion-list '(".git" ".hg" ".svn" "node_modules" ".venv"))
+  (setq vc-dir-auto-hide-up-to-date t)     ; hide unchanged files after a refresh
+  ;; Added to, not replaced: init.el's project settings put "elpa" etc. here.
+  (dolist (dir '(".git" ".hg" ".svn" "node_modules" ".venv"))
+    (add-to-list 'vc-directory-exclusion-list dir))
 
   ;; === MERGE CONFLICT RESOLUTION === ;;
   
@@ -612,8 +533,8 @@ For history surgery vc doesn't cover: interactive rebase, cherry-pick."
     :bind (:map smerge-mode-map
            ("C-c m n" . smerge-next)
            ("C-c m p" . smerge-prev)
-           ("C-c m a" . smerge-keep-mine)
-           ("C-c m b" . smerge-keep-other)
+           ("C-c m a" . smerge-keep-upper)
+           ("C-c m b" . smerge-keep-lower)
            ("C-c m m" . smerge-keep-all)
            ("C-c m c" . smerge-keep-current)
            ("C-c m e" . smerge-ediff)
@@ -678,8 +599,8 @@ For history surgery vc doesn't cover: interactive rebase, cherry-pick."
            ((memq state '(edited added removed))
             (vc-dir-mark-registered-files) 
             (message "Marked all registered files"))
-           (t 
-            (vc-dir-mark-all-files)
+           (t
+            (vc-dir-mark-all-files t)
             (message "Marked all files")))))))
 
   ;; Show only modified files
@@ -747,122 +668,12 @@ Marked untracked files are registered automatically first."
       (message "Modified: %d | Added: %d | Removed: %d | Untracked: %d"
                modified added removed unregistered)))
   
-  ;; Show diff for file at point or all marked files
-  (defun kdb-vc-dir-show-diff ()
-    "Show diff for the file at point or all marked files in a side window."
-    (interactive)
-    (let* ((files (or (vc-dir-marked-files)
-                      (when (vc-dir-current-file)
-                        (list (vc-dir-current-file)))))
-           (buf (get-buffer-create "*vc-dir-diff*")))
-      (if (not files)
-          (message "No file at point or marked files")
-        ;; Simpler approach: just call vc-diff and redirect output
-        (let* ((root (vc-dir-root))
-               (full-files (mapcar (lambda (f) 
-                                    (expand-file-name f root)) 
-                                  files)))
-          (with-current-buffer buf
-            (let ((inhibit-read-only t))
-              (erase-buffer)
-              (diff-mode)
-              ;; Run git diff directly to avoid VC overhead
-              (insert (shell-command-to-string 
-                       (format "cd %s && git diff HEAD -- %s" 
-                               (shell-quote-argument root)
-                               (mapconcat 'shell-quote-argument files " "))))
-              (goto-char (point-min))))
-          ;; Display in side window
-          (display-buffer buf
-                          '((display-buffer-in-side-window)
-                            (side . right)
-                            (window-width . 0.5)))))))
-  
-  (defun kdb-vc-dir-show-diff-quietly ()
-    "Show diff without triggering refreshes."
-    (let* ((files (or (vc-dir-marked-files)
-                      (when (vc-dir-current-file)
-                        (list (vc-dir-current-file)))))
-           (buf (get-buffer-create "*vc-dir-diff*")))
-      (when files
-        (let ((inhibit-message t)  ; Suppress messages
-              (root (vc-dir-root)))
-          (with-current-buffer buf
-            (let ((inhibit-read-only t))
-              (erase-buffer)
-              (diff-mode)
-              ;; Run git diff directly - much faster and no VC overhead
-              (insert (shell-command-to-string 
-                       (format "cd %s && git diff HEAD -- %s 2>/dev/null" 
-                               (shell-quote-argument root)
-                               (mapconcat 'shell-quote-argument files " "))))
-              (goto-char (point-min))))
-          ;; Display in side window quietly
-          (when (> (buffer-size buf) 0)
-            (display-buffer buf
-                            '((display-buffer-in-side-window)
-                              (side . right)
-                              (window-width . 0.5))))))))
-  
-  ;; Show all diffs at once (like git diff)
-  (defun kdb-vc-dir-show-all-diffs ()
-    "Show all uncommitted changes in a single diff buffer."
-    (interactive)
-    (let ((buf (get-buffer-create "*vc-all-diffs*"))
-          (backend (vc-backend default-directory)))
-      (if (not backend)
-          (message "No version control backend found")
-        (with-current-buffer buf
-          (let ((inhibit-read-only t))
-            (erase-buffer)))
-        (vc-diff-internal backend nil nil nil t buf)
-        (pop-to-buffer buf))))
-  
-  ;; Quick stage/unstage with diff preview
-  
-  ;; Enhanced display with icons
-  (defun kdb-vc-dir-prettify ()
-    "Add icons and better formatting to vc-dir."
-    (save-excursion
-      (goto-char (point-min))
-      (while (re-search-forward "^[ *][ *]\\s-+\\(edited\\)" nil t)
-        (replace-match "modified" nil nil nil 1))
-      (goto-char (point-min))
-      (while (re-search-forward "^[ *][ *]\\s-+\\(added\\)" nil t)
-        (overlay-put (make-overlay (match-beginning 1) (match-end 1))
-                     'face '(:foreground "#6BB05D" :weight bold)))
-      (goto-char (point-min))
-      (while (re-search-forward "^[ *][ *]\\s-+\\(removed\\)" nil t)
-        (overlay-put (make-overlay (match-beginning 1) (match-end 1))
-                     'face '(:foreground "#F65B5B" :weight bold)))))
-  
   ;; Help function
   (defun kdb-vc-dir-help ()
     "Show vc-dir keybinding help."
     (interactive)
     (message "VC-Dir: [d]iff [D]iff-all [SPC]mark [a]mark-same-type [c]ommit [C]onflicts [h/x]hide [r]evert [s]ummary | log-edit: C-c C-d diff, C-c C-e amend"))
 
-  (defun kdb-vc-dir-revert-file ()
-    "Revert the file at point to its last committed version."
-    (interactive)
-    (let ((file (vc-dir-current-file)))
-      (if file
-          (when (yes-or-no-p (format "Revert %s to last committed version? " file))
-            (let* ((root (vc-root-dir))
-                   (full-path (expand-file-name file root))
-                   (file-buffer (find-buffer-visiting full-path)))
-              (if file-buffer
-                  ;; File is open, revert it directly
-                  (with-current-buffer file-buffer
-                    (vc-revert-buffer-internal t t))
-                ;; File not open, use git directly
-                (let ((default-directory root))
-                  (shell-command (format "git checkout HEAD -- %s"
-                                       (shell-quote-argument file))))))
-            (vc-dir-refresh)
-            (message "File %s reverted to last committed version" file))
-        (message "No file at point"))))
-  
   ;; Set up keybindings using define-key instead of :bind
   (with-eval-after-load 'vc-dir
     (define-key vc-dir-mode-map (kbd "h") 'vc-dir-hide-up-to-date)
@@ -877,7 +688,7 @@ Marked untracked files are registered automatically first."
     (define-key vc-dir-mode-map (kbd "l") 'vc-print-log)
     (define-key vc-dir-mode-map (kbd "=") 'vc-diff)
     (define-key vc-dir-mode-map (kbd "g") 'revert-buffer)
-    (define-key vc-dir-mode-map (kbd "r") 'kdb-vc-dir-revert-file)
+    (define-key vc-dir-mode-map (kbd "r") 'kdb-vc-revert-file)
     (define-key vc-dir-mode-map (kbd "k") 'vc-dir-delete-file)
     (define-key vc-dir-mode-map (kbd "!") 'vc-dir-ignore)
     ;; New diff-related keybindings
@@ -889,18 +700,11 @@ Marked untracked files are registered automatically first."
     (define-key vc-dir-mode-map (kbd "B") 'kdb-vc-browse-remote))
   
   ;; Auto-refresh and enhance display
+  ;; g keeps vc-dir's own refresh; s gives the summary once the status is in.
   (add-hook 'vc-dir-mode-hook
             (lambda ()
-              (auto-revert-mode 1)
               (hl-line-mode 1)
-              (display-line-numbers-mode -1)  ; Cleaner without line numbers
-              (kdb-vc-dir-prettify)             ; Apply prettification
-              (setq-local revert-buffer-function
-                          (lambda (_ignore-auto _noconfirm)
-                            (vc-dir-refresh)
-                            (kdb-vc-dir-prettify)))
-              ;; Show summary on startup
-              (run-at-time 0.1 nil 'kdb-vc-dir-summary))))
+              (display-line-numbers-mode -1))))  ; Cleaner without line numbers
 
 ;; Better commit message interface
 (setq log-edit-confirm 'changed

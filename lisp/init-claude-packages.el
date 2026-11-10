@@ -136,6 +136,25 @@ paragraph for its direction, which is costly in long sessions."
 
 (global-set-key (kbd "C-c l") #'kdb-claude)
 (global-set-key (kbd "C-c '") #'kdb-claude-answer)
+;; Org and Markdown have their own C-c ': answer a waiting session first.
+(defun kdb-claude-answer-or-org-edit ()
+  "Answer a Claude session waiting on you, else `org-edit-special'."
+  (interactive)
+  (if (bound-and-true-p kdb-claude--permissions)
+      (kdb-claude-answer)
+    (call-interactively #'org-edit-special)))
+(defun kdb-claude-answer-or-markdown-edit ()
+  "Answer a Claude session waiting on you, else `markdown-edit-code-block'."
+  (interactive)
+  (if (bound-and-true-p kdb-claude--permissions)
+      (kdb-claude-answer)
+    (call-interactively #'markdown-edit-code-block)))
+(with-eval-after-load 'org
+  (define-key org-mode-map (kbd "C-c '") #'kdb-claude-answer-or-org-edit))
+(with-eval-after-load 'markdown-mode
+  (define-key markdown-mode-map (kbd "C-c '") #'kdb-claude-answer-or-markdown-edit))
+;; A bookmarked print session opens before its module has loaded.
+(autoload 'kdb-claude-print--bookmark-jump "init-claude-print")
 
 ;; Session transcripts stay out of recent files (and so out of var/recentf).
 ;; By name: on Windows here `file-in-directory-p' takes a parent of the

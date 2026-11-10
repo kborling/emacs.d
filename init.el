@@ -36,7 +36,9 @@
 ;;;                  PERFORMANCE SETTINGS
 ;;; ============================================================
 
-(fset #'jsonrpc--log-event #'ignore)
+;; After jsonrpc loads: it defines this itself, undoing an earlier fset.
+(with-eval-after-load 'jsonrpc
+  (fset #'jsonrpc--log-event #'ignore))
 
 ;; Native compilation settings
 (setq native-comp-async-report-warnings-errors nil
@@ -604,9 +606,12 @@ be found until the first emacsclient frame opens."
   (find-file (expand-file-name (locate-user-emacs-file "init.el"))))
 
 (defun config-reload ()
-  "Reload ~/.emacs.d/init.el at runtime."
+  "Reload ~/.emacs.d/init.el at runtime.
+Then the Claude module again: init.el resets `display-buffer-alist', and
+`require' wouldn't re-add what that module put there."
   (interactive)
-  (load-file (expand-file-name (locate-user-emacs-file "init.el"))))
+  (load-file (expand-file-name (locate-user-emacs-file "init.el")))
+  (load "init-claude-packages" nil t))
 
 (defun kill-buffer-other-window ()
   "Kill buffer in the other window."
@@ -1893,7 +1898,11 @@ again when eat's source changes; kept out of eat's own checkout."
   ;; Shrink fringes to 1 pixel
   (fringe-mode 1))
 
-(when (memq window-system '(x))
+;; Only when Emacs is the window manager: init-exwm binds s-t, s-p, s-x and
+;; the other launcher keys globally, which under StumpWM etc. take over
+;; keys meant for Emacs (s-t's theme cycle).
+(when (and (memq window-system '(x))
+           (equal (getenv "DESKTOP_SESSION") "exwm"))
   (require 'init-exwm))
 
 ;; Tab Bar (Workspaces) ==================================== ;;
@@ -1905,8 +1914,10 @@ again when eat's source changes; kept out of eat's own checkout."
   (setq tab-bar-show t
         tab-bar-close-button-show nil
         tab-bar-new-button-show nil
-        tab-bar-tab-hints t            ; Show tab numbers in tab names
-        tab-bar-format '(tab-bar-format-tabs tab-bar-separator))
+        tab-bar-tab-hints t)           ; Show tab numbers in tab names
+  ;; Unless EXWM already put its workspace and clock there.
+  (unless (memq 'kdb-exwm-tab-bar-workspace-name tab-bar-format)
+    (setq tab-bar-format '(tab-bar-format-tabs tab-bar-separator)))
   ;; M-1..M-8 go to that tab, M-9 the last, M-0 the one you were just in.
   ;; Not in terminal Emacs, where M-digits split windows (init-terminal).
   (unless (bound-and-true-p kdb-terminal-mode)

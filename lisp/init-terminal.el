@@ -39,8 +39,14 @@
     (when paste-cmd
       (setq interprogram-paste-function
             (lambda ()
-              (let ((output (shell-command-to-string paste-cmd)))
-                (unless (string-empty-p output) output))))))
+              ;; stdout only: an error (no display, no text) isn't pasted.
+              ;; Nil for what Emacs itself copied, so it isn't killed twice.
+              (let ((output (with-temp-buffer
+                              (and (zerop (call-process-shell-command paste-cmd nil '(t nil)))
+                                   (buffer-string)))))
+                (unless (or (null output) (string-empty-p output)
+                            (equal output (car kill-ring)))
+                  output))))))
   
   ;; Terminal defaults
   (setq-default cursor-type 'bar)

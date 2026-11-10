@@ -517,42 +517,44 @@ macOS: interactive region select. Linux: scrot/maim. Windows: snippingtool."
   (setq csv-separators '("," ";" "\t")))
 
 ;; Excel (.xlsx) support — view and export
+(defun kdb/xlsx-convert (file)
+  "Convert FILE (.xlsx) to a temporary CSV file and return its name.
+File names go to the converters as arguments, never into code or a
+shell, and a converter that fails is reported, not taken as done."
+  (let* ((file (expand-file-name file))
+         (csv (make-temp-file (file-name-base file) nil ".csv"))
+         (ok (cond
+              ((executable-find "ssconvert")
+               (zerop (call-process "ssconvert" nil nil nil file csv)))
+              ((executable-find "xlsx2csv")
+               (zerop (call-process "xlsx2csv" nil nil nil file csv)))
+              ((executable-find "libreoffice")
+               (let* ((dir (make-temp-file "lo-" t))
+                      (out (expand-file-name (concat (file-name-base file) ".csv") dir)))
+                 (call-process "libreoffice" nil nil nil
+                               "--headless" "--convert-to" "csv" "--outdir" dir file)
+                 (and (file-exists-p out) (progn (rename-file out csv t) t))))
+              ((executable-find "python3")
+               (zerop (call-process "python3" nil nil nil "-c"
+                                    "import sys,csv,openpyxl
+ws=openpyxl.load_workbook(sys.argv[1]).active
+with open(sys.argv[2],'w',newline='') as f:
+    csv.writer(f).writerows([c.value for c in r] for r in ws.iter_rows())"
+                                    file csv)))
+              (t (user-error "No xlsx converter found. Install ssconvert, xlsx2csv, libreoffice, or python3+openpyxl")))))
+    (unless ok
+      (delete-file csv)
+      (user-error "Couldn't convert %s" (file-name-nondirectory file)))
+    csv))
+
 (defun kdb/xlsx-to-csv (file)
-  "Convert FILE (.xlsx) to CSV and open in csv-mode."
+  "Convert FILE (.xlsx) to CSV and open it, read-only, in csv-mode."
   (interactive "fOpen Excel file: ")
-  (let* ((base (file-name-sans-extension (file-name-nondirectory file)))
-         (csv-file (make-temp-file base nil ".csv"))
-         (converted nil))
-    ;; Try available converters in order
-    (cond
-     ((executable-find "ssconvert")
-      (call-process "ssconvert" nil nil nil file csv-file)
-      (setq converted t))
-     ((executable-find "xlsx2csv")
-      (call-process "xlsx2csv" nil nil nil file csv-file)
-      (setq converted t))
-     ((executable-find "libreoffice")
-      (let ((tmp-dir (make-temp-file "lo-" t)))
-        (call-process "libreoffice" nil nil nil
-                      "--headless" "--convert-to" "csv"
-                      "--outdir" tmp-dir file)
-        (let ((lo-csv (expand-file-name (concat base ".csv") tmp-dir)))
-          (when (file-exists-p lo-csv)
-            (rename-file lo-csv csv-file t)
-            (setq converted t)))))
-     ((executable-find "python3")
-      (call-process "python3" nil nil nil "-c"
-                    (format "import csv,openpyxl;wb=openpyxl.load_workbook('%s');ws=wb.active;w=csv.writer(open('%s','w'));[w.writerow([c.value for c in r]) for r in ws.iter_rows()]"
-                            (expand-file-name file) csv-file))
-      (setq converted t)))
-    (if converted
-        (progn
-          (find-file csv-file)
-          (csv-mode)
-          (csv-align-fields nil (point-min) (point-max))
-          (setq-local buffer-read-only t)
-          (message "Opened %s (converted to CSV)" (file-name-nondirectory file)))
-      (message "No xlsx converter found. Install ssconvert, xlsx2csv, libreoffice, or python3+openpyxl"))))
+  (find-file (kdb/xlsx-convert file))
+  (csv-mode)
+  (csv-align-fields nil (point-min) (point-max))
+  (setq buffer-read-only t)
+  (message "Opened %s (converted to CSV)" (file-name-nondirectory file)))
 
 (defun kdb/org-table-to-xlsx ()
   "Export current org table to Excel (.xlsx) via CSV."
@@ -560,32 +562,47 @@ macOS: interactive region select. Linux: scrot/maim. Windows: snippingtool."
   (unless (org-at-table-p) (user-error "Not in an org table"))
   (let* ((base (file-name-base (or buffer-file-name "table")))
          (csv-file (make-temp-file base nil ".csv"))
-         (xlsx-file (read-file-name "Export xlsx to: " nil nil nil (concat base ".xlsx"))))
+         (xlsx-file (expand-file-name
+                     (read-file-name "Export xlsx to: " nil nil nil (concat base ".xlsx")))))
     (org-table-export csv-file "orgtbl-to-csv")
-    (cond
-     ((executable-find "ssconvert")
-      (call-process "ssconvert" nil nil nil csv-file xlsx-file))
-     ((executable-find "libreoffice")
-      (let ((tmp-dir (file-name-directory xlsx-file)))
-        (call-process "libreoffice" nil nil nil
-                      "--headless" "--convert-to" "xlsx"
-                      "--outdir" tmp-dir csv-file)
-        (let ((lo-file (expand-file-name (concat (file-name-base csv-file) ".xlsx") tmp-dir)))
-          (unless (string= lo-file xlsx-file)
-            (rename-file lo-file xlsx-file t)))))
-     ((executable-find "python3")
-      (call-process "python3" nil nil nil "-c"
-                    (format "import csv,openpyxl;wb=openpyxl.Workbook();ws=wb.active;[ws.append(r) for r in csv.reader(open('%s'))];wb.save('%s')"
-                            csv-file (expand-file-name xlsx-file))))
-     (t (message "No xlsx converter. CSV saved to %s" csv-file) (setq xlsx-file csv-file)))
-    (delete-file csv-file)
-    (message "Exported to %s" xlsx-file)))
+    (let ((ok (cond
+               ((executable-find "ssconvert")
+                (zerop (call-process "ssconvert" nil nil nil csv-file xlsx-file)))
+               ((executable-find "libreoffice")
+                (let* ((dir (file-name-directory xlsx-file))
+                       (out (expand-file-name (concat (file-name-base csv-file) ".xlsx") dir)))
+                  (call-process "libreoffice" nil nil nil
+                                "--headless" "--convert-to" "xlsx" "--outdir" dir csv-file)
+                  (and (file-exists-p out)
+                       (progn (unless (string= out xlsx-file) (rename-file out xlsx-file t)) t))))
+               ((executable-find "python3")
+                (zerop (call-process "python3" nil nil nil "-c"
+                                     "import sys,csv,openpyxl
+wb=openpyxl.Workbook();ws=wb.active
+[ws.append(r) for r in csv.reader(open(sys.argv[1],newline=''))]
+wb.save(sys.argv[2])"
+                                     csv-file xlsx-file))))))
+      (if ok
+          (progn (delete-file csv-file)
+                 (message "Exported to %s" xlsx-file))
+        ;; No converter, or it failed: the CSV is kept, and said so.
+        (message "No xlsx made; the table is in %s" csv-file)))))
 
-;; Auto-convert xlsx files when opened
-(add-to-list 'auto-mode-alist '("\\.xlsx\\'" . kdb/xlsx-auto-open))
-(defun kdb/xlsx-auto-open ()
-  "Auto-convert xlsx to CSV on open."
-  (kdb/xlsx-to-csv buffer-file-name))
+;; .xlsx files open as their CSV, read-only, in the file's own buffer.
+(add-to-list 'auto-mode-alist '("\\.xlsx\\'" . kdb/xlsx-mode))
+(defun kdb/xlsx-mode ()
+  "Show this .xlsx file's first sheet as CSV, read-only.
+A major mode for `auto-mode-alist': it fills this buffer, rather than
+opening another that `find-file' would then put back over."
+  (let ((csv (kdb/xlsx-convert buffer-file-name))
+        (inhibit-read-only t))
+    (set-buffer-multibyte t)
+    (erase-buffer)
+    (insert-file-contents csv)
+    (delete-file csv)
+    (csv-mode)
+    (set-buffer-modified-p nil)
+    (setq buffer-read-only t)))
 
 ;; Export org table to CSV
 (defun kdb/org-table-to-csv ()

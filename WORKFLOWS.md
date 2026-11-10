@@ -77,7 +77,9 @@
 
 1. `C-c g` — VC transient (status, diff, log, branch, stash, push)
 2. Common flow: `g` (status) → mark files → `c` (commit) → `p` (push)
-3. `x` — unstage, `z z` — stash, `B` — blame
+3. `a` — stage, `x` — unstage, `U` — discard changes (file or vc-dir marks)
+4. `F` — fetch only, `f` — pull, `P` — push with edited command
+5. `z z` — stash, `B` — blame
 
 ## Review Prep (Performance Reviews)
 

@@ -20,8 +20,6 @@
 (require 'project)
 (require 'init-claude)
 
-(declare-function kdb-claude-flag-buffer "init-claude-workflow")
-
 ;;; ============================================================
 ;;; Options
 ;;; ============================================================
@@ -175,11 +173,6 @@ reads, and background prefetches.  Note: `--bare' forces API-key auth
     (goto-char (point-max))
     (insert (apply #'format fmt args))))
 
-(defun kdb-claude-print--flag ()
-  "Mark this session as waiting on you."
-  (when (fboundp 'kdb-claude-flag-buffer)
-    (kdb-claude-flag-buffer (current-buffer))))
-
 ;;; ============================================================
 ;;; Process
 ;;; ============================================================
@@ -260,8 +253,7 @@ RESUME non-nil continues the buffer's session id."
             ("peer_message_hold"
              (kdb-claude-print--insert
               "%s\n\n" (propertize "── message from another session held (permission modes differ) ──"
-                                   'face 'warning))
-             (kdb-claude-print--flag)))
+                                   'face 'warning))))
           (when (equal (alist-get 'subtype obj) "init")
             (let ((sid (alist-get 'session_id obj)))
               (unless (equal sid kdb-claude-print--session-id)
@@ -300,9 +292,8 @@ RESUME non-nil continues the buffer's session id."
                             (alist-get 'tool_name req)
                             (kdb-claude-print--tool-summary (alist-get 'input req)))
                     'face 'warning))
-                  (kdb-claude-print--flag)
                   (unless (get-buffer-window (current-buffer))
-                    (message "Claude wants %s in %s (C-c ' to review)"
+                    (message "Claude wants %s in %s (answer it there)"
                              (alist-get 'tool_name req) (buffer-name))))
               (kdb-claude-print--send
                `((type . "control_response")
@@ -319,8 +310,7 @@ RESUME non-nil continues the buffer's session id."
                (/ (or (alist-get 'duration_ms obj) 0) 1000.0))
             (kdb-claude-print--insert
              "\n── error: %s ──\n\n"
-             (or (alist-get 'subtype obj) "unknown")))
-          (kdb-claude-print--flag)))))))
+             (or (alist-get 'subtype obj) "unknown")))))))))
 
 (defun kdb-claude-print--tool-summary (input)
   "Return a short one-line summary string for a tool-use INPUT alist."
@@ -365,8 +355,7 @@ sentinel can fire after its successor started)."
                     (string-prefix-p "exited abnormally with code 0" event))
           (when (memq (process-status proc) '(exit signal))
             (kdb-claude-print--insert "\n── process %s ──\n\n"
-                                      (string-trim event))))
-        (kdb-claude-print--flag)))))
+                                      (string-trim event))))))))
 
 ;;; ============================================================
 ;;; Runner

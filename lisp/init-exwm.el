@@ -56,14 +56,18 @@
   "Add spacing for systemtray on the right."
   '((systemtray-spacer menu-item "     " ignore)))
 
+(defvar kdb-exwm--clock-timer nil
+  "The timer redrawing the tab bar's clock.")
+
 (defun kdb-exwm-setup-tab-bar ()
   "Configure tab-bar for EXWM."
   (setq tab-bar-format '(kdb-exwm-tab-bar-workspace-name
                          tab-bar-format-align-right
                          kdb-exwm-tab-bar-time
                          kdb-exwm-tab-bar-spacer))
-  ;; Update time display every minute
-  (run-with-timer 0 60 #'force-mode-line-update t))
+  ;; Update time display every minute: one timer, however often this runs
+  (unless (timerp kdb-exwm--clock-timer)
+    (setq kdb-exwm--clock-timer (run-with-timer 0 60 #'force-mode-line-update t))))
 
 ;;; Window Management ====================================================
 
@@ -776,9 +780,7 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
 
 (defun kdb-exwm-notify (message)
   "Send a notification MESSAGE."
-  (start-process-shell-command
-   "notify" nil
-   (format "notify-send 'EXWM' '%s'" message)))
+  (start-process "notify" nil "notify-send" "EXWM" message))
 
 ;;; Initialize EXWM ======================================================
 
