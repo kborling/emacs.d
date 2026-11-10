@@ -25,7 +25,8 @@
               kdb-claude--redraw-tabs kdb-claude--tab-save kdb-claude--tab-restore
               kdb-claude--busy-frames kdb-claude--logo-icon kdb-claude--logo-header
               kdb-claude--steady-busy-frame kdb-claude--heartbeat-rate kdb-claude--display-in-own-tab
-              kdb-claude--close-session-window))
+              kdb-claude--close-session-window kdb-claude--trim-session kdb-claude--watch-agent
+              kdb-claude--focused-tick-p kdb-claude--display-in-pane))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
                  kdb-claude-send kdb-claude-answer kdb-claude-review
@@ -46,6 +47,15 @@
 (dolist (fn '(agent-shell-prompt-queue agent-shell-prompt-queue-remove agent-shell-prompt-queue-resume))
   (autoload fn "agent-shell" nil t))
 
+(defun kdb-claude--left-to-right ()
+  "Lay this session out left to right, so redisplay doesn't scan each
+paragraph for its direction, which is costly in long sessions."
+  (setq bidi-paragraph-direction 'left-to-right))
+
+(defvar kdb-claude-agent-logs
+  (expand-file-name "claude-agent-logs" temporary-file-directory)
+  "Where the Claude agent adapter writes its log.")
+
 (use-package agent-shell
   :ensure t
   :commands agent-shell-anthropic-start-claude-code
@@ -60,6 +70,9 @@
         ;; Code block labels: RET copies (built in), x runs the block (shell
         ;; blocks in the project's shell, others in org babel), e edits first.
         agent-shell-markdown-render-function #'kdb-claude--render-markdown
+        ;; Files clicked in the chat (links, path:line, tool calls) open in
+        ;; the pane beside it, not over it; a file already shown is reused.
+        agent-shell-file-display-action '((display-buffer-reuse-window kdb-claude--display-in-pane))
         ;; Resume from the history list (C-c l h), not a picker on every start.
         agent-shell-session-strategy 'new
         ;; Each session in a tab of its own, named after it.
@@ -77,7 +90,7 @@
         ;; reports any stderr as an error, which aborts agent-review.
         agent-shell-anthropic-claude-environment
         (agent-shell-make-environment-variables
-         "CLAUDE_AGENT_LOGS" (expand-file-name "claude-agent-logs" temporary-file-directory)))
+         "CLAUDE_AGENT_LOGS" kdb-claude-agent-logs))
   ;; The default, ImageMagick's import, is often missing on Linux; maim
   ;; (-s: drag a region) where installed.  macOS/Windows keep the default.
   (when (and (eq system-type 'gnu/linux) (executable-find "maim"))
@@ -86,9 +99,14 @@
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-artifacts)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-emacs-session)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--close-session-window)
+  (add-hook 'agent-shell-mode-hook #'kdb-claude--trim-session)
+  (add-hook 'agent-shell-mode-hook #'kdb-claude--left-to-right)
+  ;; An agent that dies between turns says so, instead of the session just stopping.
+  (advice-add 'acp--start-client :after #'kdb-claude--watch-agent)
   (setq agent-shell-busy-indicator-frames #'kdb-claude--busy-frames)
   (advice-add 'agent-shell--busy-indicator-frame :filter-return #'kdb-claude--steady-busy-frame)
   (advice-add 'agent-shell-heartbeat-make :filter-args #'kdb-claude--heartbeat-rate)
+  (advice-add 'agent-shell--update-header-and-mode-line :before-while #'kdb-claude--focused-tick-p)
   (advice-add 'rename-buffer :around #'kdb-claude--rename-keeps-tab)
   (advice-add 'agent-shell--permission-title :around #'kdb-claude--permission-title)
   (advice-add 'agent-shell--fetch-agent-icon :before-until #'kdb-claude--logo-icon)
@@ -133,11 +151,13 @@
 
 ;; Keep the archive current so search/ask/resume see recent sessions.
 ;; The conversion runs in a background Emacs, so idle time never freezes.
-(run-with-idle-timer 300 t (lambda ()
-                             (require 'init-claude)
-                             (when (kdb-claude--archive-repo-p)
-                               (with-demoted-errors "Claude archive sync: %S"
-                                 (kdb-claude-sync-code-sessions-async)))))
+;; A defvar, so loading this file again doesn't add a second timer.
+(defvar kdb-claude--archive-timer
+  (run-with-idle-timer 300 t (lambda ()
+                               (require 'init-claude)
+                               (when (kdb-claude--archive-repo-p)
+                                 (with-demoted-errors "Claude archive sync: %S"
+                                   (kdb-claude-sync-code-sessions-async))))))
 
 ;; Code blocks run from Claude's replies (C-c l x), and babel's errors.
 (add-to-list 'display-buffer-alist

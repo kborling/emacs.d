@@ -46,7 +46,29 @@
 (setq fast-but-imprecise-scrolling t
       redisplay-skip-fontification-on-input t
       jit-lock-defer-time 0
-      jit-lock-stealth-time 0.2)
+      ;; No stealth: it fontifies every buffer in the background,
+      ;; multi-MB Claude sessions included, allocating as it goes.
+      jit-lock-stealth-time nil
+      bidi-inhibit-bpa t)
+
+;; Timers (auto-revert, Claude sessions finishing, theme switches, agent
+;; output) that message while you type a file name or command append
+;; " [their text]" to it.  Not shown then; *Messages* still has them.
+(defvar kdb-in-timer nil
+  "While a timer runs, the minibuffer depth it started at.")
+
+(defun kdb--mark-timer (fn &rest args)
+  "Run timer handler FN with ARGS, `kdb-in-timer' bound."
+  (let ((kdb-in-timer (minibuffer-depth)))
+    (apply fn args)))
+(advice-add 'timer-event-handler :around #'kdb--mark-timer)
+
+(defun kdb-quiet-timer-message (_message)
+  "Non-nil, so not shown, for a timer's message over a minibuffer in use.
+Only one already open when the timer started: a prompt the timer opens
+itself shows messages as usual.  For `set-message-functions'."
+  (and kdb-in-timer (> kdb-in-timer 0) (= kdb-in-timer (minibuffer-depth)) t))
+(setq set-message-functions '(kdb-quiet-timer-message set-minibuffer-message))
 
 ;;; ============================================================
 ;;;                   PACKAGE MANAGEMENT
@@ -289,10 +311,11 @@
         recentf-exclude '(".gz" ".xz" ".zip" "/elpa/" "/opt/" "/.rustup/" "/ssh:" "/sudo:" "/node_modules/" "/nix/"))
   (run-with-idle-timer 1 nil #'recentf-mode)
   :config
-  ;; Save silently every 5 minutes
-  (run-at-time nil (* 5 60) (lambda ()
-                              (let ((inhibit-message t))
-                                (recentf-save-list)))))
+  ;; Save silently every 5 minutes; a defvar, so a reload adds no second timer
+  (defvar kdb-recentf-save-timer
+    (run-at-time nil (* 5 60) (lambda ()
+                                (let ((inhibit-message t))
+                                  (recentf-save-list))))))
 
 ;; Save Place ============================================== ;;
 

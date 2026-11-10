@@ -239,10 +239,14 @@ what, and how to answer; not over a prompt you're answering."
 (defvar kdb-claude--notification nil
   "Id of the last Windows notification, which must be closed before the next.")
 
+(defun kdb-claude--emacs-focused-p ()
+  "Non-nil when some Emacs frame has focus."
+  (seq-some #'frame-focus-state (frame-list)))
+
 ;;;###autoload
 (defun kdb-claude--notify (_buffer title body)
   "Show TITLE/BODY as a desktop notification, only when Emacs isn't focused."
-  (unless (seq-some #'frame-focus-state (frame-list))
+  (unless (kdb-claude--emacs-focused-p)
     (cond ((fboundp 'w32-notification-notify)
            (when kdb-claude--notification
              (w32-notification-close kdb-claude--notification))
@@ -831,6 +835,15 @@ where each redraw is slow.")
   (append (list :beats-per-second kdb-claude-busy-beats-per-second) args))
 
 ;;;###autoload
+(defun kdb-claude--focused-tick-p (&rest args)
+  "Nil for a busy animation tick (ARGS has :cache-enabled) if Emacs is unfocused.
+Before-while advice on `agent-shell--update-header-and-mode-line': each
+tick redraws the header, so sessions working while you're in another
+app animate for no one.  The first tick after you come back redraws."
+  (or (not (plist-get args :cache-enabled))
+      (kdb-claude--emacs-focused-p)))
+
+;;;###autoload
 (defun kdb-claude--busy-frames ()
   "Frames for `agent-shell-busy-indicator-frames', per `kdb-claude-busy-indicator'."
   (pcase kdb-claude-busy-indicator
@@ -972,8 +985,9 @@ redraws only on a change."
 ;;; Artifacts: files Claude writes
 ;;; ============================================================
 
-(defvar kdb-claude-artifact-auto-show t
-  "Non-nil to show documents Claude writes in the artifact pane.")
+(defvar kdb-claude-artifact-auto-show nil
+  "Non-nil to show documents Claude writes in the artifact pane as they land.
+Off: they're links in the chat instead, opening in that pane when clicked.")
 
 (defvar kdb-claude-artifact-extensions
   '("md" "markdown" "org" "txt" "csv" "svg" "png" "jpg" "jpeg" "gif" "pdf")
@@ -1020,6 +1034,43 @@ window you have since used for something else is left alone."
       (when (and select win) (select-window win))
       win)))
 
+;;;###autoload
+(defun kdb-claude--display-in-pane (buffer _alist)
+  "Show BUFFER, a file a chat link opened, in the artifact pane beside the chat.
+A `display-buffer' action, for `agent-shell-file-display-action'."
+  (if-let* ((file (buffer-file-name buffer)))
+      (kdb-claude--show-artifact file)
+    (display-buffer-pop-up-window buffer nil)))
+
+(declare-function agent-shell-markdown--apply-link-properties "agent-shell-markdown")
+
+(defun kdb-claude--link-documents ()
+  "Link bare paths of documents that exist, in this (narrowed) reply.
+agent-shell links a path only when it names a line; a document Claude
+wrote is usually cited whole, as `notes/plan.org' or ~/report.md."
+  (let ((case-fold-search t)
+        (ext (concat "\\.\\(?:" (regexp-opt kdb-claude-artifact-extensions) "\\)\\b")))
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward ext nil t)
+        (let ((end (point)) start)
+          (save-excursion
+            ;; Bounded, so a long run of path chars costs little.
+            (skip-chars-backward "[:alnum:]._~/@+-" (max (point-min) (- end 300)))
+            (when (looking-back "\\b[A-Za-z]:" (max (point-min) (- (point) 2))) ; C:/...
+              (backward-char 2))
+            (setq start (point)))
+          (when-let* (((< start end))
+                      ((not (file-remote-p default-directory)))
+                      ;; Not the tail of a URL (https://host/x.md) or a share.
+                      ((not (string-prefix-p "//" (buffer-substring-no-properties
+                                                   start (min end (+ start 2))))))
+                      ((not (get-text-property start 'agent-shell-markdown-url)))
+                      ((not (get-text-property start 'agent-shell-markdown-source-block-body)))
+                      (file (expand-file-name (buffer-substring-no-properties start end)))
+                      ((file-regular-p file)))
+            (agent-shell-markdown--apply-link-properties :start start :end end :url file)))))))
+
 (defun kdb-claude--note-artifact (buf id tool-call)
   "Record the file tool call ID wrote in session BUF, showing it if a document.
 Only Write calls, which create files; Edit ones change files already there.
@@ -1060,6 +1111,92 @@ And name it after its title once it has one, to tell it from others."
                              (id (agent-shell-session-id :shell-buffer buf)))
                    (kdb-claude--note-emacs-session id)
                    (kdb-claude--name-session buf))))))
+
+(defvar comint-prompt-regexp)
+(declare-function agent-shell--prompt-face-p "agent-shell-prompt")
+
+(defvar kdb-claude-session-max-chars 1000000
+  "A session buffer past this many characters loses its oldest turns.
+About half is kept.  Millions of characters (long tool output adds up)
+make every GC and redisplay slow, which freezes Emacs for all sessions.")
+
+(defun kdb-claude--trim-session ()
+  "Trim this shell's oldest turns whenever a turn leaves it too big.
+Only the buffer: the session, and its archived transcript, keep all."
+  (let ((buf (current-buffer)))
+    (agent-shell-subscribe-to
+     :shell-buffer buf :event 'turn-complete
+     :on-event (lambda (_)
+                 (when (buffer-live-p buf)
+                   (with-current-buffer buf
+                     (with-demoted-errors "Trimming Claude session: %S"
+                       (kdb-claude--trim-buffer))))))))
+
+(defun kdb-claude--trim-buffer ()
+  "Delete the turns before the prompt nearest half of the limit from the end.
+Nothing when that would free little: one huge last turn stays as it is."
+  (when (> (buffer-size) kdb-claude-session-max-chars)
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (- (point-max) (/ kdb-claude-session-max-chars 2)))
+        ;; A real prompt, live or restored (its face says so), not
+        ;; "Claude> " in a reply.
+        (while (and (re-search-backward comint-prompt-regexp nil 'move)
+                    (not (agent-shell--prompt-face-p (get-text-property (point) 'font-lock-face)))))
+        (when (> (- (point) (point-min)) (/ kdb-claude-session-max-chars 10))
+          (let ((inhibit-read-only t))
+            ;; Not recorded, and older entries' positions would be off by
+            ;; what was deleted, so undo starts over from here.
+            (let ((buffer-undo-list t))
+              (delete-region (point-min) (point))
+              (goto-char (point-min))
+              (insert (propertize "Earlier turns trimmed to keep Emacs responsive; the archive has them all.\n\n"
+                                  'font-lock-face 'shadow)))
+            (setq buffer-undo-list nil)))))))
+
+(declare-function agent-shell--update-fragment "agent-shell")
+(declare-function agent-shell--state "agent-shell")
+
+(defvar kdb-claude-agent-logs)
+
+(defun kdb-claude--watch-agent (&rest args)
+  "After `acp--start-client' (ARGS), say so in the session if its agent dies.
+Between turns nothing else would (acp only fails pending requests); mid-turn
+this adds why it died and how to resume to agent-shell's request error."
+  (let* ((client (plist-get args :client))
+         (proc (map-elt client :process)))
+    (when (processp proc)
+      (add-function :before (process-sentinel proc)
+                    (lambda (p event) (kdb-claude--agent-died client p event))))))
+
+(defun kdb-claude--agent-died (client proc event)
+  "Tell CLIENT's session that PROC ended with EVENT, unless it was shut down.
+`acp-shutdown' forgets the process before stopping it, so a process the
+client still holds ended on its own."
+  (when-let* (((memq (process-status proc) '(exit signal)))
+              ((eq (map-elt client :process) proc))
+              (buf (map-elt client :context-buffer))
+              ((buffer-live-p buf)))
+    (let* ((stderr (get-buffer (format "acp-client-stderr(%s)-%s"
+                                       (map-elt client :command)
+                                       (map-elt client :instance-count))))
+           (tail (and stderr (with-current-buffer stderr
+                               (string-trim (buffer-substring-no-properties
+                                             (max (point-min) (- (point-max) 1500))
+                                             (point-max))))))
+           (body (format "The agent process %s.%s\n\nM-x agent-shell-reload resumes this conversation.  The agent's log is in %s."
+                         (string-trim event)
+                         (if (string-empty-p (or tail "")) "" (concat "\n\n" tail))
+                         kdb-claude-agent-logs)))
+      (with-current-buffer buf
+        (agent-shell--update-fragment
+         :state (agent-shell--state)
+         :block-id (format "agent-died-%s" (process-id proc))
+         :label-left (propertize "Agent stopped" 'font-lock-face 'error)
+         :body body :create-new t :expanded t :above-last-prompt t))
+      (message "Claude: %s's agent %s" (buffer-name buf) (string-trim event))
+      (kdb-claude--notify buf "Claude agent stopped" (buffer-name buf)))))
 
 (defun kdb-claude--rename-in-tab-states (old new)
   "Rename buffer OLD to NEW in the saved layouts of tabs you aren't in.
@@ -1244,6 +1381,9 @@ Elsewhere, raw fenced blocks."
 
 (declare-function org-escape-code-in-string "org-src")
 (defvar explicit-shell-file-name)
+(defvar shell-fontify-input-enable)
+(defvar comint-buffer-maximum-size)
+(declare-function comint-truncate-buffer "comint")
 (declare-function comint-send-input "comint")
 (declare-function comint-check-proc "comint")
 
@@ -1282,11 +1422,16 @@ better in Emacs than PowerShell), or pwsh where there's no bash."
                    ('pwsh (or (executable-find "pwsh") (executable-find "powershell")))
                    ('bash (kdb-claude--bash)))
                  (user-error "No %s on this machine" kind))))
-        (save-window-excursion (shell buf))
+        ;; No hidden highlighting copy of every line a dev server logs.
+        (let ((shell-fontify-input-enable nil))
+          (save-window-excursion (shell buf)))
         ;; Throwaway shells: killing one, or quitting Emacs, shouldn't ask.
         (set-process-query-on-exit-flag (get-buffer-process buf) nil)
         (with-current-buffer buf
-          (add-hook 'comint-output-filter-functions #'comint-osc-process-output nil t))
+          (add-hook 'comint-output-filter-functions #'comint-osc-process-output nil t)
+          ;; Dev servers log without end: keep only the recent lines.
+          (setq-local comint-buffer-maximum-size 5000)
+          (add-hook 'comint-output-filter-functions #'comint-truncate-buffer nil t))
         (let ((proc (get-buffer-process buf))
               (end (+ (float-time) 5)))
           ;; Until the prompt ("$", or pwsh's "? ") ends the output.
@@ -1428,6 +1573,7 @@ Then code block labels also run their block, through org babel: x runs
 it, e opens it to edit first.  The label's hint names both next to
 RET's copy."
   (apply #'agent-shell-markdown-replace-markup args)
+  (kdb-claude--link-documents)
   ;; Labels carry their own keymap (RET copies) and a hint sensor; the
   ;; ⧉ in each is tagged.  Streaming re-renders, so skip labels done.
   (let ((pos (point-min)))

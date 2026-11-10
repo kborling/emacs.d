@@ -381,6 +381,8 @@
          (should-not (process-query-on-exit-flag (get-buffer-process shell)))
          (should (memq #'comint-osc-process-output    ; Git Bash's title codes stripped
                        (buffer-local-value 'comint-output-filter-functions (get-buffer shell))))
+         (should (memq #'comint-truncate-buffer       ; dev server logs don't grow without end
+                       (buffer-local-value 'comint-output-filter-functions (get-buffer shell))))
          (should (eq (selected-window) here))
          ;; Cleanup: what it opened goes; your file stays, and so does unsaved work.
          (with-current-buffer (get-file-buffer notes) (insert "edit"))
@@ -564,5 +566,83 @@
         (kdb-claude--start-on-branch repo)
         (should (same started repo))))
     (delete-directory root t)))
+
+(ert-deftest big-session-loses-oldest-turns-only ()
+  (require 'agent-shell-prompt)
+  (with-temp-buffer
+    (setq-local comint-prompt-regexp "Claude> ")
+    (let ((kdb-claude-session-max-chars 1000)
+          (prompt (propertize "Claude> " 'font-lock-face 'comint-highlight-prompt)))
+      (dotimes (i 10)
+        (insert prompt (format "question %d\n" i)
+                "Claude> quoted in a reply, not a prompt\n"
+                (make-string 200 ?x) "\n"))
+      (insert prompt)
+      (kdb-claude--trim-buffer)
+      (should (<= (buffer-size) 1000))
+      (should (string-prefix-p "Earlier turns trimmed" (buffer-string)))
+      (should (string-match-p "question 9" (buffer-string)))
+      (should-not (string-match-p "question 0" (buffer-string)))
+      ;; Cut at a real prompt, so the first turn kept is whole.
+      (should (string-match-p "trimmed[^\n]*\n\nClaude> question" (buffer-string)))
+      ;; Under the limit: nothing happens.
+      (let ((before (buffer-string)))
+        (kdb-claude--trim-buffer)
+        (should (equal before (buffer-string))))
+      ;; Only one huge turn after the note: nothing worth freeing, left alone
+      ;; rather than the note rewritten after every turn.
+      (erase-buffer)
+      (insert "Earlier turns trimmed\n\n" prompt "q\n" (make-string 3000 ?y))
+      (let ((before (buffer-string)))
+        (kdb-claude--trim-buffer)
+        (should (equal before (buffer-string))))))
+  ;; Narrowed (say to one prompt), still the oldest turns go.
+  (with-temp-buffer
+    (setq-local comint-prompt-regexp "Claude> ")
+    (let ((kdb-claude-session-max-chars 1000)
+          (prompt (propertize "Claude> " 'font-lock-face 'comint-highlight-prompt)))
+      (dotimes (i 10)
+        (insert prompt (format "question %d\n" i) (make-string 200 ?x) "\n"))
+      (narrow-to-region (- (point-max) 300) (point-max))
+      (kdb-claude--trim-buffer)
+      (widen)
+      (should (string-prefix-p "Earlier turns trimmed" (buffer-string)))
+      (should (string-match-p "question 9" (buffer-string))))))
+
+(ert-deftest agent-dying-on-its-own-is-reported-not-a-shutdown ()
+  (let* ((buf (generate-new-buffer "Claude Agent @ died"))
+         (proc (make-process :name "fake-agent" :command '("true") :noquery t))
+         (client (list (cons :process proc) (cons :context-buffer buf)
+                       (cons :command "claude") (cons :instance-count 1)))
+         shown)
+    (while (process-live-p proc) (accept-process-output proc 0.05))
+    (cl-letf (((symbol-function 'agent-shell--state) #'ignore)
+              ((symbol-function 'agent-shell--update-fragment)
+               (lambda (&rest args) (push (plist-get args :body) shown)))
+              ((symbol-function 'kdb-claude--notify) #'ignore))
+      (kdb-claude--agent-died client proc "finished\n")
+      (should (string-match-p "agent process finished" (car shown)))
+      (should (string-match-p "agent-shell-reload" (car shown)))
+      ;; acp-shutdown forgets the process first: a deliberate stop says nothing.
+      (setf (alist-get :process client) nil)
+      (kdb-claude--agent-died client proc "finished\n")
+      (should (= 1 (length shown))))
+    (kill-buffer buf)))
+
+(ert-deftest busy-animation-waits-while-emacs-is-unfocused ()
+  (cl-letf (((symbol-function 'frame-focus-state) #'ignore))
+    (should-not (kdb-claude--focused-tick-p :cache-enabled t))   ; a tick: skipped
+    (should (kdb-claude--focused-tick-p)))                       ; a real update: drawn
+  (cl-letf (((symbol-function 'frame-focus-state) (lambda (&rest _) t)))
+    (should (kdb-claude--focused-tick-p :cache-enabled t))))
+
+(ert-deftest timer-messages-stay-out-of-an-open-minibuffer ()
+  (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1)))
+    (let ((kdb-in-timer 1))                 ; minibuffer open when the timer fired
+      (should (kdb-quiet-timer-message "Reverting buffer")))
+    (let ((kdb-in-timer 0))                 ; the timer opened this prompt itself
+      (should-not (kdb-quiet-timer-message "Mark set")))
+    (let ((kdb-in-timer nil))               ; your own command
+      (should-not (kdb-quiet-timer-message "Mark set")))))
 
 ;;; tabs-session-test.el ends here

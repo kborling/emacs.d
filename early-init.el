@@ -17,7 +17,12 @@
 (add-hook 'emacs-startup-hook
           (lambda ()
             (setq gc-cons-threshold (* 128 1024 1024)
-                  gc-cons-percentage 0.5)))
+                  gc-cons-percentage 0.5)
+            ;; Collect while you pause, so long-running sessions' GC
+            ;; pauses land between keystrokes instead of during them;
+            ;; only once a quarter of the threshold is allocated, since
+            ;; a GC costs the same however little garbage there is.
+            (run-with-idle-timer 15 t #'garbage-collect-maybe 4)))
 
 (setq large-file-warning-threshold 200000000)
 
