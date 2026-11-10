@@ -95,6 +95,11 @@ paragraph for its direction, which is costly in long sessions."
   ;; (-s: drag a region) where installed.  macOS/Windows keep the default.
   (when (and (eq system-type 'gnu/linux) (executable-find "maim"))
     (setq agent-shell-screenshot-command '("maim" "-s")))
+  ;; Antigravity (M-x agent-shell-antigravity-start-agent) through its CLI's
+  ;; documented `agy acp', not the separate agy_acp_server agent-shell expects.
+  ;; Only where agy is installed (the work machine); elsewhere, the default.
+  (when (executable-find "agy")
+    (setq agent-shell-antigravity-acp-command '("agy" "acp")))
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-artifacts)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-emacs-session)

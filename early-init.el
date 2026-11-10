@@ -55,6 +55,8 @@ PATH, which shell commands use, gets Windows-style backslashes on Windows."
                       (delete-dups (append file-name-handler-alist handlers))))))
   ;; Explorer keeps a stale PATH until sign-in; npm global bin may be missing.
   (kdb-add-to-path (expand-file-name "npm" (getenv "APPDATA")))
+  ;; Antigravity's CLI (agy), from its install.ps1.
+  (kdb-add-to-path (expand-file-name "agy/bin" (getenv "LOCALAPPDATA")))
   ;; Git's bin first, so "bash" (org babel, Claude code blocks) is Git Bash,
   ;; not WSL's System32\bash.exe.
   (when-let* ((git (executable-find "git"))
