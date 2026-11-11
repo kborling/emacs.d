@@ -338,10 +338,14 @@ Returns the window, for `agent-shell-display-action'."
 (defvar kdb-claude--id)
 (defvar kdb-claude--users)
 
+(defvar kdb-claude--restarting nil
+  "The session buffer `agent-shell-restart' is replacing, while it does.")
+
 ;;;###autoload
 (defun kdb-claude--close-session-window ()
   "When a session is killed, close its tab, or its window if it shares one.
-What it opened (`kdb-claude-show', `kdb-claude-run') is closed too."
+What it opened (`kdb-claude-show', `kdb-claude-run') is closed too.
+Not when it's restarted: the new buffer takes all of them over."
   (add-hook 'kill-buffer-hook
             (lambda ()
               ;; Switching tabs and windows changes the current buffer, and
@@ -349,11 +353,12 @@ What it opened (`kdb-claude-show', `kdb-claude-run') is closed too."
               ;; the current buffer: without this they stop another session.
               (save-current-buffer
                 (let ((buf (current-buffer)))
-                  (when kdb-claude--id
-                    (ignore-errors (kdb-claude-cleanup kdb-claude--id)))
-                  (ignore-errors (kdb-claude--close-session-tab buf))
-                  (dolist (w (get-buffer-window-list buf nil))
-                    (ignore-errors (delete-window w))))))
+                  (unless (eq buf kdb-claude--restarting)
+                    (when kdb-claude--id
+                      (ignore-errors (kdb-claude-cleanup kdb-claude--id)))
+                    (ignore-errors (kdb-claude--close-session-tab buf))
+                    (dolist (w (get-buffer-window-list buf nil))
+                      (ignore-errors (delete-window w)))))))
             nil t))
 
 (defun kdb-claude--close-session-tab (buf)
@@ -385,7 +390,8 @@ QUIETLY `background': shown in its project tab, focus stays here;
                      :on-event (lambda (_)
                                  (with-current-buffer buf
                                    (agent-shell-unsubscribe :subscription token))
-                                 (agent-shell-insert :text prompt :submit t :shell-buffer buf))))))
+                                 (agent-shell-insert :text prompt :submit t :shell-buffer buf
+                                                     :no-focus t))))))
     buf))
 
 ;;;###autoload
@@ -1125,14 +1131,18 @@ And name it after its title once it has one, to tell it from others."
 About half is kept.  Millions of characters (long tool output adds up)
 make every GC and redisplay slow, which freezes Emacs for all sessions.")
 
+(defvar kdb-claude--background-candidates)
+
 (defun kdb-claude--trim-session ()
   "Trim this shell's oldest turns whenever a turn leaves it too big.
-Only the buffer: the session, and its archived transcript, keep all."
+Only the buffer: the session, and its archived transcript, keep all.
+Each turn's end also has `kdb-claude--scan-background' look at it."
   (let ((buf (current-buffer)))
     (agent-shell-subscribe-to
      :shell-buffer buf :event 'turn-complete
      :on-event (lambda (_)
                  (when (buffer-live-p buf)
+                   (cl-pushnew buf kdb-claude--background-candidates)
                    (with-current-buffer buf
                      (with-demoted-errors "Trimming Claude session: %S"
                        (kdb-claude--trim-buffer))))))))
@@ -1201,9 +1211,13 @@ buffer each was started from is logged, to find what leaves them."
                           (and (eq (buffer-local-value 'major-mode buf) 'agent-shell-mode)
                                (not (eq (map-elt (buffer-local-value 'agent-shell--state buf) :client)
                                         client))))
-                      (message "Claude: stopping an orphaned agent (pid %s, was %s)"
-                               (process-id proc) (if (buffer-live-p buf) (buffer-name buf) "a closed session"))
-                      (acp-shutdown :client client)
+                      (let ((pid (process-id proc)))
+                        (message "Claude: stopping an orphaned agent (pid %s, was %s)"
+                                 pid (if (buffer-live-p buf) (buffer-name buf) "a closed session"))
+                        ;; acp-shutdown can leave Windows' cmd > node > claude.exe running.
+                        (when (eq system-type 'windows-nt)
+                          (kdb-claude--stop-process pid))
+                        (acp-shutdown :client client))
                       (setq reaped (1+ reaped))
                       nil)
                      (t t))))
@@ -1248,30 +1262,33 @@ forever, looking like it's still working.  Not one waiting on you."
 (defun kdb-claude--agent-died (client proc event)
   "Tell CLIENT's session that PROC ended with EVENT, unless it was shut down.
 `acp-shutdown' forgets the process before stopping it, so a process the
-client still holds ended on its own."
-  (when-let* (((memq (process-status proc) '(exit signal)))
-              ((eq (map-elt client :process) proc))
-              (buf (map-elt client :context-buffer))
-              ((buffer-live-p buf)))
-    (let* ((stderr (get-buffer (format "acp-client-stderr(%s)-%s"
-                                       (map-elt client :command)
-                                       (map-elt client :instance-count))))
-           (tail (and stderr (with-current-buffer stderr
-                               (string-trim (buffer-substring-no-properties
-                                             (max (point-min) (- (point-max) 1500))
-                                             (point-max))))))
-           (body (format "The agent process %s.%s\n\nM-x agent-shell-reload resumes this conversation.  The agent's log is in %s."
-                         (string-trim event)
-                         (if (string-empty-p (or tail "")) "" (concat "\n\n" tail))
-                         kdb-claude-agent-logs)))
-      (with-current-buffer buf
-        (agent-shell--update-fragment
-         :state (agent-shell--state)
-         :block-id (format "agent-died-%s" (process-id proc))
-         :label-left (propertize "Agent stopped" 'font-lock-face 'error)
-         :body body :create-new t :expanded t :above-last-prompt t))
-      (message "Claude: %s's agent %s" (buffer-name buf) (string-trim event))
-      (kdb-claude--notify buf "Claude agent stopped" (buffer-name buf)))))
+client still holds ended on its own.  Only for a session: an agent-review
+client's buffer isn't one.  Never signals, so acp's own sentinel still runs."
+  (with-demoted-errors "Claude agent watch: %S"
+    (when-let* (((memq (process-status proc) '(exit signal)))
+                ((eq (map-elt client :process) proc))
+                (buf (map-elt client :context-buffer))
+                ((buffer-live-p buf))
+                ((eq (buffer-local-value 'major-mode buf) 'agent-shell-mode)))
+      (let* ((stderr (get-buffer (format "acp-client-stderr(%s)-%s"
+                                         (map-elt client :command)
+                                         (map-elt client :instance-count))))
+             (tail (and stderr (with-current-buffer stderr
+                                 (string-trim (buffer-substring-no-properties
+                                               (max (point-min) (- (point-max) 1500))
+                                               (point-max))))))
+             (body (format "The agent process %s.%s\n\nM-x agent-shell-reload resumes this conversation.  The agent's log is in %s."
+                           (string-trim event)
+                           (if (string-empty-p (or tail "")) "" (concat "\n\n" tail))
+                           kdb-claude-agent-logs)))
+        (with-current-buffer buf
+          (agent-shell--update-fragment
+           :state (agent-shell--state)
+           :block-id (format "agent-died-%s" (process-id proc))
+           :label-left (propertize "Agent stopped" 'font-lock-face 'error)
+           :body body :create-new t :expanded t :above-last-prompt t))
+        (message "Claude: %s's agent %s" (buffer-name buf) (string-trim event))
+        (kdb-claude--notify buf "Claude agent stopped" (buffer-name buf))))))
 
 (defun kdb-claude--rename-in-tab-states (old new)
   "Rename buffer OLD to NEW in the saved layouts of tabs you aren't in.
@@ -1766,7 +1783,6 @@ It reads the local transcripts, so it covers this machine only."
 
 (defvar agent-shell-anthropic-claude-environment)
 (declare-function shell-maker-busy "shell-maker")
-(declare-function agent-shell--state "agent-shell")
 (declare-function agent-shell--prompt-queue-enqueue "agent-shell-prompt-queue")
 (declare-function agent-shell--prompt-queue-process-next "agent-shell-prompt-queue")
 
@@ -1807,6 +1823,24 @@ ARGS has the session buffer under :buffer."
                         (setq kdb-claude--provider-env kdb-claude--next-env)))
                   agent-shell-anthropic-claude-environment)))
     (apply make-client args)))
+
+(declare-function agent-shell--current-shell "agent-shell")
+
+;;;###autoload
+(defun kdb-claude--keep-across-restart (restart &rest args)
+  "Around RESTART, `agent-shell-restart' (ARGS), so `agent-shell-reload' too:
+the session keeps its id, model provider, tab and what it opened.  The
+restart kills the buffer and starts a new one under its name, which
+would otherwise close all that and start over as another session."
+  (let* ((buf (agent-shell--current-shell))
+         (id (and buf (buffer-local-value 'kdb-claude--id buf)))
+         (tab-auto (and buf (buffer-local-value 'kdb-claude--tab-auto buf)))
+         (kdb-claude--restarting buf)
+         (kdb-claude--next-id id)
+         (kdb-claude--next-env (and buf (buffer-local-value 'kdb-claude--provider-env buf))))
+    (prog1 (apply restart args)
+      (when-let* ((id) (new (kdb-claude--session-buffer id)))
+        (with-current-buffer new (setq kdb-claude--tab-auto tab-auto))))))
 
 ;;; ============================================================
 ;;; Other models: Claude Code against any Anthropic-compatible API
@@ -1930,7 +1964,8 @@ first, unless NO-SHOW.  Return FN's value."
         (progn
           (when-let* ((tab (and from-tab (tab-bar-get-buffer-tab buf))))
             (tab-bar-select-tab (1+ (alist-get 'index tab))))
-          (if-let* ((win (get-buffer-window buf)))
+          ;; Shown only in another frame: there, not split into yours.
+          (if-let* ((win (or (get-buffer-window buf) (get-buffer-window buf t))))
               (with-selected-window win (funcall fn buf))
             (funcall fn buf)))
       (when (and from-tab (not (eql from-tab (tab-bar--current-tab-index))))
@@ -2051,7 +2086,10 @@ PIDS it didn't print are kept as unreadable, so they aren't asked again."
     (dolist (pid pids)
       (puthash pid (cons (alist-get 'start (gethash pid table))
                          (let ((l (gethash pid read))) (and l (not (string-empty-p l)) l)))
-               kdb-claude--command-lines))))
+               kdb-claude--command-lines))
+    ;; Processes gone since: else every PID ever seen stays.
+    (maphash (lambda (pid _) (unless (gethash pid table) (remhash pid kdb-claude--command-lines)))
+             kdb-claude--command-lines)))
 
 (defun kdb-claude--read-command-lines (pids table &optional wait)
   "Read the command lines of PIDS (from process TABLE) with PowerShell.
@@ -2077,7 +2115,9 @@ In the background, so Emacs never stops for it; with WAIT, now."
                                (unless (process-live-p proc)
                                  (kdb-claude--store-command-lines
                                   pids (with-current-buffer out (buffer-string)) table)
-                                 (kill-buffer out)))))))))))
+                                 (kill-buffer out))))))
+          (unless kdb-claude--command-lines-reading
+            (kill-buffer out)))))))
 
 (defun kdb-claude--session-work (buf &optional table wait)
   "What session BUF's commands are running, as (PID . ATTRIBUTES).
@@ -2150,18 +2190,29 @@ ready.  From the last `kdb-claude--scan-background', so drawing the tab
 bar never scans processes itself."
   (seq-filter #'buffer-live-p (cdr kdb-claude--background)))
 
+(defvar kdb-claude--background-candidates nil
+  "Sessions whose turn ended, until a scan finds nothing running under them.
+Only a turn starts background work, so only these are scanned.")
+
 (defun kdb-claude--scan-background ()
   "Find the sessions working in the background, at most every 10 seconds.
 It reads every process, so only on the tab bar's own timer, and only
-when some session is ready."
+while a session that is ready may have left something running."
+  (setq kdb-claude--background-candidates
+        (seq-filter #'buffer-live-p kdb-claude--background-candidates))
   (unless (and kdb-claude--background
                (< (float-time (time-subtract nil (car kdb-claude--background))) 10))
     (let* ((idle (seq-remove (lambda (b) (and (boundp 'agent-shell-attention--busy)
                                               (gethash b agent-shell-attention--busy)))
-                             (and (fboundp 'agent-shell-buffers) (agent-shell-buffers))))
-           (table (and idle (kdb-claude--process-table))))
-      (setq kdb-claude--background
-            (cons (current-time) (seq-filter (lambda (b) (kdb-claude--session-work b table)) idle))))))
+                             kdb-claude--background-candidates))
+           (table (and idle (kdb-claude--process-table)))
+           (working (seq-filter (lambda (b) (kdb-claude--session-work b table)) idle)))
+      ;; While PowerShell reads command lines, an empty result isn't nothing.
+      (unless (process-live-p kdb-claude--command-lines-reading)
+        (setq kdb-claude--background-candidates
+              (seq-remove (lambda (b) (and (memq b idle) (not (memq b working))))
+                          kdb-claude--background-candidates)))
+      (setq kdb-claude--background (cons (current-time) working)))))
 
 (defun kdb-claude--task-outputs (buf)
   "Output files of session BUF's background tasks, newest first."
@@ -2517,14 +2568,16 @@ counts as new.  A log that can't be fetched yet is retried next poll."
   "The watch on session BUF, or nil."
   (seq-find (lambda (w) (eq (kdb-claude--watch-buffer w) buf)) kdb-claude--watches))
 
+(defun kdb-claude--watched-session-killed ()
+  "Stop the PR watch on this session, which is being killed."
+  (when-let* ((w (kdb-claude--buffer-watch (current-buffer))))
+    (kdb-claude--watch-stop w "session closed")))
+
 (defun kdb-claude--watch-start (buf dir number)
   "Watch PR NUMBER (in repo DIR) for session BUF."
   (let ((w (kdb-claude--watch-create :buffer buf :dir dir :number number)))
     (with-current-buffer buf
-      (add-hook 'kill-buffer-hook
-                (lambda () (when (memq w kdb-claude--watches)
-                             (kdb-claude--watch-stop w "session closed")))
-                nil t))
+      (add-hook 'kill-buffer-hook #'kdb-claude--watched-session-killed nil t))
     (push w kdb-claude--watches)
     (unless kdb-claude--pr-timer
       (setq kdb-claude--pr-timer (run-at-time kdb-claude-pr-poll-interval
@@ -2535,13 +2588,14 @@ counts as new.  A log that can't be fetched yet is retried next poll."
     w))
 
 ;;;###autoload
-(defun kdb-claude-watch-pr ()
+(defun kdb-claude-watch-pr (&optional number)
   "Watch CI on this session's PR and have the session fix failures.
-Finds the PR for the session's branch, or asks for its number.  Each
-failed run's log is sent once it finishes, through the session's prompt
-queue.  Watching stops when all checks pass, the PR is merged or closed,
-or the session ends.  Run again in a watched session to stop."
-  (interactive)
+Finds the PR for the session's branch; with a prefix argument, asks for
+the PR NUMBER.  Each failed run's log is sent once it finishes, through
+the session's prompt queue.  Watching stops when all checks pass, the PR
+is merged or closed, or the session ends.  Run again in a watched
+session to stop."
+  (interactive (list (and current-prefix-arg (read-number "Watch PR number: "))))
   (unless (derived-mode-p 'agent-shell-mode)
     (user-error "Run this in a Claude session buffer"))
   (let ((buf (current-buffer))
@@ -2553,6 +2607,7 @@ or the session ends.  Run again in a watched session to stop."
           (kdb-claude--watch-stop w "stopped"))))
      ((memq buf kdb-claude--pr-lookups)
       (message "Still looking up this session's PR..."))
+     (number (kdb-claude--watch-start buf dir number))
      (t
       (push buf kdb-claude--pr-lookups)
       (message "Looking up the PR for this branch...")
@@ -2562,17 +2617,16 @@ or the session ends.  Run again in a watched session to stop."
          (unwind-protect
              (let ((pr (kdb-claude--json out)))
                (when (and (buffer-live-p buf) (not (kdb-claude--buffer-watch buf)))
-                 (kdb-claude--watch-start
-                  buf dir
-                  (if (equal (alist-get 'state pr) "OPEN")
-                      (alist-get 'number pr)
-                    (read-number
-                     (cond (pr (format "PR #%s is %s; watch PR number: "
-                                       (alist-get 'number pr) (downcase (alist-get 'state pr))))
-                           ((and (/= status 0) (not (string-match-p "no pull requests found" err)))
-                            (format "gh failed (%s); PR number: "
-                                    (string-trim (or (car (split-string err "\n" t)) "no output"))))
-                           (t "No open PR for this branch; PR number: ")))))))
+                 (if (equal (alist-get 'state pr) "OPEN")
+                     (kdb-claude--watch-start buf dir (alist-get 'number pr))
+                   ;; In a process sentinel: a prompt here would pop up out of nowhere.
+                   (message "%s; C-u M-x kdb-claude-watch-pr watches a PR by number"
+                            (cond (pr (format "PR #%s is %s" (alist-get 'number pr)
+                                              (downcase (alist-get 'state pr))))
+                                  ((and (/= status 0) (not (string-match-p "no pull requests found" err)))
+                                   (format "gh failed (%s)"
+                                           (string-trim (or (car (split-string err "\n" t)) "no output"))))
+                                  (t "No open PR for this branch"))))))
            (setq kdb-claude--pr-lookups (delq buf kdb-claude--pr-lookups)))))))))
 
 ;;; ============================================================

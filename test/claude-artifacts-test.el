@@ -602,12 +602,13 @@
 
 (ert-deftest ready-session-with-background-work-marked-working ()
   (require 'agent-shell-attention)
-  (let ((buf (generate-new-buffer "Run the tests"))
-        (agent-shell-attention--pending (make-hash-table :test #'eq))
-        (agent-shell-attention--busy (make-hash-table :test #'eq))
-        (kdb-claude--background nil)
-        (kdb-claude--waiting-drawn nil)
-        (scans 0))
+  (let* ((buf (generate-new-buffer "Run the tests"))
+         (agent-shell-attention--pending (make-hash-table :test #'eq))
+         (agent-shell-attention--busy (make-hash-table :test #'eq))
+         (kdb-claude--background nil)
+         (kdb-claude--background-candidates (list buf))     ; its turn has ended
+         (kdb-claude--waiting-drawn nil)
+         (scans 0))
     (test-with-processes buf
       (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (list buf)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
@@ -620,6 +621,39 @@
                    (lambda () (cl-incf scans) (make-hash-table))))
           (kdb-claude--redraw-tabs)
           (should (= scans 0)))))
+    (kill-buffer buf)))
+
+(ert-deftest background-scan-only-after-a-turn ()
+  ;; Reading every process is slow on Windows: only a session whose turn
+  ;; ended is looked at, until nothing is found running under it.
+  (require 'agent-shell-attention)
+  (let ((buf (generate-new-buffer "Run the tests"))
+        (agent-shell-attention--busy (make-hash-table :test #'eq))
+        (kdb-claude--background nil)
+        (kdb-claude--background-candidates nil)
+        (kdb-claude--command-lines-reading nil)
+        (scans 0)
+        on-turn)
+    (test-with-processes buf
+      (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (list buf)))
+                ((symbol-function 'kdb-claude--process-table)
+                 (lambda () (cl-incf scans) (make-hash-table)))
+                ((symbol-function 'agent-shell-subscribe-to)
+                 (lambda (&rest args) (setq on-turn (plist-get args :on-event)))))
+        ;; No turn has ended: nothing is read.
+        (kdb-claude--scan-background)
+        (should (= scans 0))
+        ;; A turn ends: scanned once; nothing under it, so not again.
+        (with-current-buffer buf (kdb-claude--trim-session))
+        (funcall on-turn nil)
+        (should (memq buf kdb-claude--background-candidates))
+        (setq kdb-claude--background nil)
+        (kdb-claude--scan-background)
+        (should (= scans 1))
+        (should-not kdb-claude--background-candidates)
+        (setq kdb-claude--background nil)
+        (kdb-claude--scan-background)
+        (should (= scans 1))))
     (kill-buffer buf)))
 
 (ert-deftest processes-view-shows-work-and-output ()

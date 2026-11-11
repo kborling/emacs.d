@@ -338,6 +338,31 @@ esac
     (should-not kdb-claude--pr-lookups)
     (kill-buffer buf)))
 
+(ert-deftest pr-watch-without-open-pr-says-how-to-give-one ()
+  ;; gh answers in a process sentinel: no prompt from there.  A prefix
+  ;; argument asks for the number up front instead.
+  (test-reset)
+  (test-file "pr.json" "{\"number\":12,\"url\":\"u\",\"headRefName\":\"feat\",\"state\":\"MERGED\"}")
+  (test-file "state.json" "{\"state\":\"OPEN\"}")
+  (test-file "checks.json" (test-checks (test-check "build" "pass" 101 1)))
+  (let ((buf (test-shell)) said asked)
+    (cl-letf (((symbol-function 'read-number) (lambda (&rest _) (setq asked t) 21))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args) (when fmt (push (apply #'format fmt args) said)))))
+      (with-current-buffer buf (kdb-claude-watch-pr))
+      (test-wait (lambda () (null kdb-claude--pr-lookups)))
+      (should-not asked)
+      (should-not kdb-claude--watches)
+      (should (seq-some (lambda (m) (string-match-p "PR #12 is merged; C-u M-x kdb-claude-watch-pr" m))
+                        said))
+      (with-current-buffer buf
+        (let ((current-prefix-arg '(4)))
+          (call-interactively #'kdb-claude-watch-pr)))
+      (should asked)
+      (should (= 21 (kdb-claude--watch-number (car kdb-claude--watches))))
+      (test-settle))
+    (kill-buffer buf)))
+
 (ert-deftest schedule-past-time-means-tomorrow ()
   (let* ((past (format-time-string "%H:%M" (time-subtract nil 3600)))
          (fired nil))

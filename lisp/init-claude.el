@@ -48,7 +48,7 @@
       (let ((default-directory dir))
         (call-process "git" nil nil nil "init")
         (with-temp-file (expand-file-name ".gitignore" dir)
-          (insert "# Keep everything\n"))
+          (insert "# Keep everything but half-written files\n*.tmp\n"))
         (call-process "git" nil nil nil "add" ".")
         (call-process "git" nil nil nil "commit" "-m" "Init claude archive")))
     dir))
@@ -123,10 +123,18 @@ and the archive keeps the copy."
          (org (kdb-claude--archive-file
                (expand-file-name "code-sessions/" (kdb-claude--ensure-archive))
                (file-name-nondirectory (directory-file-name (file-name-directory jsonl)))
-               id)))
+               id))
+         (tmp (and (kdb-claude--path-too-long-p jsonl) (make-temp-file "claude-long" t))))
     (make-directory (file-name-directory org) t)
-    (kdb-claude--jsonl-to-org jsonl org jsonl t)
-    (let ((buf (find-file-noselect org)))
+    (unwind-protect
+        (kdb-claude--jsonl-to-org
+         (if tmp
+             (or (cdar (kdb-claude--copy-long-files (list jsonl) tmp))
+                 (user-error "Can't read %s: path too long, and copying it failed" jsonl))
+           jsonl)
+         org jsonl t)
+      (when tmp (delete-directory tmp t)))
+    (let ((buf (find-file-noselect org t)))
       (with-current-buffer buf
         (revert-buffer t t t)
         (read-only-mode 1)
@@ -210,6 +218,8 @@ reconvert every session."
   "Callbacks for the sync to run after the current one; non-nil = rerun.")
 (defvar kdb-claude--sync-next-commit nil
   "Non-nil if the next sync should also commit the archive.")
+(defvar kdb-claude--sync-command nil
+  "How the sync starts its background Emacs, up to what it evaluates.")
 
 (defun kdb-claude-sync-code-sessions-async (&optional callback commit)
   "Sync Claude Code sessions in a background Emacs, then call CALLBACK.
@@ -231,14 +241,17 @@ is served by a fresh run right after it."
             (make-process
              :name "claude-archive-sync" :buffer " *claude-archive-sync*" :noquery t
              :command
-             (list (let ((emacs (expand-file-name invocation-name invocation-directory)))
-                     (or (executable-find emacs) emacs)) ; adds .exe on Windows
-                   "--batch" "-Q" "-L" (file-name-directory (locate-library "init-claude"))
-                   "-l" "init-claude"
-                   "--eval" (format "(progn (set-language-environment \"UTF-8\") \
+             (append
+              ;; Looked up once: both search paths, slow on Windows.
+              (with-memoization kdb-claude--sync-command
+                (list (let ((emacs (expand-file-name invocation-name invocation-directory)))
+                        (or (executable-find emacs) emacs)) ; adds .exe on Windows
+                      "--batch" "-Q" "-L" (file-name-directory (locate-library "init-claude"))
+                      "-l" "init-claude"))
+              (list "--eval" (format "(progn (set-language-environment \"UTF-8\") \
 (setq kdb-claude-archive-dir %S) (kdb-claude-sync-code-sessions)%s)"
-                                    (expand-file-name kdb-claude-archive-dir)
-                                    (if commit " (kdb-claude--commit-archive)" "")))
+                                     (expand-file-name kdb-claude-archive-dir)
+                                     (if commit " (kdb-claude--commit-archive)" ""))))
              :sentinel
              (lambda (p _)
                (unless (process-live-p p)
@@ -310,25 +323,32 @@ converting make the JSONL newer and are picked up next sync."
           (error nil))
         (forward-line 1)))
     (setq messages (nreverse messages))
-    (let ((coding-system-for-write 'utf-8-unix))  ; no CRLF churn from Windows
-      (with-temp-file org-file
-        (insert (format "#+TITLE: %s\n" (string-trim
-                                         (replace-regexp-in-string
-                                          "[\n\r]+" " " (or custom-title ai-title
-                                                             (kdb-claude--session-title messages))))))
-        (insert (format "#+DATE: %s\n" (format-time-string "%Y-%m-%d %H:%M" mtime)))
-        (insert (format "#+SOURCE: %s\n" (or source jsonl-file)))
-        (when cwd (insert (format "#+CWD: %s\n" cwd)))
-        (insert (format "#+PROJECT: %s\n" (if cwd (kdb-claude--project-name cwd) "")))
-        (when branch (insert (format "#+BRANCH: %s\n" branch)))
-        (insert (format "#+CLIENT: %s\n" (if emacs "emacs" (or client ""))))
-        (insert (format "#+MESSAGES: %d\n" (length messages)))
-        (insert "\n")
-        (dolist (msg messages)
-          (insert (format "* %s\n\n%s\n\n"
-                          (if (equal (car msg) "user") "You" "Claude")
-                          (cdr msg))))))
-    (set-file-times org-file mtime)))
+    ;; Written aside and renamed over it, so a sync killed mid-write
+    ;; can't leave a truncated org that looks current.
+    (let ((coding-system-for-write 'utf-8-unix)  ; no CRLF churn from Windows
+          (tmp (concat org-file ".tmp")))
+      (unwind-protect
+          (progn
+            (with-temp-file tmp
+              (insert (format "#+TITLE: %s\n" (string-trim
+                                               (replace-regexp-in-string
+                                                "[\n\r]+" " " (or custom-title ai-title
+                                                                   (kdb-claude--session-title messages))))))
+              (insert (format "#+DATE: %s\n" (format-time-string "%Y-%m-%d %H:%M" mtime)))
+              (insert (format "#+SOURCE: %s\n" (or source jsonl-file)))
+              (when cwd (insert (format "#+CWD: %s\n" cwd)))
+              (insert (format "#+PROJECT: %s\n" (if cwd (kdb-claude--project-name cwd) "")))
+              (when branch (insert (format "#+BRANCH: %s\n" branch)))
+              (insert (format "#+CLIENT: %s\n" (if emacs "emacs" (or client ""))))
+              (insert (format "#+MESSAGES: %d\n" (length messages)))
+              (insert "\n")
+              (dolist (msg messages)
+                (insert (format "* %s\n\n%s\n\n"
+                                (if (equal (car msg) "user") "You" "Claude")
+                                (cdr msg)))))
+            (set-file-times tmp mtime)
+            (rename-file tmp org-file t))
+        (when (file-exists-p tmp) (delete-file tmp))))))
 
 (defun kdb-claude--path-within-p (file dir)
   "Non-nil if FILE is DIR or inside it, by name.
@@ -386,7 +406,8 @@ Windows here, they find any two folders equal."
   "Return (DIR . TIME) for directories with Claude Code sessions, newest first."
   (let (dirs)
     (dolist (proj (ignore-errors (directory-files (kdb-claude--projects-dir) t "\\`[^.]")))
-      (when-let* ((newest (car (sort (directory-files-and-attributes proj t "\\.jsonl\\'" t)
+      (when-let* (((file-directory-p proj))
+                  (newest (car (sort (directory-files-and-attributes proj t "\\.jsonl\\'" t)
                                      (lambda (a b) (time-less-p (file-attribute-modification-time (cdr b))
                                                                 (file-attribute-modification-time (cdr a)))))))
                   (cwd (ignore-errors (kdb-claude--jsonl-cwd (car newest)))))
@@ -487,7 +508,9 @@ too), \"● TAB\" for the tab showing it, in any frame, else \"● no tab\"."
         (seq-some (lambda (frame)
                     (or (and (not (eq frame (selected-frame)))
                              (get-buffer-window buf frame)
-                             (concat "● " (alist-get 'name (tab-bar--current-tab nil frame))))
+                             ;; An unnamed tab is named from the selected window, so select FRAME.
+                             (concat "● " (with-selected-frame frame
+                                            (alist-get 'name (tab-bar--current-tab-find)))))
                         (and (fboundp 'agent-shell-attention--tab-displays-buffer-p)
                              (when-let* ((tab (seq-find (lambda (tab)
                                                           (and (not (eq (car tab) 'current-tab))
@@ -508,6 +531,11 @@ directory, so a refresh asks the disk once for each."
                (file-regular-p (expand-file-name ".git" cwd))))
         (concat "⑂ " branch)
       branch)))
+
+(defun kdb-claude--archived-orgs ()
+  "Every archived session's org file, not looking inside .git."
+  (directory-files-recursively (kdb-claude--ensure-archive) "\\.org\\'" nil
+                               (lambda (dir) (not (equal (file-name-nondirectory dir) ".git")))))
 
 (defun kdb-claude--history-entries ()
   "Return `tabulated-list-entries' for every archived session."
@@ -533,7 +561,7 @@ directory, so a refresh asks the disk once for each."
                                 (t ""))
                           (kdb-claude--history-branch h worktrees)
                           (or (cdr (assoc "TITLE" h)) (file-name-base f))))))
-      (directory-files-recursively (kdb-claude--ensure-archive) "\\.org$")))))
+      (kdb-claude--archived-orgs)))))
 
 (defun kdb-claude--last-message (file)
   "The last message in archived FILE as \"WHO: text\" on one line, or nil.
@@ -729,15 +757,18 @@ A candidate is the project and title; its annotation (text property)
 says when, where it ran, and the branch.  One-shot claude -p calls and
 sessions in temporary folders are left out."
   (let* ((live (kdb-claude--live-sessions))
-         (tmp (file-truename temporary-file-directory))
+         ;; Both spellings: Windows gives the temp folder as KEVINB~1.
+         (tmps (list (expand-file-name temporary-file-directory)
+                     (file-truename temporary-file-directory)))
          (rows (seq-keep
                 (lambda (f)
                   (let* ((h (kdb-claude--org-header f))
                          (cwd (cdr (assoc "CWD" h))))
                     (unless (or (equal (kdb-claude--history-source f h) "claude -p")
-                                (and cwd (kdb-claude--path-within-p cwd tmp)))
+                                (and cwd (seq-some (lambda (tmp) (kdb-claude--path-within-p cwd tmp))
+                                                   tmps)))
                       (list f h (or (cdr (assoc "UPDATED" h)) (cdr (assoc "DATE" h)) "")))))
-                (directory-files-recursively (kdb-claude--ensure-archive) "\\.org$")))
+                (kdb-claude--archived-orgs)))
          (rows (seq-take (sort rows (lambda (a b) (string> (nth 2 a) (nth 2 b))))
                          kdb-claude-recent-count))
          (rows (append (seq-filter (lambda (r) (assoc (file-name-base (car r)) live)) rows)
@@ -923,7 +954,8 @@ Id-like keys are skipped."
 (defun kdb-claude--commit-archive ()
   "Stage and commit everything in the archive (run in the batch Emacs)."
   (let ((default-directory (kdb-claude--ensure-archive)))
-    (call-process "git" nil nil nil "add" "-A")
+    ;; Not a half-written org.tmp left by a killed sync.
+    (call-process "git" nil nil nil "add" "-A" "--" "." ":!*.tmp")
     (call-process "git" nil nil nil "commit" "-q" "-m"
                   (format "Sync %s" (format-time-string "%Y-%m-%d %H:%M")))))
 
@@ -965,15 +997,16 @@ in your browser, and running again on the same manifest imports them."
                                      (expand-file-name "~/Downloads/"))))
   (let* ((path (expand-file-name path))
          (dest (expand-file-name "claude-export/" (file-name-directory
-                                                   (directory-file-name path)))))
+                                                   (directory-file-name path))))
+         data-files)
     (cond
      ((file-directory-p path) (setq dest path))
      ((string-match-p "\\.zip\\'" path) (kdb-claude--unzip path dest))
-     ((alist-get 'data_files (kdb-claude--read-json path))
+     ((setq data-files (alist-get 'data_files (kdb-claude--read-json path)))
       (let* ((dir (file-name-directory path))
              (files (mapcar (lambda (f) (cons (expand-file-name (alist-get 'filename f) dir)
                                               (alist-get 'export_url f)))
-                            (alist-get 'data_files (kdb-claude--read-json path))))
+                            data-files))
              (missing (seq-remove (lambda (f) (file-exists-p (car f))) files)))
         (when missing
           (dolist (f missing) (browse-url (cdr f)))

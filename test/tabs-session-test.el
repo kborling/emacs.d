@@ -631,6 +631,7 @@
          (client (list (cons :process proc) (cons :context-buffer buf)
                        (cons :command "claude") (cons :instance-count 1)))
          shown)
+    (with-current-buffer buf (setq major-mode 'agent-shell-mode))
     (while (process-live-p proc) (accept-process-output proc 0.05))
     (cl-letf (((symbol-function 'agent-shell--state) #'ignore)
               ((symbol-function 'agent-shell--update-fragment)
@@ -642,8 +643,74 @@
       ;; acp-shutdown forgets the process first: a deliberate stop says nothing.
       (setf (alist-get :process client) nil)
       (kdb-claude--agent-died client proc "finished\n")
-      (should (= 1 (length shown))))
+      (should (= 1 (length shown)))
+      ;; An agent-review client: its buffer isn't a session.  Nothing here
+      ;; may signal, or acp's own sentinel, after this one, never runs.
+      (let ((review (generate-new-buffer "agent-review")))
+        (setf (alist-get :process client) proc
+              (alist-get :context-buffer client) review)
+        (cl-letf (((symbol-function 'agent-shell--state) (lambda () (error "Not a session"))))
+          (kdb-claude--agent-died client proc "finished\n"))
+        (kill-buffer review))
+      (should (= 1 (length shown)))
+      (setf (alist-get :context-buffer client) buf)
+      (cl-letf (((symbol-function 'agent-shell--update-fragment) (lambda (&rest _) (error "Boom"))))
+        (kdb-claude--agent-died client proc "finished\n")))
     (kill-buffer buf)))
+
+(ert-deftest prompt-for-a-quiet-session-leaves-focus-alone ()
+  ;; A spawned or scheduled session's first prompt, once it's ready, must
+  ;; not pull you to its tab.
+  (require 'agent-shell)
+  (let ((buf (generate-new-buffer "Claude Agent @ test"))
+        on-ready inserted)
+    (cl-letf (((symbol-function 'agent-shell-anthropic-make-claude-code-config) #'ignore)
+              ((symbol-function 'agent-shell--start) (lambda (&rest _) buf))
+              ((symbol-function 'agent-shell-subscribe-to)
+               (lambda (&rest args) (setq on-ready (plist-get args :on-event)) 'token))
+              ((symbol-function 'agent-shell-unsubscribe) #'ignore)
+              ((symbol-function 'agent-shell-insert) (lambda (&rest args) (setq inserted args))))
+      (kdb-claude--start-with "/tmp/" "go" nil 'hidden)
+      (funcall on-ready nil)
+      (should (equal (plist-get inserted :text) "go"))
+      (should (plist-get inserted :no-focus)))
+    (kill-buffer buf)))
+
+(ert-deftest restarted-session-keeps-its-tab-id-and-things ()
+  ;; agent-shell-restart (and -reload) kills the buffer and starts another
+  ;; under its name: the same session, not one closed and a new one.
+  (require 'agent-shell)
+  (test-with-tabs
+   (let* ((api (test-project "api"))
+          (old (test-claude-buffer api "a"))
+          cleaned new)
+     (with-current-buffer old
+       (setq kdb-claude--id "api-1"
+             kdb-claude--provider-env '("ANTHROPIC_MODEL=m")))
+     (kdb-claude--display-in-own-tab old nil)
+     (let ((tabs (test-tab-names)))
+       (cl-letf (((symbol-function 'kdb-claude-cleanup) (lambda (id) (push id cleaned))))
+         (with-current-buffer old
+           (kdb-claude--keep-across-restart
+            (lambda ()
+              ;; As agent-shell does: kill it, then start anew, client and all.
+              (let ((name (buffer-name old)))
+                (kill-buffer old)
+                (setq new (test-claude-buffer api "a"))
+                (kdb-claude--tag-client #'ignore :buffer new)
+                (with-current-buffer new (rename-buffer name))
+                (set-window-buffer (selected-window) new))))))
+       (should-not cleaned)
+       (should (equal (test-tab-names) tabs))
+       (with-current-buffer new
+         (should (equal kdb-claude--id "api-1"))
+         (should (equal kdb-claude--provider-env '("ANTHROPIC_MODEL=m")))
+         (should (equal kdb-claude--tab-auto "api"))
+         ;; Declined: nothing is left set for the next session started.
+         (should-error (kdb-claude--keep-across-restart (lambda () (user-error "Cancelled")))
+                       :type 'user-error))
+       (should-not kdb-claude--restarting)
+       (should-not kdb-claude--next-id)))))
 
 (ert-deftest busy-animation-waits-while-emacs-is-unfocused ()
   (cl-letf (((symbol-function 'frame-focus-state) #'ignore))

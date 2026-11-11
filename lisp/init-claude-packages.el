@@ -27,7 +27,7 @@
               kdb-claude--steady-busy-frame kdb-claude--heartbeat-rate kdb-claude--display-in-own-tab
               kdb-claude--close-session-window kdb-claude--trim-session kdb-claude--watch-agent
               kdb-claude--focused-tick-p kdb-claude--display-in-pane kdb-claude-reap-agents
-              kdb-claude-check-stalls))
+              kdb-claude-check-stalls kdb-claude--keep-across-restart))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
                  kdb-claude-send kdb-claude-answer kdb-claude-review
@@ -37,7 +37,9 @@
                  kdb-claude-set-busy-indicator kdb-claude-start-model
                  kdb-claude-reveal-artifact kdb-reveal-in-file-manager kdb-claude-scratch kdb-claude-new-in-folder
                  kdb-claude-review-pr)
-                ("init-claude-print" kdb-claude-print)
+                ("init-claude-print" kdb-claude-print kdb-claude-print-from
+                 kdb-claude-print-continue kdb-claude-print-new
+                 kdb-claude-print-region kdb-claude-print-buffer)
                 ("init-claude" kdb-claude-sync kdb-claude-sync-code-sessions
                  kdb-claude-search kdb-claude-import-export
                  kdb-claude-ask-archive kdb-claude-resume-archived kdb-claude-history kdb-claude-recent kdb-claude-transcript
@@ -108,6 +110,8 @@ paragraph for its direction, which is costly in long sessions."
   (advice-add 'agent-shell--busy-indicator-frame :filter-return #'kdb-claude--steady-busy-frame)
   (advice-add 'agent-shell-heartbeat-make :filter-args #'kdb-claude--heartbeat-rate)
   (advice-add 'agent-shell--update-header-and-mode-line :before-while #'kdb-claude--focused-tick-p)
+  ;; A reload keeps the session's id, provider, tab and what it opened.
+  (advice-add 'agent-shell-restart :around #'kdb-claude--keep-across-restart)
   (advice-add 'rename-buffer :around #'kdb-claude--rename-keeps-tab)
   (advice-add 'agent-shell--permission-title :around #'kdb-claude--permission-title)
   (advice-add 'agent-shell--fetch-agent-icon :before-until #'kdb-claude--logo-icon)
