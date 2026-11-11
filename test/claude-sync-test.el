@@ -277,6 +277,22 @@ under a path limit that makes LONG's transcripts too long to open."
 
 ;;; Telling sessions apart in history
 
+(ert-deftest history-kills-an-open-session-after-asking ()
+  (let* ((file "/archive/code-sessions/-p/abc-123.org")
+         (session (generate-new-buffer "session"))
+         (answer nil))
+    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () file))
+              ((symbol-function 'tabulated-list-print) #'ignore)
+              ((symbol-function 'kdb-claude--live-sessions)
+               (lambda () (when (buffer-live-p session) `(("abc-123" . ,session)))))
+              ((symbol-function 'y-or-n-p) (lambda (_) answer)))
+      (kdb-claude-history-kill)                         ; said no
+      (should (buffer-live-p session))
+      (setq answer t)
+      (kdb-claude-history-kill)
+      (should-not (buffer-live-p session))
+      (should-error (kdb-claude-history-kill) :type 'user-error))))  ; not open now
+
 (ert-deftest history-shows-which-tab-and-branch ()
   (let* ((archive (file-name-as-directory (make-temp-file "archive" t)))
          (main (file-name-as-directory (make-temp-file "repo" t)))

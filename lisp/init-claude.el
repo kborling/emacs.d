@@ -567,6 +567,7 @@ Reads only the end of the file, unless the last message is longer."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'kdb-claude-history-open)
     (define-key map (kbd "u") #'kdb-claude-history-resume)
+    (define-key map (kbd "k") #'kdb-claude-history-kill)
     (define-key map (kbd "w") #'kdb-claude-history-copy-id)
     (define-key map (kbd "D") #'kdb-claude-history-open-in-desktop)
     (define-key map (kbd "/") #'kdb-claude-history-filter)
@@ -593,7 +594,7 @@ onto a session shows its last message, size, branch and directory.
   (add-hook 'tabulated-list-revert-hook #'kdb-claude--history-refresh nil t)
   (setq-local header-line-format
               (substitute-command-keys
-               "\\<kdb-claude-history-mode-map>\\[kdb-claude-history-open] open  \\[kdb-claude-history-resume] resume  \\[kdb-claude-history-copy-id] copy id  \\[kdb-claude-history-open-in-desktop] desktop  \\[kdb-claude-history-filter] filter  \\[kdb-claude-search] search text  \\[kdb-claude-ask-archive] ask  \\[revert-buffer] refresh")))
+               "\\<kdb-claude-history-mode-map>\\[kdb-claude-history-open] open  \\[kdb-claude-history-resume] resume  \\[kdb-claude-history-kill] kill  \\[kdb-claude-history-copy-id] copy id  \\[kdb-claude-history-open-in-desktop] desktop  \\[kdb-claude-history-filter] filter  \\[kdb-claude-search] search text  \\[kdb-claude-ask-archive] ask  \\[revert-buffer] refresh")))
 
 ;;;###autoload
 (defun kdb-claude-history ()
@@ -634,6 +635,17 @@ Empty input shows everything."
   "Continue the session at point, switching to it if it is already open."
   (interactive)
   (kdb-claude--resume (or (tabulated-list-get-id) (user-error "No session here"))))
+
+(defun kdb-claude-history-kill ()
+  "Close the open session at point and stop its agent, after asking.
+The conversation stays in the archive; \\[kdb-claude-history-resume] brings it back."
+  (interactive)
+  (let* ((file (or (tabulated-list-get-id) (user-error "No session here")))
+         (buf (or (cdr (assoc (file-name-base file) (kdb-claude--live-sessions)))
+                  (user-error "That session isn't open"))))
+    (when (y-or-n-p (format "Kill session %s? " (buffer-name buf)))
+      (kill-buffer buf)
+      (tabulated-list-print t))))
 
 (defun kdb-claude--archived-session (file)
   "(ID . DIRECTORY) of the Claude Code session archived in FILE."
