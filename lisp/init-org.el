@@ -220,16 +220,6 @@
 
 (add-hook 'org-mode-hook #'kdb/org-setup-wrapping)
 
-;; Disable wrapping in tables (advice added once, not per-buffer)
-(advice-add 'org-table-align :before
-            (lambda (&rest _)
-              (when (org-at-table-p)
-                (setq-local truncate-lines t))))
-(advice-add 'org-table-next-field :after
-            (lambda (&rest _)
-              (unless (org-at-table-p)
-                (setq-local truncate-lines nil))))
-
 (load (expand-file-name "org-contacts-simple" user-emacs-directory) nil t)
 
 ;; Scratch notes — draft in a throwaway buffer, file into org when done
@@ -476,7 +466,8 @@ macOS: interactive region select. Linux: scrot/maim. Windows: snippingtool."
      ((executable-find "scrot")
       (call-process "scrot" nil nil nil "-s" filepath))
      ((eq system-type 'windows-nt)
-      (shell-command (format "snippingtool /clip"))
+      ;; Nothing reads the snip here, so don't wait for it.
+      (call-process shell-file-name nil 0 nil shell-command-switch "snippingtool /clip")
       ;; On Windows, fall back to yank-media after clipboard capture
       (message "Use yank-media (C-c o y) to paste from clipboard")
       (setq filepath nil))
@@ -629,36 +620,28 @@ opening another that `find-file' would then put back over."
     (with-temp-file html-file
       (insert "<!DOCTYPE html><html><head><meta charset='utf-8'>")
       (insert (format "<style>%s</style></head><body>" css))
-      ;; Use markdown-mode's export if available, otherwise basic conversion
-      (if (fboundp 'markdown-export-body-to-html)
-          (let ((md-buf (generate-new-buffer " *md-tmp*")))
-            (with-current-buffer md-buf
-              (insert content)
-              (markdown-mode)
-              (insert (markdown-export-body-to-html)))
-            (kill-buffer md-buf))
-        ;; Basic markdown to HTML conversion
-        (let ((text content))
-          ;; Code blocks
-          (setq text (replace-regexp-in-string
-                      "```\\([a-z]*\\)\n\\(\\(?:.*\n\\)*?\\)```"
-                      "<pre><code class=\"\\1\">\\2</code></pre>" text))
-          ;; Headers
-          (setq text (replace-regexp-in-string "^### \\(.*\\)$" "<h3>\\1</h3>" text))
-          (setq text (replace-regexp-in-string "^## \\(.*\\)$" "<h2>\\1</h2>" text))
-          (setq text (replace-regexp-in-string "^# \\(.*\\)$" "<h1>\\1</h1>" text))
-          ;; Bold/italic
-          (setq text (replace-regexp-in-string "\\*\\*\\([^*]+\\)\\*\\*" "<strong>\\1</strong>" text))
-          (setq text (replace-regexp-in-string "\\*\\([^*]+\\)\\*" "<em>\\1</em>" text))
-          ;; Inline code
-          (setq text (replace-regexp-in-string "`\\([^`]+\\)`" "<code>\\1</code>" text))
-          ;; Links
-          (setq text (replace-regexp-in-string "\\[\\([^]]+\\)\\](\\([^)]+\\))" "<a href=\"\\2\">\\1</a>" text))
-          ;; List items
-          (setq text (replace-regexp-in-string "^- \\(.*\\)$" "<li>\\1</li>" text))
-          ;; Paragraphs
-          (setq text (replace-regexp-in-string "\n\n" "</p><p>" text))
-          (insert "<p>" text "</p>")))
+      ;; Basic markdown to HTML conversion
+      (let ((text content))
+        ;; Code blocks
+        (setq text (replace-regexp-in-string
+                    "```\\([a-z]*\\)\n\\(\\(?:.*\n\\)*?\\)```"
+                    "<pre><code class=\"\\1\">\\2</code></pre>" text))
+        ;; Headers
+        (setq text (replace-regexp-in-string "^### \\(.*\\)$" "<h3>\\1</h3>" text))
+        (setq text (replace-regexp-in-string "^## \\(.*\\)$" "<h2>\\1</h2>" text))
+        (setq text (replace-regexp-in-string "^# \\(.*\\)$" "<h1>\\1</h1>" text))
+        ;; Bold/italic
+        (setq text (replace-regexp-in-string "\\*\\*\\([^*]+\\)\\*\\*" "<strong>\\1</strong>" text))
+        (setq text (replace-regexp-in-string "\\*\\([^*]+\\)\\*" "<em>\\1</em>" text))
+        ;; Inline code
+        (setq text (replace-regexp-in-string "`\\([^`]+\\)`" "<code>\\1</code>" text))
+        ;; Links
+        (setq text (replace-regexp-in-string "\\[\\([^]]+\\)\\](\\([^)]+\\))" "<a href=\"\\2\">\\1</a>" text))
+        ;; List items
+        (setq text (replace-regexp-in-string "^- \\(.*\\)$" "<li>\\1</li>" text))
+        ;; Paragraphs
+        (setq text (replace-regexp-in-string "\n\n" "</p><p>" text))
+        (insert "<p>" text "</p>"))
       (insert "</body></html>"))
     (eww-open-file html-file)))
 

@@ -44,9 +44,37 @@
      (should (equal (buffer-string) "one\n"))            ; the buffer too
      (kill-buffer))))
 
+(ert-deftest discarding-a-directory-reverts-the-buffers-under-it ()
+  (test-in-repo
+   (let ((buf (find-file-noselect "src/f.txt")))
+     (with-current-buffer buf (insert "changed\n") (save-buffer))
+     ;; As from a vc-dir directory entry
+     (cl-letf (((symbol-function 'kdb-vc-files) (lambda () '("src/")))
+               ((symbol-function 'yes-or-no-p) (lambda (_) t)))
+       (kdb-vc-revert-file))
+     (should (equal (test-git-status) ""))
+     (should (equal (with-current-buffer buf (buffer-string)) "one\n"))
+     (kill-buffer buf))))
+
+(ert-deftest conflicts-open-the-right-files-from-a-subdirectory ()
+  (require 'vc-dir)
+  (test-in-repo
+   (cl-flet ((git (&rest args) (apply #'call-process "git" nil nil nil args))
+             (put-f (text) (with-temp-file "src/f.txt" (insert text))))
+     (git "checkout" "-qb" "other") (put-f "two\n") (git "commit" "-qam" "two")
+     (git "checkout" "-q" "-") (put-f "three\n") (git "commit" "-qam" "three")
+     (git "merge" "-q" "other"))
+   (let ((default-directory (expand-file-name "src/" root)))
+     (save-window-excursion (kdb-vc-resolve-conflicts)))
+   (let ((buf (find-buffer-visiting (expand-file-name "src/f.txt" root))))
+     (should buf)
+     (kill-buffer buf))
+   (should-not (find-buffer-visiting (expand-file-name "src/src/f.txt" root)))))
+
 (ert-deftest odd-file-names-reach-git-untouched ()
   (test-in-repo
-   (let ((odd "x;echo pwned>p.txt"))
+   ;; Windows file names can't hold >; its shell runs & the same way.
+   (let ((odd (if (eq system-type 'windows-nt) "x&copy nul p.txt" "x;echo pwned>p.txt")))
      (with-temp-file odd (insert "x\n"))
      (call-process "git" nil nil nil "add" ".")
      (call-process "git" nil nil nil "commit" "-qm" "odd")

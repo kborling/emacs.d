@@ -129,12 +129,11 @@
           (message "No previous commit")))))
   
   ;; Add keybindings to log-view-mode
-  (with-eval-after-load 'log-view
-    (define-key log-view-mode-map (kbd "d") 'kdb-log-view-show-commit-diff)
-    (define-key log-view-mode-map (kbd "D") 'kdb-log-view-show-commit-stat)
-    (define-key log-view-mode-map (kbd "RET") 'kdb-log-view-show-commit-diff)
-    (define-key log-view-mode-map (kbd "=") 'kdb-log-view-show-commit-diff)
-    (define-key log-view-mode-map (kbd "s") 'kdb-log-view-show-commit-stat))
+  (define-key log-view-mode-map (kbd "d") 'kdb-log-view-show-commit-diff)
+  (define-key log-view-mode-map (kbd "D") 'kdb-log-view-show-commit-stat)
+  (define-key log-view-mode-map (kbd "RET") 'kdb-log-view-show-commit-diff)
+  (define-key log-view-mode-map (kbd "=") 'kdb-log-view-show-commit-diff)
+  (define-key log-view-mode-map (kbd "s") 'kdb-log-view-show-commit-stat)
   
   ;; Add keybindings to commit diff buffer only
   (defvar kdb-commit-diff-mode-map
@@ -155,12 +154,7 @@
 (use-package vc-msg
   :ensure t
   :config
-  ;; Customize popup appearance - cleaner style
-  (setq vc-msg-show-author t
-        vc-msg-time-format "%Y-%m-%d %H:%M"
-        vc-msg-persist-popup t)
-  
-  (setq vc-msg-git-show-commit-function 'vc-msg-git-show-commit-internal))
+  (setq vc-msg-git-show-commit-function #'kdb-vc-commit-show))
 
 ;; Diff-hl - changed-line indicators in the fringe + hunk-level staging
 (use-package diff-hl
@@ -210,6 +204,8 @@ branch names need no quoting (and none goes wrong on Windows' cmd)."
       (unless (zerop (apply #'process-file "git" nil t nil args))
         (user-error "git %s: %s" (car args) (string-trim (buffer-string)))))))
 
+(defvar vc-ewoc)
+
 (defun kdb-vc-files ()
   "Files to act on, relative to the root: vc-dir's marked or current ones,
 else this buffer's file, else nil."
@@ -217,7 +213,11 @@ else this buffer's file, else nil."
     (mapcar (lambda (f) (file-relative-name (expand-file-name f) root))
             (cond ((derived-mode-p 'vc-dir-mode)
                    (or (vc-dir-marked-files)
-                       (and (vc-dir-current-file) (list (vc-dir-current-file)))))
+                       ;; On the header vc-dir-current-file gives the first
+                       ;; file, which you didn't pick.
+                       (when-let* ((first (ewoc-nth vc-ewoc 0)))
+                         (and (>= (point) (ewoc-location first))
+                              (list (vc-dir-current-file))))))
                   (buffer-file-name (list buffer-file-name))))))
 
 (defun kdb-vc-refresh ()
@@ -262,81 +262,76 @@ else this buffer's file, else nil."
   (vc-push t))
 
 ;; VC Transient Menu - provides Magit-like interface for VC
-(defun kdb-vc-transient ()
+(require 'transient)
+(transient-define-prefix kdb-vc-transient ()
   "Custom VC transient menu with Magit-like keybindings."
-  (interactive)
-  (require 'transient)
-  (transient-define-prefix kdb-vc-menu ()
-    "VC operations menu"
-    [["Status & Diff"
-      ("g" "Status (Root)" project-vc-dir)
-      ("G" "Lazygit" kdb-lazygit)
-      ("s" "Status" vc-dir)
-      ("d" "Diff (unstaged)" vc-diff)
-      ("D" "Diff vs Branch" vc-root-diff)
-      ("=" "Basic Diff" vc-diff)
-      ("e" "Ediff" vc-ediff)
-      ("E" "Ediff Revision" vc-version-ediff)]
-     
-     ["Log & History"
-      ("l" "Log (current file)" vc-print-log)
-      ("L" "Log (branch)" vc-print-root-log)
-      ("h h" "File History" vc-print-root-log)
-      ("h s" "Show Commit" kdb-vc-commit-show)
-      ("h d" "Commit Diff" kdb-vc-commit-diff)
-      ("h f" "Find Revision" vc-revision-other-window)
-      ("/" "Search Log" vc-log-search)
-      ("B" "Blame" vc-annotate)
-      ("M" "Line Commit" vc-msg-show)]
-     
-     ["Branch"
-      ("b b" "Switch" vc-switch-branch)
-      ("b n" "New" vc-create-branch)
-      ("b d" "Delete" kdb-vc-delete-branch)
-      ("b r" "Rename" kdb-vc-rename-branch)
-      ("?" "File at Branch" kdb-vc-find-branch-file)
-      ""
-      "-Merge-"
-      ("m" "Merge" vc-merge)]
-     
-     ["Remote"
-      ("f" "Pull" vc-update)
-      ("F" "Fetch" kdb-vc-fetch)
-      ("p" "Push" vc-push)
-      ("P" "Push Specific" kdb-vc-push-specific)
-      ""
-      "-Management-"
-      ("r l" "List" kdb-vc-remote-list)
-      ("r a" "Add" kdb-vc-remote-add)
-      ("r u" "Set URL" kdb-vc-remote-set-url)
-      ("C" "Clone" kdb-vc-clone)]]
-    
-    [["Changes"
-      ("a" "Add/Stage" kdb-vc-git-stage)
-      ("x" "Unstage" kdb-vc-git-unstage)
-      ("c" "Commit" vc-next-action)
-      ("C-c" "Amend" kdb-vc-git-amend)
-      ("u" "Revert" vc-revert)
-      ("U" "Discard changes" kdb-vc-revert-file)
-      ("k" "Delete" vc-delete-file)
-      ("R" "Rename" vc-rename-file)]
-     
-     ["Stash"
-      ("z z" "Snapshot" vc-git-stash-snapshot)
-      ("z s" "Stash..." vc-git-stash)
-      ("z a" "Apply..." vc-git-stash-apply)
-      ("z p" "Pop..." vc-git-stash-pop)
-      ("z v" "Show..." vc-git-stash-show)
-      ("z k" "Delete..." vc-git-stash-delete)]
-     
-     ["Tags & Info"
-      ("t" "Create Tag" vc-create-tag)
-      ("T" "List Tags" kdb-vc-git-list-tags)
-      ("i" "Init Repo" vc-create-repo)
-      ("!" "Git Command" kdb-vc-git-command)
-      ""
-      ("q" "Quit" transient-quit-one)]])
-  (kdb-vc-menu))
+  [["Status & Diff"
+    ("g" "Status (Root)" project-vc-dir)
+    ("G" "Lazygit" kdb-lazygit)
+    ("s" "Status" vc-dir)
+    ("d" "Diff (unstaged)" vc-diff)
+    ("D" "Diff vs Branch" vc-root-diff)
+    ("=" "Basic Diff" vc-diff)
+    ("e" "Ediff" vc-ediff)
+    ("E" "Ediff Revision" vc-version-ediff)]
+   
+   ["Log & History"
+    ("l" "Log (current file)" vc-print-log)
+    ("L" "Log (branch)" vc-print-root-log)
+    ("h s" "Show Commit" kdb-vc-commit-show)
+    ("h d" "Commit Diff" kdb-vc-commit-diff)
+    ("h f" "Find Revision" vc-revision-other-window)
+    ("/" "Search Log" vc-log-search)
+    ("B" "Blame" vc-annotate)
+    ("M" "Line Commit" vc-msg-show)]
+   
+   ["Branch"
+    ("b b" "Switch" vc-switch-branch)
+    ("b n" "New" vc-create-branch)
+    ("b d" "Delete" kdb-vc-delete-branch)
+    ("b r" "Rename" kdb-vc-rename-branch)
+    ("?" "File at Branch" kdb-vc-find-branch-file)
+    ""
+    "-Merge-"
+    ("m" "Merge" vc-merge)]
+   
+   ["Remote"
+    ("f" "Pull" vc-update)
+    ("F" "Fetch" kdb-vc-fetch)
+    ("p" "Push" vc-push)
+    ("P" "Push Specific" kdb-vc-push-specific)
+    ""
+    "-Management-"
+    ("r l" "List" kdb-vc-remote-list)
+    ("r a" "Add" kdb-vc-remote-add)
+    ("r u" "Set URL" kdb-vc-remote-set-url)
+    ("C" "Clone" kdb-vc-clone)]]
+  
+  [["Changes"
+    ("a" "Add/Stage" kdb-vc-git-stage)
+    ("x" "Unstage" kdb-vc-git-unstage)
+    ("c" "Commit" vc-next-action)
+    ("C-c" "Amend" kdb-vc-git-amend)
+    ("u" "Revert" vc-revert)
+    ("U" "Discard changes" kdb-vc-revert-file)
+    ("k" "Delete" vc-delete-file)
+    ("R" "Rename" vc-rename-file)]
+   
+   ["Stash"
+    ("z z" "Snapshot" vc-git-stash-snapshot)
+    ("z s" "Stash..." vc-git-stash)
+    ("z a" "Apply..." vc-git-stash-apply)
+    ("z p" "Pop..." vc-git-stash-pop)
+    ("z v" "Show..." vc-git-stash-show)
+    ("z k" "Delete..." vc-git-stash-delete)]
+   
+   ["Tags & Info"
+    ("t" "Create Tag" vc-create-tag)
+    ("T" "List Tags" kdb-vc-git-list-tags)
+    ("i" "Init Repo" vc-create-repo)
+    ("!" "Git Command" kdb-vc-git-command)
+    ""
+    ("q" "Quit" transient-quit-one)]])
 
 ;; Custom VC helper functions
 (defun kdb-vc-remote-set-url ()
@@ -376,9 +371,24 @@ vc check-in).  \\`C-c C-e' in log-edit toggles amend on any commit."
   (let ((files (or (kdb-vc-files) (user-error "No file here to revert"))))
     (when (yes-or-no-p (format "Discard all changes to %s? " (string-join files ", ")))
       (apply #'kdb-vc-git-run "checkout" "HEAD" "--" files)
-      (dolist (f files)
-        (when-let* ((buf (find-buffer-visiting (expand-file-name f (kdb-vc-root)))))
-          (with-current-buffer buf (revert-buffer t t t))))
+      ;; Every buffer on a discarded file, or under a discarded directory,
+      ;; else a later save puts the changes back.  By truename and ignoring
+      ;; case: git and Emacs spell Windows paths differently (C: and c:,
+      ;; KEVINB~1), which `vc-resynch-buffers-in-directory' misses.
+      (let ((paths (mapcar (lambda (f)
+                             (let ((p (file-truename (expand-file-name f (kdb-vc-root)))))
+                               (if (file-directory-p p) (file-name-as-directory p) p)))
+                           files))
+            (fold (memq system-type '(windows-nt cygwin darwin))))
+        (dolist (b (buffer-list))
+          (when-let* ((name (buffer-file-name b))
+                      (name (file-truename name))
+                      ((seq-some (lambda (p)
+                                   (if (directory-name-p p)
+                                       (string-prefix-p p name fold)
+                                     (eq t (compare-strings p nil nil name nil nil fold))))
+                                 paths)))
+            (with-current-buffer b (revert-buffer t t t)))))
       (kdb-vc-refresh)
       (message "Reverted %s to the last commit" (string-join files ", ")))))
 
@@ -451,20 +461,11 @@ For history surgery vc doesn't cover: interactive rebase, cherry-pick."
           (goto-char (point-min))
           (pop-to-buffer (current-buffer)))))))
 
-(defun kdb-vc-git-command ()
-  "Run an arbitrary git command."
-  (interactive)
-  (let* ((command (read-string "Git command (without 'git'): "))
-         (full-command (format "git %s" command))
-         (output (shell-command-to-string full-command)))
-    (if (string-empty-p (string-trim output))
-        (message "Git command completed: %s" command)
-      (with-current-buffer (get-buffer-create "*Git Output*")
-        (erase-buffer)
-        (insert (format "$ %s\n\n" full-command))
-        (insert output)
-        (goto-char (point-min))
-        (pop-to-buffer (current-buffer))))))
+(defun kdb-vc-git-command (command)
+  "Run git COMMAND, its output streaming into *Git Output*."
+  (interactive "sGit command (without 'git'): ")
+  ;; Async: git may open an editor (emacsclient) that this Emacs must serve.
+  (async-shell-command (concat "git " command) "*Git Output*"))
 
 ;; Commit hash lookup functions
 (defun kdb-vc-commit-show (hash)
@@ -492,12 +493,6 @@ For history surgery vc doesn't cover: interactive rebase, cherry-pick."
       (diff-mode)
       (goto-char (point-min))
       (pop-to-buffer (current-buffer)))))
-
-(defun kdb-vc-commit-stats (hash)
-  "Show stats for a specific commit HASH."
-  (interactive "sCommit hash: ")
-  (let ((output (kdb-vc-git-output "show" "--stat" "--format=%h %s%n%aD %an" hash)))
-    (message "%s" (string-trim output))))
 
 (defalias 'kdb-vc-clone 'vc-clone)
 
@@ -557,33 +552,18 @@ For history surgery vc doesn't cover: interactive rebase, cherry-pick."
       (browse-url remote-url)
       (message "Opening %s" remote-url)))
 
-  (defun kdb-vc-copy-current-branch ()
-    "Copy the current branch name to clipboard."
-    (interactive)
-    (let ((branch (string-trim (shell-command-to-string "git branch --show-current"))))
-      (kill-new branch)
-      (message "Copied branch: %s" branch)))
-
-  (defun kdb-vc-copy-file-path ()
-    "Copy the repository-relative path of current file."
-    (interactive)
-    (let ((filepath (file-relative-name buffer-file-name (vc-root-dir))))
-      (kill-new filepath)
-      (message "Copied: %s" filepath)))
-
   ;; Function to open all conflict files
   (defun kdb-vc-resolve-conflicts ()
     "Open all files with merge conflicts for resolution."
     (interactive)
-    (let* ((conflicts (split-string 
-                       (shell-command-to-string 
-                        "git diff --name-only --diff-filter=U") "\n" t))
+    (let* ((root (kdb-vc-root))
+           (conflicts (kdb-vc-git-lines "diff" "--name-only" "--diff-filter=U"))
            (conflict-count (length conflicts)))
       (if (= conflict-count 0)
           (message "No merge conflicts found!")
         (message "Opening %d conflict files..." conflict-count)
         (dolist (file conflicts)
-          (find-file file))
+          (find-file (expand-file-name file root)))
         (message "Resolve with: C-c m n/p (navigate) C-c m a (mine) C-c m b (theirs) C-c m e (ediff)"))))
   
   (defun kdb-vc-dir-mark-same-state ()

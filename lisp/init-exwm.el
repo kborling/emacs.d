@@ -515,46 +515,18 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
   ;; Spotify daemon — appears as a Spotify Connect device named "guix"
   (start-process-shell-command "spotifyd" nil "spotifyd"))
 
-;;; Modeline Integration =================================================
-
-(defun kdb-exwm-modeline-segment ()
-  "Display current workspace in modeline."
-  (format " [WS:%d] " exwm-workspace-current-index))
-
-;; Add to mode-line-format if desired
-;; (setq-default mode-line-format
-;;               (cons '(:eval (kdb-exwm-modeline-segment))
-;;                     mode-line-format))
-
 ;;; Theme Management - Light/Dark Mode ===================================
 
-(defvar kdb-exwm-current-mode 'dark
-  "Current theme mode: 'light or 'dark.")
-
-(defvar kdb-exwm-light-theme 'acme
-  "Theme to use for light mode.")
-
-(defvar kdb-exwm-dark-theme 'fleury
-  "Theme to use for dark mode.")
-
-
-(defun kdb-exwm-set-kitty-theme (theme)
-  "Set kitty terminal theme to THEME (light, dark, or fleury)."
-  (let ((config-file (expand-file-name "~/.config/kitty/kitty.conf")))
-    (start-process-shell-command
-     "kitty-theme" nil
-     (format "sed -i 's|include themes/[a-z]*.conf|include themes/%s.conf|g' %s && kill -SIGUSR1 $(pgrep kitty)"
-             (shell-quote-argument theme) config-file))
-    (message "Set kitty theme to %s" theme)))
+;; init-theme sets the theme (and kitty); these sync what only EXWM has.
 
 (defun kdb-exwm-set-dunst-theme (theme)
   "Set dunst notification theme to THEME (light or dark)."
   (let ((dunst-config (expand-file-name "~/.config/dunst/dunstrc"))
         (theme-config (expand-file-name (format "~/.config/dunst/dunstrc-%s" theme))))
-    ;; Update symlink
-    (when (file-exists-p theme-config)
-      (delete-file dunst-config)
-      (make-symbolic-link theme-config dunst-config)
+    ;; Only replace our own symlink, never a real dunstrc.
+    (when (and (file-exists-p theme-config)
+               (or (file-symlink-p dunst-config) (not (file-exists-p dunst-config))))
+      (make-symbolic-link theme-config dunst-config t)
       ;; Restart dunst to apply new config
       (start-process-shell-command
        "dunst-restart" nil
@@ -573,79 +545,24 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
      (format "gsettings set org.gnome.desktop.interface color-scheme 'prefer-%s'" theme))
     (message "Set system color scheme to %s" theme)))
 
-(defun kdb-exwm-set-light-mode ()
-  "Switch to light mode: Acme theme, light kitty, light dunst."
-  (interactive)
-  (setq kdb-exwm-current-mode 'light)
+(defun kdb-exwm-sync-theme (&rest _)
+  "Sync GTK, dunst, the systemtray and Polybar to `kdb-current-theme'."
+  (let ((mode (if (memq kdb-current-theme kdb-light-themes) "light" "dark")))
+    (kdb-exwm-set-gtk-theme mode)
+    (kdb-exwm-set-dunst-theme mode)
+    (when (featurep 'exwm-systemtray)
+      (setq exwm-systemtray-background-color
+            (face-attribute 'default :background nil 'default)))
+    (when kdb-exwm-use-polybar
+      (start-process-shell-command
+       "polybar-theme" nil
+       (format "cd ~/.config/polybar && ln -sf %s config && polybar-msg cmd restart"
+               (if (string= mode "light") "config-light.ini" "config.ini"))))))
 
-  ;; Disable all themes first, then load light theme
-  (mapc #'disable-theme custom-enabled-themes)
-  (load-theme kdb-exwm-light-theme t)
+(advice-add 'kdb/theme-set :after #'kdb-exwm-sync-theme)
 
-  ;; Set system color scheme (for Firefox prefers-color-scheme)
-  (kdb-exwm-set-gtk-theme "light")
-
-  ;; Set kitty to light theme
-  (kdb-exwm-set-kitty-theme "light")
-
-  ;; Set dunst to light theme
-  (kdb-exwm-set-dunst-theme "light")
-
-  ;; Update systemtray background color
-  (when (featurep 'exwm-systemtray)
-    (setq exwm-systemtray-background-color
-          (face-attribute 'default :background nil 'default)))
-
-  ;; Switch Polybar to light theme if using Polybar
-  (when kdb-exwm-use-polybar
-    (start-process-shell-command
-     "polybar-theme" nil
-     "cd ~/.config/polybar && ln -sf config-light.ini config && polybar-msg cmd restart"))
-
-  ;; Send message
-  (message "Light mode activated"))
-
-(defun kdb-exwm-set-dark-mode ()
-  "Switch to dark mode: Uwu theme, dark kitty, dark dunst."
-  (interactive)
-  (setq kdb-exwm-current-mode 'dark)
-
-  ;; Disable all themes first, then load dark theme
-  (mapc #'disable-theme custom-enabled-themes)
-  (load-theme kdb-exwm-dark-theme t)
-
-  ;; Set system color scheme (for Firefox prefers-color-scheme)
-  (kdb-exwm-set-gtk-theme "dark")
-
-  ;; Set kitty to dark theme
-  (kdb-exwm-set-kitty-theme "fleury")
-
-  ;; Set dunst to dark theme
-  (kdb-exwm-set-dunst-theme "dark")
-
-  ;; Update systemtray background color
-  (when (featurep 'exwm-systemtray)
-    (setq exwm-systemtray-background-color
-          (face-attribute 'default :background nil 'default)))
-
-  ;; Switch Polybar to dark theme if using Polybar
-  (when kdb-exwm-use-polybar
-    (start-process-shell-command
-     "polybar-theme" nil
-     "cd ~/.config/polybar && ln -sf config.ini config && polybar-msg cmd restart"))
-
-  ;; Send message
-  (message "Dark mode activated"))
-
-(defun kdb-exwm-toggle-theme-mode ()
-  "Toggle between light and dark mode system-wide."
-  (interactive)
-  (if (eq kdb-exwm-current-mode 'dark)
-      (kdb-exwm-set-light-mode)
-    (kdb-exwm-set-dark-mode)))
-
-;; Bind theme toggle to Super+t
-(exwm-input-set-key (kbd "s-t") #'kdb-exwm-toggle-theme-mode)
+;; Under EXWM s-t toggles light/dark, as it always has.
+(exwm-input-set-key (kbd "s-t") #'kdb/theme-toggle)
 
 ;;; Power Management =====================================================
 
