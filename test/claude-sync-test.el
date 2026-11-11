@@ -269,13 +269,42 @@ under a path limit that makes LONG's transcripts too long to open."
       (should (equal (kdb-claude-sync-code-sessions) "Synced 0 Claude Code sessions"))
       (let ((entry (car (kdb-claude--history-entries))))
         (should (equal (aref (cadr entry) 3) "sns-technology"))
-        (should (equal (aref (cadr entry) 4) "Fix login redirect loop"))))
+        (should (equal (aref (cadr entry) 5) "Fix login redirect loop"))))
     (delete-directory root t)))
 
 (ert-deftest symbol-fonts-apply ()
   (kdb-apply-symbol-fonts))
 
 ;;; Telling sessions apart in history
+
+(ert-deftest history-shows-which-tab-and-branch ()
+  (let* ((archive (file-name-as-directory (make-temp-file "archive" t)))
+         (main (file-name-as-directory (make-temp-file "repo" t)))
+         (wt (file-name-as-directory (make-temp-file "repo-feature" t)))
+         (shown (generate-new-buffer "shown here"))
+         (elsewhere (generate-new-buffer "in another tab"))
+         (hidden (generate-new-buffer "in no tab")))
+    (make-directory (expand-file-name ".git" main))                       ; a checkout
+    (with-temp-file (expand-file-name ".git" wt) (insert "gitdir: x\n"))  ; a worktree
+    (dolist (s `(("a" ,main "main") ("b" ,wt "feature") ("c" ,main "main") ("d" ,main "")))
+      (with-temp-file (expand-file-name (concat (car s) ".org") archive)
+        (insert (format "#+TITLE: %s\n#+CWD: %s\n#+BRANCH: %s\n" (car s) (nth 1 s) (nth 2 s)))))
+    (set-window-buffer (selected-window) shown)
+    (cl-letf (((symbol-function 'kdb-claude--ensure-archive) (lambda () archive))
+              ((symbol-function 'kdb-claude--live-sessions)
+               (lambda () `(("a" . ,shown) ("b" . ,elsewhere) ("c" . ,hidden))))
+              ((symbol-function 'tab-bar-tabs)
+               (lambda () '((current-tab (name . "mine")) (tab (name . "api work")))))
+              ((symbol-function 'agent-shell-attention--tab-displays-buffer-p)
+               (lambda (tab buf) (and (equal (alist-get 'name tab) "api work") (eq buf elsewhere)))))
+      (let ((tab-bar-mode t) (kdb-claude--history-filter nil))
+        (should (seq-set-equal-p
+                 (mapcar (lambda (e) (list (aref (cadr e) 0) (aref (cadr e) 4) (aref (cadr e) 5)))
+                         (kdb-claude--history-entries))
+                 '(("● here" "main" "a") ("● api work" "⑂ feature" "b")
+                   ("● no tab" "main" "c") ("" "" "d"))))))
+    (mapc #'kill-buffer (list shown elsewhere hidden))
+    (dolist (d (list archive main wt)) (delete-directory d t))))
 
 (ert-deftest convert-records-client-and-size ()
   (let ((h (test-convert (test-user "first" "/tmp/x" nil "cli")
@@ -300,7 +329,7 @@ under a path limit that makes LONG's transcripts too long to open."
     (cl-letf (((symbol-function 'kdb-claude--ensure-archive) (lambda () archive))
               ((symbol-function 'kdb-claude--live-sessions) #'ignore))
       (let ((kdb-claude--history-filter nil)
-            (rows (lambda () (mapcar (lambda (e) (list (aref (cadr e) 2) (aref (cadr e) 3) (aref (cadr e) 4)))
+            (rows (lambda () (mapcar (lambda (e) (list (aref (cadr e) 2) (aref (cadr e) 3) (aref (cadr e) 5)))
                                      (kdb-claude--history-entries)))))
         (should (seq-set-equal-p (funcall rows)
                                  '(("terminal" "app" "In the terminal") ("emacs" "app" "In Emacs")
@@ -389,7 +418,7 @@ under a path limit that makes LONG's transcripts too long to open."
                        '("open" "new" "dup" "old")))
         (should (string-match-p "\\`api +New work\\'" (car (nth 1 cands))))
         (should (string-suffix-p "<2>" (car (nth 2 cands))))
-        (should (string-match-p "\\`● open .*terminal  main  /home/me/api\\'"
+        (should (string-match-p "\\`● no tab .*terminal  main  /home/me/api\\'"
                                 (get-text-property 0 'kdb-annotation (car (nth 0 cands)))))
         ;; Picking: an archived one resumes; an open one is gone to.
         (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) (car (nth 1 cands)))))

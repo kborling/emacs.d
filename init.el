@@ -2008,7 +2008,14 @@ A daemon keeps running, and has nothing to save from afterwards."
   :ensure t
   :after evil
   :config
-  (evil-collection-init))
+  (evil-collection-init)
+  ;; It deletes these from `special-mode-map' itself, for every buffer, so
+  ;; g stopped refreshing lists (Claude history, Dired-like modes) outside
+  ;; evil too.  Evil's own state maps come first, so its buffers keep its keys.
+  (define-key special-mode-map "g" #'revert-buffer)
+  (define-key special-mode-map "h" #'describe-mode)
+  (define-key special-mode-map "?" #'describe-mode)
+  (define-key special-mode-map "0" #'digit-argument))
 
 (defvar kdb-evil-buffer-list nil
   "List of buffer patterns where 'evil-mode' is enabled.")

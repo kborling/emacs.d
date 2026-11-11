@@ -471,9 +471,37 @@ is any other program on Claude's SDK, such as claude -p with JSON output.")
           ""
         (or (cdr (assoc client kdb-claude--client-names)) client)))))
 
+(declare-function agent-shell-attention--tab-displays-buffer-p "agent-shell-attention")
+
+(defun kdb-claude--session-place (buf)
+  "Where open session BUF is, for the history: in this tab, which tab, or none."
+  (or (and (buffer-live-p buf) (get-buffer-window buf) "● here")
+      (and (bound-and-true-p tab-bar-mode)
+           (fboundp 'agent-shell-attention--tab-displays-buffer-p)
+           (buffer-live-p buf)
+           (when-let* ((tab (seq-find (lambda (tab)
+                                        (and (not (eq (car tab) 'current-tab))
+                                             (agent-shell-attention--tab-displays-buffer-p tab buf)))
+                                      (tab-bar-tabs))))
+             (concat "● " (alist-get 'name tab))))
+      "● no tab"))
+
+(defun kdb-claude--history-branch (header worktrees)
+  "The branch in HEADER, marked ⑂ when its directory is a worktree.
+A worktree's .git is a file, not a folder.  WORKTREES caches that per
+directory, so a refresh asks the disk once for each."
+  (let ((branch (or (cdr (assoc "BRANCH" header)) ""))
+        (cwd (cdr (assoc "CWD" header))))
+    (if (and cwd (not (string-empty-p branch))
+             (with-memoization (gethash cwd worktrees)
+               (file-regular-p (expand-file-name ".git" cwd))))
+        (concat "⑂ " branch)
+      branch)))
+
 (defun kdb-claude--history-entries ()
   "Return `tabulated-list-entries' for every archived session."
-  (let ((live (mapcar #'car (kdb-claude--live-sessions))))
+  (let ((live (kdb-claude--live-sessions))
+        (worktrees (make-hash-table :test #'equal)))
     (seq-filter
      (lambda (e)
        (or (null kdb-claude--history-filter)
@@ -483,13 +511,16 @@ is any other program on Claude's SDK, such as claude -p with JSON output.")
       (lambda (f)
         (let* ((h (kdb-claude--org-header f))
                (cwd (cdr (assoc "CWD" h))))
-          (list f (vector (if (member (file-name-base f) live) "●" "")
+          (list f (vector (if-let* ((buf (cdr (assoc (file-name-base f) live))))
+                              (kdb-claude--session-place buf)
+                            "")
                           (or (cdr (assoc "UPDATED" h)) (cdr (assoc "DATE" h)) "")
                           (kdb-claude--history-source f h)
                           (cond ((let ((p (cdr (assoc "PROJECT" h))))
                                    (and p (not (string-empty-p p)) p)))
                                 (cwd (file-name-nondirectory (directory-file-name cwd)))
                                 (t ""))
+                          (kdb-claude--history-branch h worktrees)
                           (or (cdr (assoc "TITLE" h)) (file-name-base f))))))
       (directory-files-recursively (kdb-claude--ensure-archive) "\\.org$")))))
 
@@ -534,14 +565,16 @@ Reads only the end of the file, unless the last message is longer."
   "Keymap for `kdb-claude-history-mode'.")
 
 (define-derived-mode kdb-claude-history-mode tabulated-list-mode "Claude-History"
-  "Past Claude sessions, newest first.  ● marks sessions open in Emacs.
+  "Past Claude sessions, newest first.
+Tab says where an open one is: here (this tab), the tab showing it, or
+no tab.  Branch is the git branch it ran on, ⑂ when in a worktree.
 Source says where each happened: emacs, terminal, desktop, claude -p,
 sdk (other programs on Claude's SDK), or chat (imported claude.ai/Desktop
 chats); / filters on it too.  Moving
 onto a session shows its last message, size, branch and directory.
 \\{kdb-claude-history-mode-map}"
-  (setq tabulated-list-format [("" 1 t) ("Last active" 16 t) ("Source" 9 t)
-                                ("Project" 18 t) ("Title" 0 t)]
+  (setq tabulated-list-format [("Tab" 14 t) ("Last active" 16 t) ("Source" 9 t)
+                                ("Project" 16 t) ("Branch" 20 t) ("Title" 0 t)]
         tabulated-list-sort-key '("Last active" . t)
         tabulated-list-entries #'kdb-claude--history-entries)
   (setq-local eldoc-documentation-functions (list #'kdb-claude--history-preview))
@@ -700,7 +733,8 @@ sessions in temporary folders are left out."
          (cons (propertize
                 cand 'kdb-annotation
                 (string-join
-                 (delq nil (list (and (assoc (file-name-base f) live) "● open")
+                 (delq nil (list (when-let* ((buf (cdr (assoc (file-name-base f) live))))
+                                   (kdb-claude--session-place buf))
                                  (ignore-errors (kdb-claude--age (date-to-time updated)))
                                  (let ((src (kdb-claude--history-source f h)))
                                    (unless (string-empty-p src) src))
