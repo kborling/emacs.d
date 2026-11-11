@@ -344,11 +344,16 @@ Returns the window, for `agent-shell-display-action'."
 What it opened (`kdb-claude-show', `kdb-claude-run') is closed too."
   (add-hook 'kill-buffer-hook
             (lambda ()
-              (when kdb-claude--id
-                (ignore-errors (kdb-claude-cleanup kdb-claude--id)))
-              (ignore-errors (kdb-claude--close-session-tab (current-buffer)))
-              (dolist (w (get-buffer-window-list (current-buffer) nil))
-                (ignore-errors (delete-window w))))
+              ;; Switching tabs and windows changes the current buffer, and
+              ;; the kill hooks after this one (agent-shell's shutdown) act on
+              ;; the current buffer: without this they stop another session.
+              (save-current-buffer
+                (let ((buf (current-buffer)))
+                  (when kdb-claude--id
+                    (ignore-errors (kdb-claude-cleanup kdb-claude--id)))
+                  (ignore-errors (kdb-claude--close-session-tab buf))
+                  (dolist (w (get-buffer-window-list buf nil))
+                    (ignore-errors (delete-window w))))))
             nil t))
 
 (defun kdb-claude--close-session-tab (buf)

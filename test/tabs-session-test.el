@@ -67,6 +67,22 @@
         (tab-bar-mode -1)
         (delete-directory root t)))))
 
+(ert-deftest closing-a-session-leaves-the-others-running ()
+  ;; agent-shell's own kill hook shuts down the current buffer's agent, so
+  ;; ours must leave the dying session current, whatever buffer it visits.
+  (let* ((dir (file-name-as-directory temporary-file-directory))
+         (other (test-claude-buffer dir "sess-b"))
+         (closing (test-claude-buffer dir "sess-a"))
+         (shut-down nil))
+    (with-current-buffer closing
+      (setq kdb-claude--id "sess-a")
+      (add-hook 'kill-buffer-hook (lambda () (setq shut-down (current-buffer))) t t))
+    (cl-letf (((symbol-function 'kdb-claude-cleanup) (lambda (_) (set-buffer other))))
+      (unwind-protect
+          (progn (kill-buffer closing)
+                 (should (eq shut-down closing)))
+        (kill-buffer other)))))
+
 (ert-deftest tabs-are-never-saved-over-with-nothing ()
   ;; Before the restore: saving would replace last session with this one.
   (let ((kdb-tabs--restored nil))
