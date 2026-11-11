@@ -645,4 +645,61 @@
     (let ((kdb-in-timer nil))               ; your own command
       (should-not (kdb-quiet-timer-message "Mark set")))))
 
+(ert-deftest orphaned-agents-are-stopped-owned-ones-kept ()
+  (require 'acp)
+  (let* ((start (lambda (buf)
+                  ;; The keys `acp-shutdown' updates in place, as a real client has.
+                  (list (cons :process (make-process :name "fake-agent" :command '("sleep" "60") :noquery t))
+                        (cons :context-buffer buf) (cons :command "fake") (cons :instance-count 0)
+                        (cons :error-handlers nil) (cons :notification-handlers nil)
+                        (cons :request-handlers nil) (cons :pending-requests nil))))
+         (session (generate-new-buffer "session"))
+         (review (generate-new-buffer "agent-review"))           ; not a session
+         (closed (generate-new-buffer "closed session"))
+         (owned (funcall start session))
+         (replaced (funcall start session))                      ; session moved on
+         (other (funcall start review))
+         (gone (funcall start closed))
+         (kdb-claude--clients (list owned replaced other gone)))
+    (with-current-buffer session
+      (setq major-mode 'agent-shell-mode)
+      (setq-local agent-shell--state (list (cons :client owned))))
+    (kill-buffer closed)
+    (should (= 2 (kdb-claude-reap-agents)))
+    (should (process-live-p (map-elt owned :process)))
+    (should (process-live-p (map-elt other :process)))
+    (should-not (map-elt replaced :process))                    ; acp-shutdown let go of them
+    (should-not (map-elt gone :process))
+    (should (equal kdb-claude--clients (list owned other)))
+    (dolist (c (list owned other)) (delete-process (map-elt c :process)))
+    (kill-buffer session) (kill-buffer review)))
+
+(ert-deftest quiet-agent-mid-turn-is-noted-once ()
+  (let* ((buf (generate-new-buffer "session"))
+         (kdb-claude--permissions nil)
+         (last (time-subtract nil (* 60 20)))          ; 20 minutes ago
+         (busy t) notes)
+    (with-current-buffer buf (setq major-mode 'agent-shell-mode))
+    (cl-letf (((symbol-function 'agent-shell--state) #'ignore)
+              ((symbol-function 'agent-shell--active-requests-p) (lambda (_) busy))
+              ((symbol-function 'agent-shell-last-activity-time) (lambda (&rest _) last))
+              ((symbol-function 'agent-shell--update-fragment)
+               (lambda (&rest args) (push (plist-get args :body) notes)))
+              ((symbol-function 'kdb-claude--notify) #'ignore))
+      (kdb-claude-check-stalls)
+      (should (string-match-p "may be stuck" (car notes)))
+      (kdb-claude-check-stalls)                        ; same silence: not again
+      (should (= 1 (length notes)))
+      (setq last (time-subtract nil 60))               ; heard from a minute ago
+      (kdb-claude-check-stalls)
+      (should (= 1 (length notes)))
+      (setq last (time-subtract nil (* 60 20)))        ; quiet, but waiting on you
+      (let ((kdb-claude--permissions (list (list "id" buf nil))))
+        (kdb-claude-check-stalls))
+      (should (= 1 (length notes)))
+      (setq busy nil)                                  ; not mid-turn
+      (kdb-claude-check-stalls)
+      (should (= 1 (length notes))))
+    (kill-buffer buf)))
+
 ;;; tabs-session-test.el ends here

@@ -26,7 +26,8 @@
               kdb-claude--busy-frames kdb-claude--logo-icon kdb-claude--logo-header
               kdb-claude--steady-busy-frame kdb-claude--heartbeat-rate kdb-claude--display-in-own-tab
               kdb-claude--close-session-window kdb-claude--trim-session kdb-claude--watch-agent
-              kdb-claude--focused-tick-p kdb-claude--display-in-pane))
+              kdb-claude--focused-tick-p kdb-claude--display-in-pane kdb-claude-reap-agents
+              kdb-claude-check-stalls))
   (autoload fn "init-claude-workflow"))
 (dolist (spec '(("init-claude-workflow" kdb-claude kdb-claude-new
                  kdb-claude-send kdb-claude-answer kdb-claude-review
@@ -95,11 +96,6 @@ paragraph for its direction, which is costly in long sessions."
   ;; (-s: drag a region) where installed.  macOS/Windows keep the default.
   (when (and (eq system-type 'gnu/linux) (executable-find "maim"))
     (setq agent-shell-screenshot-command '("maim" "-s")))
-  ;; Antigravity (M-x agent-shell-antigravity-start-agent) through its CLI's
-  ;; documented `agy acp', not the separate agy_acp_server agent-shell expects.
-  ;; Only where agy is installed (the work machine); elsewhere, the default.
-  (when (executable-find "agy")
-    (setq agent-shell-antigravity-acp-command '("agy" "acp")))
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-permissions)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-artifacts)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-emacs-session)
@@ -176,6 +172,15 @@ paragraph for its direction, which is costly in long sessions."
 ;; Keep the archive current so search/ask/resume see recent sessions.
 ;; The conversion runs in a background Emacs, so idle time never freezes.
 ;; A defvar, so loading this file again doesn't add a second timer.
+;; Agents no session owns any more (300-450 MB each) are stopped when idle.
+(defvar kdb-claude--reap-timer
+  (run-with-idle-timer 60 t (lambda () (when (featurep 'init-claude-workflow)
+                                         (kdb-claude-reap-agents)))))
+;; A session whose agent has gone quiet mid-turn says so (acp has no timeout).
+(defvar kdb-claude--stall-timer
+  (run-with-timer 60 60 (lambda () (when (featurep 'init-claude-workflow)
+                                     (kdb-claude-check-stalls)))))
+
 (defvar kdb-claude--archive-timer
   (run-with-idle-timer 300 t (lambda ()
                                (require 'init-claude)

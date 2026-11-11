@@ -1160,6 +1160,9 @@ Nothing when that would free little: one huge last turn stays as it is."
 
 (defvar kdb-claude-agent-logs)
 
+(defvar kdb-claude--clients nil
+  "Every ACP client started, for `kdb-claude-reap-agents'.")
+
 (defun kdb-claude--watch-agent (&rest args)
   "After `acp--start-client' (ARGS), say so in the session if its agent dies.
 Between turns nothing else would (acp only fails pending requests); mid-turn
@@ -1167,8 +1170,75 @@ this adds why it died and how to resume to agent-shell's request error."
   (let* ((client (plist-get args :client))
          (proc (map-elt client :process)))
     (when (processp proc)
+      (push client kdb-claude--clients)
       (add-function :before (process-sentinel proc)
                     (lambda (p event) (kdb-claude--agent-died client p event))))))
+
+(declare-function acp-shutdown "acp")
+
+;;;###autoload
+(defun kdb-claude-reap-agents ()
+  "Stop agent processes no session owns any more; return how many.
+Each holds 300-450 MB.  An agent is orphaned when its session buffer is
+gone, or the session has since started another agent, without the old
+one being shut down: 6 piled up over 11 days of one Emacs.  Clients of
+a live buffer that isn't a session (agent-review) are left alone.  The
+buffer each was started from is logged, to find what leaves them."
+  (interactive)
+  (let ((reaped 0))
+    (setq kdb-claude--clients
+          (seq-filter
+           (lambda (client)
+             (let ((proc (map-elt client :process))
+                   (buf (map-elt client :context-buffer)))
+               (cond ((not (process-live-p proc)) nil)        ; done: forget it
+                     ((or (not (buffer-live-p buf))
+                          (and (eq (buffer-local-value 'major-mode buf) 'agent-shell-mode)
+                               (not (eq (map-elt (buffer-local-value 'agent-shell--state buf) :client)
+                                        client))))
+                      (message "Claude: stopping an orphaned agent (pid %s, was %s)"
+                               (process-id proc) (if (buffer-live-p buf) (buffer-name buf) "a closed session"))
+                      (acp-shutdown :client client)
+                      (setq reaped (1+ reaped))
+                      nil)
+                     (t t))))
+           kdb-claude--clients))
+    (when (called-interactively-p 'any)
+      (message "Stopped %d orphaned agent(s)" reaped))
+    reaped))
+
+(defvar kdb-claude-stall-minutes 15
+  "Minutes without a word from a working agent before its session says so.
+Claude's tool commands time out within 10, so longer is a hang.")
+
+(defvar-local kdb-claude--stall-noted nil
+  "The activity time a stall notice was given for, so it's given once.")
+
+(declare-function agent-shell-last-activity-time "agent-shell")
+(declare-function agent-shell--active-requests-p "agent-shell")
+
+;;;###autoload
+(defun kdb-claude-check-stalls ()
+  "Tell sessions mid-turn whose agent has gone quiet that it may be stuck.
+acp has no request timeout, so a hung connection leaves a session busy
+forever, looking like it's still working.  Not one waiting on you."
+  (dolist (buf (buffer-list))
+    (when (eq (buffer-local-value 'major-mode buf) 'agent-shell-mode)
+      (with-current-buffer buf
+        (when-let* (((agent-shell--active-requests-p (agent-shell--state)))
+                    ((not (seq-some (lambda (e) (eq (nth 1 e) buf)) kdb-claude--permissions)))
+                    (last (agent-shell-last-activity-time :shell-buffer buf))
+                    ((> (float-time (time-subtract nil last)) (* 60 kdb-claude-stall-minutes)))
+                    ((not (equal last kdb-claude--stall-noted))))
+          (setq kdb-claude--stall-noted last)
+          (agent-shell--update-fragment
+           :state (agent-shell--state)
+           :block-id (format "stalled-%s" (float-time last))
+           :label-left (propertize "Agent quiet" 'font-lock-face 'warning)
+           :body (format "No word from the agent for %d minutes; it may be stuck.\n\nC-c C-c interrupts the turn; M-x agent-shell-reload restarts the agent and resumes this conversation."
+                         kdb-claude-stall-minutes)
+           :create-new t :expanded t :above-last-prompt t)
+          (kdb-claude--notify buf "Claude agent quiet" (buffer-name buf)))))))
 
 (defun kdb-claude--agent-died (client proc event)
   "Tell CLIENT's session that PROC ended with EVENT, unless it was shut down.
