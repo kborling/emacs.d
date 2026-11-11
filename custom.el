@@ -6,7 +6,7 @@
  ;; If there is more than one, they won't work right.
  '(package-selected-packages
    '(acme-theme agent-shell angular-mode cape compat corfu cperl-mode
-                csharp-mode csv-mode deadgrep deft dictionary diff-hl
+                csv-mode deadgrep deft dictionary diff-hl
                 eat editorconfig eglot eglot-booster elixir-ts-mode
                 evil-collection exec-path-from-shell exwm faceup
                 fleury-theme flymake hl-todo less-css-mode lua-mode
@@ -14,7 +14,7 @@
                 multiple-cursors orderless org org-appear org-modern
                 peg project tabspaces tempel-collection tramp
                 transient treesit-expand uwu-theme vc-msg verilog-mode
-                wallpaper))
+                wallpaper which-key))
  '(package-vc-selected-packages
    '((fleury-theme :url "https://github.com/kborling/fleury-theme.el")
      (uwu-theme :url "https://github.com/kborling/uwu-theme")

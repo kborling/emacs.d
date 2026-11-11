@@ -36,10 +36,6 @@
 ;;;                  PERFORMANCE SETTINGS
 ;;; ============================================================
 
-;; After jsonrpc loads: it defines this itself, undoing an earlier fset.
-(with-eval-after-load 'jsonrpc
-  (fset #'jsonrpc--log-event #'ignore))
-
 ;; Native compilation settings
 (setq native-comp-async-report-warnings-errors nil
       native-comp-async-jobs-number 4)
@@ -134,8 +130,7 @@ itself shows messages as usual.  For `set-message-functions'."
 
 (setq use-package-always-ensure t
       package-native-compile t
-      ;; :error, not :emergency, so failed package installs are visible.
-      warning-minimum-level :error)
+      warning-minimum-level :warning)
 
 (setq package-install-upgrade-built-in t
       package-vc-register-as-project nil)
@@ -146,7 +141,7 @@ itself shows messages as usual.  For `set-message-functions'."
 ;; Popup/window management — consistent buffer placement
 (setq display-buffer-alist
       '(;; Hide noise
-        ("\\`\\*\\(Warnings\\|Compile-Log\\)\\*\\'"
+        ("\\`\\*Compile-Log\\*\\'"
          (display-buffer-no-window)
          (allow-no-window . t))
         ;; Bottom side window (ephemeral output)
@@ -215,8 +210,6 @@ itself shows messages as usual.  For `set-message-functions'."
 
 (setq
  sentence-end-double-space nil
- fill-column 80
- column-number-mode t
  apropos-do-all t
  mouse-yank-at-point t
  require-final-newline t
@@ -225,7 +218,8 @@ itself shows messages as usual.  For `set-message-functions'."
  global-mark-ring-max 50000
  ;; Built-in defaults
  view-read-only t
- completion-cycle-threshold 5)
+ completion-cycle-threshold 5
+ delete-by-moving-to-trash t)
 
 ;; Emacs 31+ features
 (when (boundp 'kill-region-dwim)
@@ -283,14 +277,15 @@ itself shows messages as usual.  For `set-message-functions'."
   "Scroll *Messages* to bottom when displayed."
   (when (equal (buffer-name (get-buffer buffer)) "*Messages*")   ; BUFFER may be a name
     (with-current-buffer buffer
-      (goto-char (point-max)))
-    (when-let* ((window (get-buffer-window buffer)))
-      (set-window-point window (point-max)))))
+      (goto-char (point-max))
+      (when-let* ((window (get-buffer-window buffer)))
+        (set-window-point window (point-max))))))
 
 (advice-add 'display-buffer :after #'kdb-messages-buffer-advice)
 
 ;; Frame sizing — large but not fullscreen (EXWM handles its own)
-(unless (memq window-system '(x))  ; Skip on EXWM
+(unless (and (memq window-system '(x))
+             (equal (getenv "DESKTOP_SESSION") "exwm"))
   (when (or (display-graphic-p) (daemonp))
     (add-to-list 'default-frame-alist '(width . 120))
     (add-to-list 'default-frame-alist '(height . 45))))
@@ -310,14 +305,9 @@ itself shows messages as usual.  For `set-message-functions'."
         recentf-max-saved-items 1000
         recentf-max-menu-items 20
         recentf-auto-cleanup 'never
+        recentf-autosave-interval 300
         recentf-exclude '(".gz" ".xz" ".zip" "/elpa/" "/opt/" "/.rustup/" "/ssh:" "/sudo:" "/node_modules/" "/nix/"))
-  (run-with-idle-timer 1 nil #'recentf-mode)
-  :config
-  ;; Save silently every 5 minutes; a defvar, so a reload adds no second timer
-  (defvar kdb-recentf-save-timer
-    (run-at-time nil (* 5 60) (lambda ()
-                                (let ((inhibit-message t))
-                                  (recentf-save-list))))))
+  (run-with-idle-timer 1 nil #'recentf-mode))
 
 ;; Save Place ============================================== ;;
 
@@ -347,7 +337,7 @@ itself shows messages as usual.  For `set-message-functions'."
 (setq tab-always-indent 'complete)
 
 (setq-default indent-tabs-mode nil
-              tab-stop-list ()
+              fill-column 80
               tab-width 4
               c-basic-offset 4
               sgml-basic-offset 4
@@ -479,19 +469,20 @@ be found until the first emacsclient frame opens."
 
 (use-package uwu-theme
   :vc (:url "https://github.com/kborling/uwu-theme" :rev :newest)
-  :config
+  :defer t
+  :init
+  ;; Before the theme file loads: it reads these as it defines its faces.
   (setq
    uwu-distinct-line-numbers nil
    uwu-scale-org-headlines t
    uwu-use-variable-pitch t
-   uwu-cursor-color 'red)
-  ;; (load-theme 'uwu t)
-  )
+   uwu-cursor-color 'red))
 
+;; load-theme evaluates the theme file; a require first did it twice.
 (use-package fleury-theme
   :vc (:url "https://github.com/kborling/fleury-theme.el" :rev :newest)
-  :config
-  (setq fleury-distinct-line-numbers t)
+  :defer t
+  :init
   (load-theme 'fleury t))
 
 (add-hook 'prog-mode-hook #'hl-line-mode)
@@ -806,11 +797,11 @@ If point is at the end of the line, kill the whole line including the newline."
 (add-hook 'term-exec-hook
           (lambda ()
             (let ((buf (current-buffer)))
-              (set-process-sentinel
-               (get-buffer-process buf)
-               (lambda (_proc event)
-                 (when (string= event "finished\n")
-                   (kill-buffer buf)))))))
+              ;; After term's own sentinel, which this used to replace.
+              (add-function :after (process-sentinel (get-buffer-process buf))
+                            (lambda (_proc event)
+                              (when (string= event "finished\n")
+                                (kill-buffer buf)))))))
 
 ;;; ============================================================
 ;;;                   ESSENTIAL PACKAGES
@@ -820,7 +811,10 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package autorevert
   :ensure nil
-  :hook (after-init . global-auto-revert-mode))
+  :hook (after-init . global-auto-revert-mode)
+  :init
+  ;; File notifications instead of stat-ing every buffer's file every 5s.
+  (setq auto-revert-avoid-polling t))
 
 
 ;; Grep ==================================================== ;;
@@ -872,14 +866,7 @@ If point is at the end of the line, kill the whole line including the newline."
     (interactive
      (list (read-string "Server (e.g. myserver.database.windows.net): ")
            (read-string "Database: ")))
-    (let ((sql-ms-options
-           (cond
-            ;; go-sqlcmd supports --authentication-method
-            ((executable-find "go-sqlcmd")
-             (list "-S" server "-d" database "--authentication-method" "ActiveDirectoryDefault"))
-            ;; sqlcmd with -G for Azure AD
-            (t (list "-S" server "-d" database "-G")))))
-      (sql-ms)))
+    (kdb-sql-connect-internal server database))
 
   (defvar kdb-sql-connections nil
     "Alist of named Azure SQL connections. Set in personal.el:
@@ -901,16 +888,16 @@ If point is at the end of the line, kill the whole line including the newline."
 
   (defun kdb-sql-connect-internal (server database &optional name)
     "Connect to Azure SQL SERVER/DATABASE with optional buffer NAME."
-    (let* ((buf-name (format "*SQL: %s*" (or name database)))
-           (sql-ms-options
-            (cond
-             ((executable-find "go-sqlcmd")
-              (list "-S" server "-d" database "--authentication-method" "ActiveDirectoryDefault"))
-             (t (list "-S" server "-d" database "-G")))))
-      (sql-ms)
-      (when (get-buffer "*SQL*")
-        (with-current-buffer "*SQL*"
-          (rename-buffer buf-name t)))))
+    ;; Server and database are in the options: no login prompts.
+    (let ((sql-ms-login-params nil)
+          (sql-ms-options
+           (cond
+            ;; go-sqlcmd supports --authentication-method
+            ((executable-find "go-sqlcmd")
+             (list "-S" server "-d" database "--authentication-method" "ActiveDirectoryDefault"))
+            ;; sqlcmd with -G for Azure AD
+            (t (list "-S" server "-d" database "-G")))))
+      (sql-ms (format "*SQL: %s*" (or name database)))))
 
   ;; Send region/paragraph to SQL and show results
   (defun kdb-sql-send-dwim ()
@@ -986,12 +973,7 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq
    dabbrev-abbrev-char-regexp "\\sw\\|\\s_"
    dabbrev-abbrev-skip-leading-regexp "[$*/=~']"
-   dabbrev-backward-only nil
-   dabbrev-case-distinction 'case-replace
    dabbrev-case-fold-search nil
-   dabbrev-case-replace 'case-replace
-   dabbrev-check-other-buffers t
-   dabbrev-eliminate-newlines t
    dabbrev-upcase-means-case-search t
    dabbrev-ignored-buffer-modes
    '(archive-mode image-mode docview-mode pdf-view-mode)))
@@ -1009,11 +991,8 @@ If point is at the end of the line, kill the whole line including the newline."
   :config
   (setq
    diff-refine nil  ; Disable refinement
-   diff-font-lock-prettify nil  ; Disable prettification
    diff-font-lock-syntax nil  ; Disable syntax highlighting in diffs
    diff-font-lock-leading-indicator nil  ; Disable special indicator formatting
-   diff-update-on-the-fly t
-   diff-advance-after-apply-hunk t
    diff-default-read-only t)  ; Make diff buffers read-only by default
 
   (defun kdb-diff-toggle-refine ()
@@ -1057,7 +1036,6 @@ If point is at the end of the line, kill the whole line including the newline."
   :config
   (setq
    ediff-keep-variants nil
-   ediff-make-buffers-readonly-at-startup nil
    ediff-merge-revisions-with-ancestor t
    ediff-show-clashes-only t
    ediff-split-window-function 'split-window-horizontally
@@ -1082,7 +1060,6 @@ If point is at the end of the line, kill the whole line including the newline."
    dired-vc-rename-file t
    dired-do-revert-buffer (lambda (dir) (not (file-remote-p dir)))
    dired-kill-when-opening-new-dired-buffer t
-   delete-by-moving-to-trash t
    dired-dwim-target t
    dired-ls-F-marks-symlinks t
    dired-deletion-confirmer 'y-or-n-p
@@ -1106,7 +1083,6 @@ If point is at the end of the line, kill the whole line including the newline."
   (setq
    ibuffer-expert t
    ibuffer-display-summary nil
-   ibuffer-use-other-window nil
    ibuffer-movement-cycle nil
    ibuffer-default-sorting-mode 'filename/process
    ibuffer-use-header-line t
@@ -1164,6 +1140,7 @@ If point is at the end of the line, kill the whole line including the newline."
 
 (use-package project
   :ensure nil
+  :defer t
   :config
   (setq
    vc-directory-exclusion-list (nconc vc-directory-exclusion-list '("node_modules" "elpa" ".sl"))
@@ -1248,13 +1225,16 @@ and refresh it in the background."
         completion-styles '(orderless basic)
         completion-category-overrides '((file (styles basic partial-completion))))
 
-  ;; fido-mode forces completion-styles to (flex) on every minibuffer entry.
+  ;; fido-mode forces completion-styles to (flex) on every minibuffer entry,
+  ;; puts flex in front of each category's styles, and turns off scrolling.
   ;; Override it after fido's setup hook runs.
   (defun kdb-orderless-override-fido ()
     "Restore orderless as the completion style in fido-mode."
     (when (and (bound-and-true-p icomplete-mode)
                (not (eq (car-safe completion-styles) 'orderless)))
-      (setq-local completion-styles '(orderless basic))))
+      (setq-local completion-styles '(orderless basic)
+                  completion-category-defaults nil
+                  icomplete-scroll t)))
   (add-hook 'minibuffer-setup-hook #'kdb-orderless-override-fido 10))
 
 
@@ -1286,13 +1266,11 @@ and refresh it in the background."
    completion-show-inline-help nil
    ;; completion-auto-help 'always
    completion-auto-help nil
-   completion-auto-select nil
    completions-detailed t
    completion-ignore-case t
    read-buffer-completion-ignore-case t
    completions-max-height 14
    completions-header-format nil
-   minibuffer-visible-completions nil
    enable-recursive-minibuffers t
    completions-sort 'historical
    read-answer-short t
@@ -1325,6 +1303,9 @@ and refresh it in the background."
               ("C-c c d" . eglot-find-declaration)
               ("C-c c t" . eglot-find-typeDefinition)
               ("C-c c h" . eldoc))
+  :init
+  ;; No events buffer: logging every JSON message slows big servers.
+  (setq eglot-events-buffer-config '(:size 0 :format full))
   :config
   (setq
    eglot-sync-connect 0
@@ -1332,18 +1313,14 @@ and refresh it in the background."
    eglot-autoshutdown t
    eglot-extend-to-xref t
    eglot-ignored-server-capabilities '(:hoverProvider
-                                       :documentHighlightProvider)
-   ;; Windows-specific optimization
-   eglot-events-buffer-size (if (eq system-type 'windows-nt) 0 2000000))
-  
+                                       :documentHighlightProvider))
+
   ;; Language Servers
   (add-to-list 'eglot-server-programs '((csharp-mode csharp-ts-mode) . ("csharp-ls")))
   (add-to-list 'eglot-server-programs '(typescript-ts-mode . ("typescript-language-server" "--stdio")))
   (add-to-list 'eglot-server-programs '(html-ts-mode . ("vscode-html-language-server" "--stdio")))
   (add-to-list 'eglot-server-programs '(css-ts-mode . ("vscode-css-language-server" "--stdio")))
   (add-to-list 'eglot-server-programs '(json-ts-mode . ("vscode-json-language-server" "--stdio")))
-  (add-to-list 'eglot-server-programs '(rust-ts-mode . ("rust-analyzer")))
-  (add-to-list 'eglot-server-programs '(zig-ts-mode . ("zls")))
   (add-to-list 'eglot-server-programs '((c++-ts-mode c-ts-mode)
                                         . ("clangd"
                                            "-j=8"
@@ -1389,8 +1366,6 @@ and refresh it in the background."
    flymake-suppress-zero-counters t
    flymake-no-changes-timeout 0.5 ; Small delay helps performance
    flymake-wrap-around nil
-   flymake-start-on-save-buffer t
-   flymake-start-on-flymake-mode t
    flymake-start-on-newline nil ; Don't check on every newline
    flymake-mode-line-format
    '("" flymake-mode-line-exception flymake-mode-line-counters)
@@ -1450,15 +1425,15 @@ and refresh it in the background."
 
 ;; Exec Path From Shell ==================================== ;;
 
-(use-package exec-path-from-shell
-  :ensure t
-  :if (eq system-type 'darwin)
-  :init
-  (setq exec-path-from-shell-variables '("PATH" "SSH_AUTH_SOCK")
-        exec-path-from-shell-debug nil
-        exec-path-from-shell-check-startup-files nil)
-  :config
-  (exec-path-from-shell-initialize))
+;; `when', not :if: :ensure installs the package before :if is checked.
+(when (eq system-type 'darwin)
+  (use-package exec-path-from-shell
+    :ensure t
+    :init
+    (setq exec-path-from-shell-variables '("PATH" "SSH_AUTH_SOCK")
+          exec-path-from-shell-check-startup-files nil)
+    :config
+    (exec-path-from-shell-initialize)))
 
 
 ;; Tools installed in the user profile (opencode's installer, npm's global
@@ -1785,6 +1760,12 @@ and refresh it in the background."
   :mode "\\.csproj\\'")
 
 
+;; PowerShell ============================================== ;;
+
+(use-package powershell
+  :mode ("\\.ps[dm]?1\\'" . powershell-mode))
+
+
 ;; Conf Mode =============================================== ;;
 
 (use-package conf-mode
@@ -1889,20 +1870,18 @@ again when eat's source changes; kept out of eat's own checkout."
 
 ;; EXWM (Window Manager) =================================== ;;
 
-;; Load EXWM early if we're in X11 session
-(use-package exwm
-  :ensure t
-  :if (memq window-system '(x))
-  :defer t
-  :config
-  ;; Shrink fringes to 1 pixel
-  (fringe-mode 1))
-
 ;; Only when Emacs is the window manager: init-exwm binds s-t, s-p, s-x and
 ;; the other launcher keys globally, which under StumpWM etc. take over
-;; keys meant for Emacs (s-t's theme cycle).
+;; keys meant for Emacs (s-t's theme cycle).  `when', not :if, which
+;; :ensure ignores: exwm got installed everywhere.
 (when (and (memq window-system '(x))
            (equal (getenv "DESKTOP_SESSION") "exwm"))
+  (use-package exwm
+    :ensure t
+    :defer t
+    :config
+    ;; Shrink fringes to 1 pixel
+    (fringe-mode 1))
   (require 'init-exwm))
 
 ;; Tab Bar (Workspaces) ==================================== ;;
@@ -1911,8 +1890,7 @@ again when eat's source changes; kept out of eat's own checkout."
   :ensure nil
   :hook (after-init . tab-bar-mode)
   :config
-  (setq tab-bar-show t
-        tab-bar-close-button-show nil
+  (setq tab-bar-close-button-show nil
         tab-bar-new-button-show nil
         tab-bar-tab-hints t)           ; Show tab numbers in tab names
   ;; Unless EXWM already put its workspace and clock there.

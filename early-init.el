@@ -12,7 +12,10 @@
 ;; Maximize GC threshold during startup, restore after
 (setq gc-cons-threshold most-positive-fixnum
       gc-cons-percentage 0.6
-      read-process-output-max (* 1024 1024))
+      read-process-output-max (* 1024 1024)
+      ;; Read language-server and agent output as it arrives, not after
+      ;; growing delays when it comes in small chunks.
+      process-adaptive-read-buffering nil)
 
 (add-hook 'emacs-startup-hook
           (lambda ()
@@ -33,6 +36,10 @@ PATH, which shell commands use, gets Windows-style backslashes on Windows."
     (add-to-list 'exec-path dir)
     (setenv "PATH" (concat (if (eq system-type 'windows-nt) (subst-char-in-string ?/ ?\\ dir) dir)
                            path-separator (getenv "PATH")))))
+
+;; ELPA's old csharp-mode 2.0 shadows the built-in one, which has
+;; csharp-ts-mode; `package-install-upgrade-built-in' keeps reinstalling it.
+(setq package-load-list '(all (csharp-mode nil)))
 
 ;; Windows: file and process I/O is the bottleneck there
 (when (eq system-type 'windows-nt)
@@ -77,17 +84,16 @@ PATH, which shell commands use, gets Windows-style backslashes on Windows."
       frame-inhibit-implied-resize t
       frame-title-format '("%b")
       ring-bell-function 'ignore
-      visible-bell nil
-      use-dialog-box t
       use-file-dialog nil
       use-short-answers t
       initial-scratch-message nil
-      inhibit-splash-screen t
       inhibit-startup-screen t
       inhibit-x-resources t
-      inhibit-startup-echo-area-message user-login-name
-      inhibit-startup-buffer-menu t
-      package-enable-at-startup t)
+      inhibit-startup-buffer-menu t)
+
+;; inhibit-startup-echo-area-message only works as a literal setq of the
+;; login name in init.el, and the login differs per machine.
+(fset 'display-startup-echo-area-message #'ignore)
 
 ;; Local Variables:
 ;; no-byte-compile: t
