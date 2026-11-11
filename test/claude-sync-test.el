@@ -294,7 +294,7 @@ under a path limit that makes LONG's transcripts too long to open."
               ((symbol-function 'kdb-claude--live-sessions)
                (lambda () `(("a" . ,shown) ("b" . ,elsewhere) ("c" . ,hidden))))
               ((symbol-function 'tab-bar-tabs)
-               (lambda () '((current-tab (name . "mine")) (tab (name . "api work")))))
+               (lambda (&rest _) '((current-tab (name . "mine")) (tab (name . "api work")))))
               ((symbol-function 'agent-shell-attention--tab-displays-buffer-p)
                (lambda (tab buf) (and (equal (alist-get 'name tab) "api work") (eq buf elsewhere)))))
       (let ((tab-bar-mode t) (kdb-claude--history-filter nil))
@@ -302,7 +302,10 @@ under a path limit that makes LONG's transcripts too long to open."
                  (mapcar (lambda (e) (list (aref (cadr e) 0) (aref (cadr e) 4) (aref (cadr e) 5)))
                          (kdb-claude--history-entries))
                  '(("● here" "main" "a") ("● api work" "⑂ feature" "b")
-                   ("● no tab" "main" "c") ("" "" "d"))))))
+                   ("● no tab" "main" "c") ("" "" "d"))))
+        ;; The session the history opened over is still here, under it.
+        (let ((kdb-claude--history-from hidden))
+          (should (equal (kdb-claude--session-place hidden) "● here")))))
     (mapc #'kill-buffer (list shown elsewhere hidden))
     (dolist (d (list archive main wt)) (delete-directory d t))))
 

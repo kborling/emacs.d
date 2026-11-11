@@ -473,18 +473,29 @@ is any other program on Claude's SDK, such as claude -p with JSON output.")
 
 (declare-function agent-shell-attention--tab-displays-buffer-p "agent-shell-attention")
 
+(defvar-local kdb-claude--history-from nil
+  "The buffer the history replaced in its window, which is still \"here\".")
+
 (defun kdb-claude--session-place (buf)
-  "Where open session BUF is, for the history: in this tab, which tab, or none."
-  (or (and (buffer-live-p buf) (get-buffer-window buf) "● here")
-      (and (bound-and-true-p tab-bar-mode)
-           (fboundp 'agent-shell-attention--tab-displays-buffer-p)
-           (buffer-live-p buf)
-           (when-let* ((tab (seq-find (lambda (tab)
-                                        (and (not (eq (car tab) 'current-tab))
-                                             (agent-shell-attention--tab-displays-buffer-p tab buf)))
-                                      (tab-bar-tabs))))
-             (concat "● " (alist-get 'name tab))))
-      "● no tab"))
+  "Where open session BUF is: \"● here\" in this tab (under the history
+too), \"● TAB\" for the tab showing it, in any frame, else \"● no tab\"."
+  (if (not (buffer-live-p buf))
+      "● no tab"
+    (or (and (or (get-buffer-window buf) (eq buf kdb-claude--history-from)) "● here")
+        ;; Other frames' current tabs are their windows; their other tabs,
+        ;; like this frame's, are saved window states.
+        (seq-some (lambda (frame)
+                    (or (and (not (eq frame (selected-frame)))
+                             (get-buffer-window buf frame)
+                             (concat "● " (alist-get 'name (tab-bar--current-tab nil frame))))
+                        (and (fboundp 'agent-shell-attention--tab-displays-buffer-p)
+                             (when-let* ((tab (seq-find (lambda (tab)
+                                                          (and (not (eq (car tab) 'current-tab))
+                                                               (agent-shell-attention--tab-displays-buffer-p tab buf)))
+                                                        (tab-bar-tabs frame))))
+                               (concat "● " (alist-get 'name tab))))))
+                  (seq-remove (lambda (f) (frame-parameter f 'parent-frame)) (frame-list)))
+        "● no tab")))
 
 (defun kdb-claude--history-branch (header worktrees)
   "The branch in HEADER, marked ⑂ when its directory is a worktree.
@@ -589,11 +600,13 @@ onto a session shows its last message, size, branch and directory.
   "List every past Claude session — Claude Code and imported Desktop chats.
 Shows the archive as it is, then redraws once a background sync is done."
   (interactive)
-  (with-current-buffer (get-buffer-create "*Claude History*")
-    (kdb-claude-history-mode)
-    (tabulated-list-print)
-    (pop-to-buffer-same-window (current-buffer))
-    (kdb-claude--history-refresh)))
+  (let ((from (window-buffer)))
+    (with-current-buffer (get-buffer-create "*Claude History*")
+      (kdb-claude-history-mode)
+      (setq kdb-claude--history-from from)
+      (tabulated-list-print)
+      (pop-to-buffer-same-window (current-buffer))
+      (kdb-claude--history-refresh))))
 
 (defun kdb-claude--history-refresh ()
   "Sync in the background, then redraw this history buffer."
