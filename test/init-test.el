@@ -57,6 +57,25 @@
                            "tok" "require")
                       seen)))))
 
+(ert-deftest sql-connect-from-a-script-stays-in-the-script ()
+  (require 'sql)
+  (let ((kdb-sql-connections '(("ms" :product ms :server "s" :database "d")))
+        (script (generate-new-buffer "script.sql")))
+    (cl-letf (((symbol-function 'kdb-sql--vscode-connections) #'ignore)
+              ((symbol-function 'sql-ms)
+               ;; As sql-product-interactive does: the SQLi buffer popped and current.
+               (lambda (name) (pop-to-buffer (get-buffer-create name)))))
+      (unwind-protect
+          (save-window-excursion
+            (switch-to-buffer script)
+            (sql-mode)
+            (kdb-sql-connect "ms")
+            (should (eq (window-buffer (selected-window)) script))
+            (should (eq (buffer-local-value 'sql-product script) 'ms))
+            (should (get-buffer-window "*SQL: ms*")))
+        (kill-buffer script)
+        (kill-buffer "*SQL: ms*")))))
+
 (ert-deftest sql-run-sends-the-region-or-the-whole-script ()
   (require 'sql)
   (let (sent)

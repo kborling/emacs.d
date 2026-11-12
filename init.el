@@ -925,7 +925,8 @@ previous connection's values: what made connecting work only sometimes."
    (list (completing-read "Connection: "
                           (mapcar #'car (append kdb-sql-connections (kdb-sql--vscode-connections))))))
   (require 'sql)
-  (let* ((conn (or (cdr (assoc name (append kdb-sql-connections (kdb-sql--vscode-connections))))
+  (let* ((from (current-buffer))         ; sql-ms/sql-postgres make the SQLi buffer current
+         (conn (or (cdr (assoc name (append kdb-sql-connections (kdb-sql--vscode-connections))))
                    (let ((product (intern (completing-read "Product: " '("ms" "postgres") nil t))))
                      (list :product product
                            :server (read-string "Server: ")
@@ -969,8 +970,12 @@ previous connection's values: what made connecting work only sometimes."
          (sql-postgres buf-name)))
       (other (user-error "Unknown :product %S for %s" other name)))
     ;; Highlight the script for the product it now runs on.
-    (when (derived-mode-p 'sql-mode)
-      (sql-set-product (plist-get conn :product)))))
+    ;; Back to the script, the results showing beside it: connecting moves
+    ;; point to the empty SQLi buffer, which looks like a query that failed.
+    (when (with-current-buffer from (derived-mode-p 'sql-mode))
+      (with-current-buffer from (sql-set-product (plist-get conn :product)))
+      (when-let* ((win (get-buffer-window from)))
+        (select-window win)))))
 
 (defun kdb-sql-send-dwim ()
   "Run the region, or else the whole buffer, as VS Code does.
