@@ -307,7 +307,13 @@ itself shows messages as usual.  For `set-message-functions'."
         recentf-auto-cleanup 'never
         recentf-autosave-interval 300
         recentf-exclude '(".gz" ".xz" ".zip" "/elpa/" "/opt/" "/.rustup/" "/ssh:" "/sudo:" "/node_modules/" "/nix/"))
-  (run-with-idle-timer 1 nil #'recentf-mode))
+  (run-with-idle-timer 1 nil #'recentf-mode)
+  :config
+  ;; recentf-autosave-interval is new in Emacs 31; before it, a timer of our
+  ;; own, in a defvar so a reload adds no second one.
+  (when (< emacs-major-version 31)
+    (defvar kdb-recentf-save-timer
+      (run-at-time 300 300 (lambda () (let ((inhibit-message t)) (recentf-save-list)))))))
 
 ;; Save Place ============================================== ;;
 
