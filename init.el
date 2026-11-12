@@ -1647,13 +1647,29 @@ and refresh it in the background."
 ;; would remap languages without a grammar too, which then ask to install
 ;; one on every visit.  Calling the setter directly avoids loading cus-edit.
 (when (and (require 'treesit nil t) (treesit-available-p))
-  (let ((langs '((csharp . c-sharp) (js . javascript) (c++ . cpp) (c-or-c++ . cpp)
-                 (mhtml . html) (go-mod . gomod) (go-work . gowork))))
-    (funcall (get 'treesit-enabled-modes 'custom-set) 'treesit-enabled-modes
-             (seq-filter (lambda (mode)
-                           (let ((name (intern (string-remove-suffix "-ts-mode" (symbol-name mode)))))
-                             (treesit-language-available-p (alist-get name langs name))))
-                         (seq-uniq (mapcar #'cdr treesit-major-mode-remap-alist))))))
+  (let* ((langs '((csharp . c-sharp) (js . javascript) (c++ . cpp) (c-or-c++ . cpp)
+                  (mhtml . html) (go-mod . gomod) (go-work . gowork)))
+         (grammar-p (lambda (mode)
+                      (let ((name (intern (string-remove-suffix "-ts-mode" (symbol-name mode)))))
+                        (and (fboundp mode) (treesit-language-available-p (alist-get name langs name)))))))
+    (if (boundp 'treesit-major-mode-remap-alist)
+        (funcall (get 'treesit-enabled-modes 'custom-set) 'treesit-enabled-modes
+                 (seq-filter grammar-p (seq-uniq (mapcar #'cdr treesit-major-mode-remap-alist))))
+      ;; Before Emacs 31 there's no remap registry, and the modes with no
+      ;; older mode to replace aren't in auto-mode-alist: both by hand.
+      (dolist (remap '((c-mode . c-ts-mode) (c++-mode . c++-ts-mode) (c-or-c++-mode . c-or-c++-ts-mode)
+                       (csharp-mode . csharp-ts-mode) (js-mode . js-ts-mode) (javascript-mode . js-ts-mode)
+                       (js-json-mode . json-ts-mode) (css-mode . css-ts-mode) (python-mode . python-ts-mode)
+                       (sh-mode . bash-ts-mode) (java-mode . java-ts-mode) (ruby-mode . ruby-ts-mode)
+                       (conf-toml-mode . toml-ts-mode)))
+        (when (funcall grammar-p (cdr remap))
+          (add-to-list 'major-mode-remap-alist remap)))
+      (dolist (mode '(("\\.ts\\'" . typescript-ts-mode) ("\\.tsx\\'" . tsx-ts-mode)
+                      ("\\.ya?ml\\'" . yaml-ts-mode) ("\\.rs\\'" . rust-ts-mode)
+                      ("\\.go\\'" . go-ts-mode) ("/go\\.mod\\'" . go-mod-ts-mode)
+                      ("\\(?:Dockerfile\\|\\.dockerfile\\)\\'" . dockerfile-ts-mode)))
+        (when (funcall grammar-p (cdr mode))
+          (add-to-list 'auto-mode-alist mode))))))
 
 ;; Grammar sources for treesit-install-language-grammar
 (with-eval-after-load 'treesit
