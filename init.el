@@ -526,8 +526,9 @@ be found until the first emacsclient frame opens."
             ;; Development
             ("Node.js (npm)" "npm" nil "Angular LSP, JS tooling")
             ("eglot-booster" "emacs-lsp-booster" nil "Faster LSP")
-            ("sqlcmd" "sqlcmd" nil "Azure SQL (or go-sqlcmd)")
-            ("go-sqlcmd" "go-sqlcmd" nil "Azure SQL (alternative)")
+            ("sqlcmd" "sqlcmd" nil "Azure SQL (the Go sqlcmd: winget install sqlcmd, brew install sqlcmd)")
+            ("psql" "psql" nil "PostgreSQL")
+            ("az" "az" nil "Azure CLI: signs in to Azure SQL and PostgreSQL")
             ;; Document conversion
             ("Pandoc" "pandoc" nil "DOCX/PDF export")
             ("ssconvert" "ssconvert" nil "Excel conversion (gnumeric)")
@@ -858,61 +859,130 @@ If point is at the end of the line, kill the whole line including the newline."
 
 ;; SQL Mode ================================================ ;;
 
+;; Azure SQL and Azure Database for PostgreSQL, signed in with Entra ID
+;; through the Azure CLI (az login), the way VS Code's mssql extension and
+;; `psql' with an az token do.  C-c C-a connects, C-c C-c runs the region
+;; or paragraph.
+
+(defvar kdb-sql-connections nil
+  "Saved connections for `kdb-sql-connect', as (NAME . PLIST); set in personal.el.
+PLIST has :product, `ms' (Azure SQL) or `postgres', :server, :database,
+and for postgres :user, the Entra user or group the server knows (and
+:port, default 5432).  VS Code's saved mssql connections are offered too:
+  (setq kdb-sql-connections
+        \\='((\"dev\" :product ms :server \"dev.database.windows.net\" :database \"app\")
+          (\"pg-dev\" :product postgres :server \"pg-dev.postgres.database.azure.com\"
+           :database \"postgres\" :user \"db-admins\")))")
+
+(defvar kdb-sql--args nil
+  "The exact program arguments for the connection being started.")
+
+(defun kdb-sql--comint (product options &optional buf-name)
+  "Start PRODUCT's interpreter with `kdb-sql--args' when set.
+sql.el's own builders add -E (Windows sign-in) to sqlcmd when there is no
+user or password, which overrides Entra ID, and fill in -S/-d/-U from the
+previous connection's values: what made connecting work only sometimes."
+  (if kdb-sql--args
+      (sql-comint product kdb-sql--args buf-name)
+    (funcall (if (eq product 'ms) #'sql-comint-ms #'sql-comint-postgres)
+             product options buf-name)))
+
+(defun kdb-sql--vscode-connections ()
+  "VS Code's saved mssql connections, as in `kdb-sql-connections'."
+  (let ((file (expand-file-name
+               "Code/User/settings.json"
+               (pcase system-type
+                 ('windows-nt (getenv "APPDATA"))
+                 ('darwin "~/Library/Application Support")
+                 (_ "~/.config")))))
+    (when (file-readable-p file)
+      (with-temp-buffer
+        (insert-file-contents file)
+        ;; JSON with comments and trailing commas, as VS Code writes it.
+        (goto-char (point-min))
+        (while (re-search-forward "^[ \t]*//.*$" nil t) (replace-match ""))
+        (goto-char (point-min))
+        (while (re-search-forward ",\\([ \t\n]*[]}]\\)" nil t) (replace-match "\\1"))
+        (goto-char (point-min))
+        (when-let* ((json (ignore-errors (json-parse-buffer :object-type 'alist :array-type 'list))))
+          (mapcar (lambda (c)
+                    (let-alist c
+                      (list (format "%s (VS Code)" (or .profileName .server))
+                            :product 'ms :server .server :database .database
+                            :user (and (equal .authenticationType "SqlLogin") .user))))
+                  (alist-get 'mssql.connections json)))))))
+
+(defun kdb-sql--az-token ()
+  "An Entra ID token for Azure Database for PostgreSQL, from the Azure CLI."
+  (condition-case nil
+      (car (process-lines "az" "account" "get-access-token" "--resource-type" "oss-rdbms"
+                          "--query" "accessToken" "-o" "tsv"))
+    (error (user-error "No token from the Azure CLI: run az login, then connect again"))))
+
+(defun kdb-sql-connect (name)
+  "Connect to the saved database NAME, or a new one typed in."
+  (interactive
+   (list (completing-read "Connection: "
+                          (mapcar #'car (append kdb-sql-connections (kdb-sql--vscode-connections))))))
+  (require 'sql)
+  (let* ((conn (or (cdr (assoc name (append kdb-sql-connections (kdb-sql--vscode-connections))))
+                   (let ((product (intern (completing-read "Product: " '("ms" "postgres") nil t))))
+                     (list :product product
+                           :server (read-string "Server: ")
+                           :database (read-string "Database: ")
+                           :user (and (eq product 'postgres) (read-string "Entra user or group: "))))))
+         (server (plist-get conn :server))
+         (database (plist-get conn :database))
+         (user (plist-get conn :user))
+         (buf-name (format "*SQL: %s*" name)))
+    (pcase (plist-get conn :product)
+      ('ms
+       ;; Long options with =: the Go sqlcmd quietly falls back to Windows
+       ;; sign-in when they're mixed with -G or follow -d.
+       (let* ((kdb-sql--args
+               (append (list (concat "--server=" server))
+                       (if user
+                           (list (concat "--user-name=" user))
+                         (list "--authentication-method=ActiveDirectoryAzCli"))
+                       (unless (seq-empty-p database) (list (concat "--database-name=" database)))
+                       ;; Columns as wide as their values, not their types
+                       (list "-W")))
+              (process-environment
+               (if user
+                   (cons (concat "SQLCMDPASSWORD=" (read-passwd (format "Password for %s: " user)))
+                         process-environment)
+                 process-environment)))
+         (sql-ms buf-name)))
+      ('postgres
+       (let ((kdb-sql--args (list "-X" "-P" "pager=off" "-h" server
+                                  "-p" (number-to-string (or (plist-get conn :port) 5432))
+                                  "-U" user "-d" database))
+             ;; Read at sign-in only, so an expired token doesn't end the session.
+             (process-environment (append (list (concat "PGPASSWORD=" (kdb-sql--az-token))
+                                                "PGSSLMODE=require")
+                                          process-environment)))
+         (sql-postgres buf-name)))
+      (other (user-error "Unknown :product %S for %s" other name)))))
+
+(defun kdb-sql-send-dwim ()
+  "Send the region, or the paragraph, to the SQL process."
+  (interactive)
+  (if (use-region-p)
+      (sql-send-region (region-beginning) (region-end))
+    (sql-send-paragraph)))
+
 (use-package sql
   :ensure nil
   :defer t
   :config
-  (setq sql-ms-program (or (executable-find "sqlcmd")
-                           (executable-find "go-sqlcmd")
-                           "sqlcmd"))
-
-  ;; Azure SQL connection helper
-  (defun kdb-sql-azure (server database)
-    "Connect to Azure SQL SERVER/DATABASE using managed identity."
-    (interactive
-     (list (read-string "Server (e.g. myserver.database.windows.net): ")
-           (read-string "Database: ")))
-    (kdb-sql-connect-internal server database))
-
-  (defvar kdb-sql-connections nil
-    "Alist of named Azure SQL connections. Set in personal.el:
-  (setq kdb-sql-connections
-        \\='((\"prod\" :server \"prod.database.windows.net\" :database \"mydb\")
-          (\"dev\"  :server \"dev.database.windows.net\"  :database \"mydb-dev\")))")
-
-  (defun kdb-sql-connect ()
-    "Connect to a saved Azure SQL database."
-    (interactive)
-    (if (null kdb-sql-connections)
-        (call-interactively #'kdb-sql-azure)
-      (let* ((name (completing-read "Connection: "
-                                    (mapcar #'car kdb-sql-connections) nil t))
-             (conn (cdr (assoc name kdb-sql-connections)))
-             (server (plist-get conn :server))
-             (database (plist-get conn :database)))
-        (kdb-sql-connect-internal server database name))))
-
-  (defun kdb-sql-connect-internal (server database &optional name)
-    "Connect to Azure SQL SERVER/DATABASE with optional buffer NAME."
-    ;; Server and database are in the options: no login prompts.
-    (let ((sql-ms-login-params nil)
-          (sql-ms-options
-           (cond
-            ;; go-sqlcmd supports --authentication-method
-            ((executable-find "go-sqlcmd")
-             (list "-S" server "-d" database "--authentication-method" "ActiveDirectoryDefault"))
-            ;; sqlcmd with -G for Azure AD
-            (t (list "-S" server "-d" database "-G")))))
-      (sql-ms (format "*SQL: %s*" (or name database)))))
-
-  ;; Send region/paragraph to SQL and show results
-  (defun kdb-sql-send-dwim ()
-    "Send region, paragraph, or buffer to SQL process."
-    (interactive)
-    (cond
-     ((use-region-p) (sql-send-region (region-beginning) (region-end)))
-     (t (sql-send-paragraph))))
-
+  (setq sql-ms-program (or (executable-find "sqlcmd") "sqlcmd")
+        ;; sqlcmd runs nothing until GO, psql nothing until ;
+        sql-send-terminator t
+        ;; No login prompts: kdb-sql-connect has everything
+        sql-ms-login-params nil
+        sql-postgres-login-params nil)
+  (dolist (product '(ms postgres))
+    (sql-set-product-feature product :sqli-comint-func #'kdb-sql--comint))
   :bind (:map sql-mode-map
               ("C-c C-c" . kdb-sql-send-dwim)
               ("C-c C-a" . kdb-sql-connect)))
