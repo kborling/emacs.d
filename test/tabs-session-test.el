@@ -4,6 +4,11 @@
 ;;   -f ert-run-tests-batch-and-exit
 ;; Uses a temporary session file; the real ~/.emacs.d/tabsession.el is untouched.
 
+;; These open, close and reset tabs and windows, and kill buffers: loaded
+;; into a working Emacs they wipe its tabs.
+(unless noninteractive
+  (user-error "Run %s in batch Emacs (emacs --batch), not in a live one"
+              (file-name-nondirectory (or load-file-name buffer-file-name "these tests"))))
 (require 'ert)
 (require 'tabspaces)
 (require 'init-claude-workflow)
