@@ -907,7 +907,7 @@ previous connection's values: what made connecting work only sometimes."
         (when-let* ((json (ignore-errors (json-parse-buffer :object-type 'alist :array-type 'list))))
           (mapcar (lambda (c)
                     (let-alist c
-                      (list (format "%s (VS Code)" (or .profileName .server))
+                      (list (or .profileName .server)
                             :product 'ms :server .server :database .database
                             :user (and (equal .authenticationType "SqlLogin") .user))))
                   (alist-get 'mssql.connections json)))))))
@@ -954,7 +954,9 @@ A SQL login (ms with USER) isn't listed: it would ask for the password twice."
   "Connect to the saved database NAME, or a new one typed in."
   (interactive
    (list (completing-read "Connection: "
-                          (mapcar #'car (append kdb-sql-connections (kdb-sql--vscode-connections))))))
+                          ;; A saved one of the same name comes first and wins.
+                          (delete-dups (mapcar #'car (append kdb-sql-connections
+                                                             (kdb-sql--vscode-connections)))))))
   (require 'sql)
   (let* ((from (current-buffer))         ; sql-ms/sql-postgres make the SQLi buffer current
          (conn (or (cdr (assoc name (append kdb-sql-connections (kdb-sql--vscode-connections))))

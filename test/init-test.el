@@ -145,8 +145,8 @@ SELECT @x;
     (cl-letf (((symbol-function 'getenv) (lambda (v &rest _) (and (equal v "APPDATA") dir))))
       (let ((system-type 'windows-nt))
         (should (equal (kdb-sql--vscode-connections)
-                       '(("Dev (VS Code)" :product ms :server "s" :database "d" :user nil)
-                         ("t (VS Code)" :product ms :server "t" :database "" :user "u"))))))
+                       '(("Dev" :product ms :server "s" :database "d" :user nil)
+                         ("t" :product ms :server "t" :database "" :user "u"))))))
     (delete-directory dir t)))
 
 (ert-deftest term-buffer-closes-after-terms-own-sentinel ()
