@@ -34,7 +34,8 @@
               ((symbol-function 'kdb-sql--vscode-connections) #'ignore)
               ((symbol-function 'kdb-sql--az-token) (lambda () "tok"))
               ((symbol-function 'read-passwd) (lambda (&rest _) "pw"))
-              ;; No database saved: asked, and RET keeps the server's default.
+              ;; No database saved and none listed: asked, RET keeps the default.
+              ((symbol-function 'kdb-sql--databases) #'ignore)
               ((symbol-function 'read-string) (lambda (&rest _) "")))
       (let ((kdb-sql-connections
              '(("ms" :product ms :server "s" :database "d")
@@ -75,6 +76,35 @@
             (should (get-buffer-window "*SQL: ms*")))
         (kill-buffer script)
         (kill-buffer "*SQL: ms*")))))
+
+(ert-deftest sql-database-picked-from-the-server-and-switched ()
+  (require 'sql)
+  (let ((kdb-sql-connections '(("ms" :product ms :server "s" :database "")
+                               ("pg" :product postgres :server "h" :database "postgres" :user "u")))
+        listed sent)
+    (cl-letf (((symbol-function 'kdb-sql--vscode-connections) #'ignore)
+              ((symbol-function 'kdb-sql--az-token) (lambda () "tok"))
+              ((symbol-function 'kdb-sql--databases)
+               (lambda (product server user) (push (list product server user) listed) '("A" "B]x")))
+              ((symbol-function 'completing-read) (lambda (_prompt coll &rest _) (car (last coll))))
+              ((symbol-function 'sql-send-string) (lambda (s) (push s sent)))
+              ((symbol-function 'sql-ms) (lambda (name) (set-buffer (get-buffer-create name)) (sql-interactive-mode)))
+              ((symbol-function 'sql-postgres) (lambda (name) (set-buffer (get-buffer-create name)) (sql-interactive-mode))))
+      (unwind-protect
+          (progn
+            ;; No database saved: picked from the server's list.
+            (kdb-sql-connect "ms")
+            (should (equal listed '((ms "s" nil))))
+            (with-current-buffer "*SQL: ms*"
+              (should (equal (plist-get kdb-sql--conn :database) "B]x"))
+              (call-interactively #'kdb-sql-use-database)
+              (should (equal (car sent) "USE [B]]x];")))
+            (kdb-sql-connect "pg")
+            (with-current-buffer "*SQL: pg*"
+              (kdb-sql-use-database "other")
+              (should (equal (car sent) "\\connect other"))
+              (should (equal (plist-get kdb-sql--conn :database) "other"))))
+        (dolist (b '("*SQL: ms*" "*SQL: pg*")) (when (get-buffer b) (kill-buffer b)))))))
 
 (ert-deftest sql-run-sends-the-region-or-the-whole-script ()
   (require 'sql)

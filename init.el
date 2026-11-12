@@ -862,7 +862,7 @@ If point is at the end of the line, kill the whole line including the newline."
 ;; Azure SQL and Azure Database for PostgreSQL, signed in with Entra ID
 ;; through the Azure CLI (az login), the way VS Code's mssql extension and
 ;; `psql' with an az token do.  C-c C-a connects, C-c C-c runs the region
-;; or paragraph.
+;; or the whole script, C-c C-u switches database.
 
 (defvar kdb-sql-connections nil
   "Saved connections for `kdb-sql-connect', as (NAME . PLIST); set in personal.el.
@@ -919,6 +919,37 @@ previous connection's values: what made connecting work only sometimes."
                           "--query" "accessToken" "-o" "tsv"))
     (error (user-error "No token from the Azure CLI: run az login, then connect again"))))
 
+(defvar-local kdb-sql--conn nil
+  "In a SQLi buffer, the connection it was started with, database included.")
+
+(defun kdb-sql--databases (product server user)
+  "The databases on SERVER that USER can open, or nil if they can't be listed.
+A SQL login (ms with USER) isn't listed: it would ask for the password twice."
+  (ignore-errors
+    (seq-remove
+     #'string-empty-p
+     (pcase product
+       ('ms (unless user
+              (process-lines (or (bound-and-true-p sql-ms-program) "sqlcmd")
+                             (concat "--server=" server)
+                             "--authentication-method=ActiveDirectoryAzCli"
+                             (concat "--query=SET NOCOUNT ON; SELECT name FROM sys.databases"
+                                     " WHERE state_desc = 'ONLINE' ORDER BY name")
+                             "-h" "-1" "-W")))
+       ('postgres
+        (let ((process-environment (append (list (concat "PGPASSWORD=" (kdb-sql--az-token))
+                                                 "PGSSLMODE=require")
+                                           process-environment)))
+          (process-lines "psql" "-X" "-At" "-h" server "-U" user "-d" "postgres" "-c"
+                         (concat "SELECT datname FROM pg_database"
+                                 " WHERE datallowconn AND NOT datistemplate ORDER BY 1"))))))))
+
+(defun kdb-sql--pick-database (product server user)
+  "Ask for a database on SERVER, from its list when it can be read."
+  (if-let* ((dbs (kdb-sql--databases product server user)))
+      (completing-read (format "Database on %s: " server) dbs nil t)
+    (read-string (format "Database on %s (RET for its default): " server))))
+
 (defun kdb-sql-connect (name)
   "Connect to the saved database NAME, or a new one typed in."
   (interactive
@@ -930,16 +961,16 @@ previous connection's values: what made connecting work only sometimes."
                    (let ((product (intern (completing-read "Product: " '("ms" "postgres") nil t))))
                      (list :product product
                            :server (read-string "Server: ")
-                           :database (read-string "Database: ")
+                           :database (read-string "Database (RET to pick from the server): ")
                            :user (and (eq product 'postgres) (read-string "Entra user or group: "))))))
          (server (plist-get conn :server))
          ;; VS Code leaves it to a dropdown; without one the server's
          ;; default database is used, and the script's tables aren't there.
+         (user (plist-get conn :user))
          (database (let ((d (plist-get conn :database)))
                      (if (seq-empty-p d)
-                         (read-string (format "Database on %s (RET for its default): " server))
+                         (kdb-sql--pick-database (plist-get conn :product) server user)
                        d)))
-         (user (plist-get conn :user))
          (buf-name (format "*SQL: %s*" name)))
     (pcase (plist-get conn :product)
       ('ms
@@ -969,6 +1000,9 @@ previous connection's values: what made connecting work only sometimes."
                                           process-environment)))
          (sql-postgres buf-name)))
       (other (user-error "Unknown :product %S for %s" other name)))
+    (when-let* ((sqli (get-buffer buf-name)))
+      (with-current-buffer sqli
+        (setq kdb-sql--conn (plist-put (copy-sequence conn) :database database))))
     ;; Highlight the script for the product it now runs on.
     ;; Back to the script, the results showing beside it: connecting moves
     ;; point to the empty SQLi buffer, which looks like a query that failed.
@@ -976,6 +1010,31 @@ previous connection's values: what made connecting work only sometimes."
       (with-current-buffer from (sql-set-product (plist-get conn :product)))
       (when-let* ((win (get-buffer-window from)))
         (select-window win)))))
+
+(defun kdb-sql-use-database (database)
+  "Switch the connected session to DATABASE, picked from the server's list.
+From a script, its session; from a SQLi buffer, that one."
+  (interactive
+   (let* ((sqli (kdb-sql--session))
+          (conn (or (buffer-local-value 'kdb-sql--conn sqli)
+                    (user-error "%s wasn't started by kdb-sql-connect" (buffer-name sqli)))))
+     (list (kdb-sql--pick-database (plist-get conn :product) (plist-get conn :server)
+                                   (plist-get conn :user)))))
+  (let ((sqli (kdb-sql--session)))
+    (with-current-buffer sqli
+      (setq kdb-sql--conn (plist-put kdb-sql--conn :database database))
+      (sql-send-string (if (eq (plist-get kdb-sql--conn :product) 'postgres)
+                           ;; psql reconnects with the az token it started with,
+                           ;; good for about an hour; after that, connect again.
+                           (format "\\connect %s" database)
+                         (format "USE [%s];" (string-replace "]" "]]" database)))))
+    (message "%s: now on %s" (buffer-name sqli) database)))
+
+(defun kdb-sql--session ()
+  "The SQLi buffer for the current buffer: itself, or its script's session."
+  (cond ((derived-mode-p 'sql-interactive-mode) (current-buffer))
+        ((and (boundp 'sql-buffer) (sql-buffer-live-p sql-buffer)) (get-buffer sql-buffer))
+        (t (user-error "Not connected: C-c C-a first"))))
 
 (defun kdb-sql-send-dwim ()
   "Run the region, or else the whole buffer, as VS Code does.
@@ -1000,7 +1059,8 @@ often with blank lines between, have to go as one batch."
     (sql-set-product-feature product :sqli-comint-func #'kdb-sql--comint))
   :bind (:map sql-mode-map
               ("C-c C-c" . kdb-sql-send-dwim)
-              ("C-c C-a" . kdb-sql-connect)))
+              ("C-c C-a" . kdb-sql-connect)
+              ("C-c C-u" . kdb-sql-use-database)))
 
 
 ;; Which Key =============================================== ;;
