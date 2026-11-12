@@ -932,7 +932,12 @@ previous connection's values: what made connecting work only sometimes."
                            :database (read-string "Database: ")
                            :user (and (eq product 'postgres) (read-string "Entra user or group: "))))))
          (server (plist-get conn :server))
-         (database (plist-get conn :database))
+         ;; VS Code leaves it to a dropdown; without one the server's
+         ;; default database is used, and the script's tables aren't there.
+         (database (let ((d (plist-get conn :database)))
+                     (if (seq-empty-p d)
+                         (read-string (format "Database on %s (RET for its default): " server))
+                       d)))
          (user (plist-get conn :user))
          (buf-name (format "*SQL: %s*" name)))
     (pcase (plist-get conn :product)
@@ -962,14 +967,19 @@ previous connection's values: what made connecting work only sometimes."
                                                 "PGSSLMODE=require")
                                           process-environment)))
          (sql-postgres buf-name)))
-      (other (user-error "Unknown :product %S for %s" other name)))))
+      (other (user-error "Unknown :product %S for %s" other name)))
+    ;; Highlight the script for the product it now runs on.
+    (when (derived-mode-p 'sql-mode)
+      (sql-set-product (plist-get conn :product)))))
 
 (defun kdb-sql-send-dwim ()
-  "Send the region, or the paragraph, to the SQL process."
+  "Run the region, or else the whole buffer, as VS Code does.
+Not the paragraph: a script's DECLAREs and the statements using them,
+often with blank lines between, have to go as one batch."
   (interactive)
   (if (use-region-p)
       (sql-send-region (region-beginning) (region-end))
-    (sql-send-paragraph)))
+    (sql-send-buffer)))
 
 (use-package sql
   :ensure nil

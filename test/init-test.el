@@ -33,7 +33,9 @@
                                       seen)))
               ((symbol-function 'kdb-sql--vscode-connections) #'ignore)
               ((symbol-function 'kdb-sql--az-token) (lambda () "tok"))
-              ((symbol-function 'read-passwd) (lambda (&rest _) "pw")))
+              ((symbol-function 'read-passwd) (lambda (&rest _) "pw"))
+              ;; No database saved: asked, and RET keeps the server's default.
+              ((symbol-function 'read-string) (lambda (&rest _) "")))
       (let ((kdb-sql-connections
              '(("ms" :product ms :server "s" :database "d")
                ("ms-nodb" :product ms :server "s" :database "")
@@ -54,6 +56,24 @@
                                         "-d" "postgres")
                            "tok" "require")
                       seen)))))
+
+(ert-deftest sql-run-sends-the-region-or-the-whole-script ()
+  (require 'sql)
+  (let (sent)
+    (cl-letf (((symbol-function 'sql-send-buffer) (lambda () (setq sent 'buffer)))
+              ((symbol-function 'sql-send-region) (lambda (&rest _) (setq sent 'region))))
+      (with-temp-buffer
+        (insert "DECLARE @x INT = 1;
+
+SELECT @x;
+")
+        (goto-char (point-min))
+        (kdb-sql-send-dwim)
+        (should (eq sent 'buffer))
+        (transient-mark-mode 1)
+        (set-mark (point-min)) (goto-char (point-max)) (activate-mark)
+        (kdb-sql-send-dwim)
+        (should (eq sent 'region))))))
 
 (ert-deftest sql-comint-uses-the-exact-arguments ()
   (require 'sql)
