@@ -877,15 +877,23 @@ and for postgres :user, the Entra user or group the server knows (and
 (defvar kdb-sql--args nil
   "The exact program arguments for the connection being started.")
 
-(defun kdb-sql--comint (product options &optional buf-name)
-  "Start PRODUCT's interpreter with `kdb-sql--args' when set.
+(defun kdb-sql--comint (product _options &optional buf-name)
+  "Start PRODUCT's interpreter with exactly `kdb-sql--args'.
 sql.el's own builders add -E (Windows sign-in) to sqlcmd when there is no
 user or password, which overrides Entra ID, and fill in -S/-d/-U from the
 previous connection's values: what made connecting work only sometimes."
-  (if kdb-sql--args
-      (sql-comint product kdb-sql--args buf-name)
-    (funcall (if (eq product 'ms) #'sql-comint-ms #'sql-comint-postgres)
-             product options buf-name)))
+  (unless kdb-sql--args
+    (user-error "Connect with C-c C-a (kdb-sql-connect)"))
+  (sql-comint product kdb-sql--args buf-name))
+
+(defun kdb-sql--strip-jsonc ()
+  "Turn the JSON with comments and trailing commas VS Code writes into JSON.
+Strings are matched first and kept, so // in a URL stays."
+  (dolist (junk '("//[^\n]*\\|/\\*\\(?:.\\|\n\\)*?\\*/" ",\\([ \t\r\n]*[]}]\\)"))
+    (goto-char (point-min))
+    (while (re-search-forward (concat "\"\\(?:[^\"\\\\]\\|\\\\.\\)*\"\\|\\(" junk "\\)") nil t)
+      (when (match-beginning 1)
+        (replace-match (or (match-string 2) "") t t)))))
 
 (defun kdb-sql--vscode-connections ()
   "VS Code's saved mssql connections, as in `kdb-sql-connections'."
@@ -898,13 +906,10 @@ previous connection's values: what made connecting work only sometimes."
     (when (file-readable-p file)
       (with-temp-buffer
         (insert-file-contents file)
-        ;; JSON with comments and trailing commas, as VS Code writes it.
+        (kdb-sql--strip-jsonc)
         (goto-char (point-min))
-        (while (re-search-forward "^[ \t]*//.*$" nil t) (replace-match ""))
-        (goto-char (point-min))
-        (while (re-search-forward ",\\([ \t\n]*[]}]\\)" nil t) (replace-match "\\1"))
-        (goto-char (point-min))
-        (when-let* ((json (ignore-errors (json-parse-buffer :object-type 'alist :array-type 'list))))
+        (when-let* ((json (ignore-errors (json-parse-buffer :object-type 'alist :array-type 'list
+                                                            :null-object nil))))
           (mapcar (lambda (c)
                     (let-alist c
                       (list (or .profileName .server)
@@ -912,12 +917,39 @@ previous connection's values: what made connecting work only sometimes."
                             :user (and (equal .authenticationType "SqlLogin") .user))))
                   (alist-get 'mssql.connections json)))))))
 
+(defun kdb-sql--lines (program &rest args)
+  "PROGRAM's output lines, without its stderr (az's warnings, for one).
+Signals an error naming PROGRAM when it fails or isn't installed."
+  (with-temp-buffer
+    (let ((status (condition-case nil
+                      (apply #'call-process program nil '(t nil) nil args)
+                    (file-missing (user-error "%s isn't installed or isn't on PATH" program)))))
+      (unless (eq status 0)
+        (error "%s exited with %s" program status))
+      (split-string (buffer-string) "[\r\n]+" t "[ \t]+"))))
+
+(defvar kdb-sql--token nil
+  "(TIME . TOKEN): the last Azure CLI token, reused for a few minutes.")
+
 (defun kdb-sql--az-token ()
-  "An Entra ID token for Azure Database for PostgreSQL, from the Azure CLI."
-  (condition-case nil
-      (car (process-lines "az" "account" "get-access-token" "--resource-type" "oss-rdbms"
-                          "--query" "accessToken" "-o" "tsv"))
-    (error (user-error "No token from the Azure CLI: run az login, then connect again"))))
+  "An Entra ID token for Azure Database for PostgreSQL, from the Azure CLI.
+Kept 5 minutes, so listing databases and then connecting asks az once."
+  (if (and kdb-sql--token (< (float-time (time-since (car kdb-sql--token))) 300))
+      (cdr kdb-sql--token)
+    (let ((token (condition-case nil
+                     (car (kdb-sql--lines "az" "account" "get-access-token" "--resource-type"
+                                          "oss-rdbms" "--query" "accessToken" "-o" "tsv"))
+                   (error nil))))
+      (unless token
+        (user-error "No token from the Azure CLI: run az login, then connect again"))
+      (setq kdb-sql--token (cons (current-time) token))
+      token)))
+
+(defun kdb-sql--pg-environment ()
+  "psql's environment: the az token as password, SSL, a short connect timeout."
+  (append (list (concat "PGPASSWORD=" (kdb-sql--az-token)) "PGSSLMODE=require"
+                "PGCONNECT_TIMEOUT=10")
+          process-environment))
 
 (defvar-local kdb-sql--conn nil
   "In a SQLi buffer, the connection it was started with, database included.")
@@ -926,23 +958,19 @@ previous connection's values: what made connecting work only sometimes."
   "The databases on SERVER that USER can open, or nil if they can't be listed.
 A SQL login (ms with USER) isn't listed: it would ask for the password twice."
   (ignore-errors
-    (seq-remove
-     #'string-empty-p
-     (pcase product
-       ('ms (unless user
-              (process-lines (or (bound-and-true-p sql-ms-program) "sqlcmd")
+    (pcase product
+      ('ms (unless user
+             (kdb-sql--lines (or (bound-and-true-p sql-ms-program) "sqlcmd")
                              (concat "--server=" server)
-                             "--authentication-method=ActiveDirectoryAzCli"
+                             "--authentication-method=ActiveDirectoryAzCli" "--login-timeOut=5"
                              (concat "--query=SET NOCOUNT ON; SELECT name FROM sys.databases"
                                      " WHERE state_desc = 'ONLINE' ORDER BY name")
                              "-h" "-1" "-W")))
-       ('postgres
-        (let ((process-environment (append (list (concat "PGPASSWORD=" (kdb-sql--az-token))
-                                                 "PGSSLMODE=require")
-                                           process-environment)))
-          (process-lines "psql" "-X" "-At" "-h" server "-U" user "-d" "postgres" "-c"
+      ('postgres
+       (let ((process-environment (kdb-sql--pg-environment)))
+         (kdb-sql--lines "psql" "-X" "-At" "-h" server "-U" user "-d" "postgres" "-c"
                          (concat "SELECT datname FROM pg_database"
-                                 " WHERE datallowconn AND NOT datistemplate ORDER BY 1"))))))))
+                                 " WHERE datallowconn AND NOT datistemplate ORDER BY 1")))))))
 
 (defun kdb-sql--pick-database (product server user)
   "Ask for a database on SERVER, from its list when it can be read."
@@ -951,7 +979,9 @@ A SQL login (ms with USER) isn't listed: it would ask for the password twice."
     (read-string (format "Database on %s (RET for its default): " server))))
 
 (defun kdb-sql-connect (name)
-  "Connect to the saved database NAME, or a new one typed in."
+  "Connect to the saved database NAME, or a new one typed in.
+A session already open under NAME is replaced, so this also reconnects:
+after an expired token, or to start over on another database."
   (interactive
    (list (completing-read "Connection: "
                           ;; A saved one of the same name comes first and wins.
@@ -965,53 +995,59 @@ A SQL login (ms with USER) isn't listed: it would ask for the password twice."
                            :server (read-string "Server: ")
                            :database (read-string "Database (RET to pick from the server): ")
                            :user (and (eq product 'postgres) (read-string "Entra user or group: "))))))
+         (product (plist-get conn :product))
          (server (plist-get conn :server))
-         ;; VS Code leaves it to a dropdown; without one the server's
-         ;; default database is used, and the script's tables aren't there.
          (user (plist-get conn :user))
-         (database (let ((d (plist-get conn :database)))
-                     (if (seq-empty-p d)
-                         (kdb-sql--pick-database (plist-get conn :product) server user)
-                       d)))
          (buf-name (format "*SQL: %s*" name)))
-    (pcase (plist-get conn :product)
-      ('ms
-       ;; Long options with =: the Go sqlcmd quietly falls back to Windows
-       ;; sign-in when they're mixed with -G or follow -d.
-       (let* ((kdb-sql--args
-               (append (list (concat "--server=" server))
-                       (if user
-                           (list (concat "--user-name=" user))
-                         (list "--authentication-method=ActiveDirectoryAzCli"))
-                       (unless (seq-empty-p database) (list (concat "--database-name=" database)))
-                       ;; Columns as wide as their values, not their types
-                       (list "-W")))
-              (process-environment
-               (if user
-                   (cons (concat "SQLCMDPASSWORD=" (read-passwd (format "Password for %s: " user)))
-                         process-environment)
-                 process-environment)))
-         (sql-ms buf-name)))
-      ('postgres
-       (let ((kdb-sql--args (list "-X" "-P" "pager=off" "-h" server
-                                  "-p" (number-to-string (or (plist-get conn :port) 5432))
-                                  "-U" user "-d" database))
-             ;; Read at sign-in only, so an expired token doesn't end the session.
-             (process-environment (append (list (concat "PGPASSWORD=" (kdb-sql--az-token))
-                                                "PGSSLMODE=require")
-                                          process-environment)))
-         (sql-postgres buf-name)))
-      (other (user-error "Unknown :product %S for %s" other name)))
-    (when-let* ((sqli (get-buffer buf-name)))
-      (with-current-buffer sqli
-        (setq kdb-sql--conn (plist-put (copy-sequence conn) :database database))))
-    ;; Highlight the script for the product it now runs on.
+    (unless (memq product '(ms postgres))
+      (user-error "%s needs :product ms or postgres, not %S" name product))
+    ;; VS Code leaves it to a dropdown; without one the server's default
+    ;; database is used, and the script's tables aren't there.
+    (let ((database (let ((d (plist-get conn :database)))
+                      (if (seq-empty-p d) (kdb-sql--pick-database product server user) d))))
+      ;; sql.el only shows a live session of the same name, it doesn't reconnect.
+      (when-let* ((proc (get-buffer-process buf-name)))
+        (delete-process proc))
+      (if (eq product 'ms)
+          ;; Long options with =: the Go sqlcmd quietly falls back to Windows
+          ;; sign-in when they're mixed with -G or follow -d.
+          (let* ((kdb-sql--args
+                  (append (list (concat "--server=" server))
+                          (if user
+                              (list (concat "--user-name=" user))
+                            (list "--authentication-method=ActiveDirectoryAzCli"))
+                          (unless (seq-empty-p database) (list (concat "--database-name=" database)))
+                          ;; -W: columns as wide as their values, not their types
+                          (list "--login-timeOut=10" "-W")))
+                 (process-environment
+                  (if user
+                      (cons (concat "SQLCMDPASSWORD=" (read-passwd (format "Password for %s: " user)))
+                            process-environment)
+                    process-environment)))
+            (sql-ms buf-name))
+        (let ((kdb-sql--args (list "-X" "-P" "pager=off" "-h" server
+                                   "-p" (number-to-string (or (plist-get conn :port) 5432))
+                                   "-U" user "-d" database))
+              ;; Read at sign-in only, so an expired token doesn't end the session.
+              (process-environment (kdb-sql--pg-environment)))
+          (sql-postgres buf-name)))
+      (when-let* ((sqli (get-buffer buf-name)))
+        (with-current-buffer sqli
+          (setq kdb-sql--conn (plist-put (copy-sequence conn) :database database)))))
     ;; Back to the script, the results showing beside it: connecting moves
     ;; point to the empty SQLi buffer, which looks like a query that failed.
     (when (with-current-buffer from (derived-mode-p 'sql-mode))
-      (with-current-buffer from (sql-set-product (plist-get conn :product)))
+      (with-current-buffer from (sql-set-product product))
       (when-let* ((win (get-buffer-window from)))
         (select-window win)))))
+
+(defun kdb-sql--use-command (product database)
+  "The command that switches a PRODUCT session to DATABASE, newline included."
+  (if (eq product 'postgres)
+      ;; psql reconnects with the az token it started with, good for about
+      ;; an hour; after that, C-c C-a again.
+      (format "\\connect \"%s\"\n" (string-replace "\"" "\"\"" database))
+    (format "USE [%s];\ngo\n" (string-replace "]" "]]" database))))
 
 (defun kdb-sql-use-database (database)
   "Switch the connected session to DATABASE, picked from the server's list.
@@ -1025,17 +1061,16 @@ From a script, its session; from a SQLi buffer, that one."
   (let ((sqli (kdb-sql--session)))
     (with-current-buffer sqli
       (setq kdb-sql--conn (plist-put kdb-sql--conn :database database))
-      (sql-send-string (if (eq (plist-get kdb-sql--conn :product) 'postgres)
-                           ;; psql reconnects with the az token it started with,
-                           ;; good for about an hour; after that, connect again.
-                           (format "\\connect %s" database)
-                         (format "USE [%s];" (string-replace "]" "]]" database)))))
+      ;; Straight to the process, not sql-send-string: that adds psql's \g,
+      ;; which would run the previous query again on the new database.
+      (comint-send-string (get-buffer-process sqli)
+                          (kdb-sql--use-command (plist-get kdb-sql--conn :product) database)))
     (message "%s: now on %s" (buffer-name sqli) database)))
 
 (defun kdb-sql--session ()
   "The SQLi buffer for the current buffer: itself, or its script's session."
   (cond ((derived-mode-p 'sql-interactive-mode) (current-buffer))
-        ((and (boundp 'sql-buffer) (sql-buffer-live-p sql-buffer)) (get-buffer sql-buffer))
+        ((sql-buffer-live-p sql-buffer) (get-buffer sql-buffer))
         (t (user-error "Not connected: C-c C-a first"))))
 
 (defun kdb-sql-send-dwim ()

@@ -303,7 +303,7 @@
           (bin (expand-file-name "bin/" root))
           (gh (expand-file-name "gh" bin))
           (exec-path (cons bin exec-path))
-          (kdb-claude-review-skill "app-dev-code-review")
+          (kdb-claude-review-skill "team-code-review")
           (kdb-claude-review-repos (list (cons "apps" apps)))
           started)
      ;; A repo, and a gh whose `pr checkout N' puts the worktree on pr-N.
@@ -335,7 +335,7 @@
        (test-wait (lambda () started))
        (let ((wt (file-name-as-directory (expand-file-name "apps-review-123" root))))
          ;; The session runs in the worktree, on the PR's branch, with the bare skill.
-         (should (equal started (list wt "/app-dev-code-review")))
+         (should (equal started (list wt "/team-code-review")))
          (should (equal (car (kdb-claude--git-lines wt "branch" "--show-current")) "pr-123"))
          (should (equal (car (kdb-claude--git-lines apps "branch" "--show-current")) "main"))
          (should (equal (alist-get 'name (tab-bar--current-tab)) "PR apps#123"))

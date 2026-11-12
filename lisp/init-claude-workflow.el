@@ -515,7 +515,7 @@ In the results, mark findings with m and send them to a session with S."
 
 (defvar agent-shell-display-action)
 
-(defvar kdb-claude-review-skill "app-dev-code-review"
+(defvar kdb-claude-review-skill "code-review"
   "The skill a PR review runs, as /NAME, in the PR's worktree.")
 
 (defvar kdb-claude-review-repos nil

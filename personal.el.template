@@ -14,15 +14,18 @@
 ;; Claude session archive
 ;; (setq kdb-claude-archive-dir "~/.claude-archive")
 ;; (setq kdb-claude-export-directory "~/Downloads/")
-;; PR reviews (C-c l R): the review skill (default app-dev-code-review), and
+;; PR reviews (C-c l R): the review skill (default code-review), and
 ;; where each repo is checked out if its folder isn't named like the repo.
-;; (setq kdb-claude-review-skill "app-dev-code-review")
+;; (setq kdb-claude-review-skill "team-code-review")
 ;; (setq kdb-claude-review-repos '(("apps" . "C:/src/apps/") ("data" . "C:/src/data/")))
 
-;; SQL connections (Azure)
+;; SQL connections (C-c C-a in sql-mode), signed in through az login.
+;; :database "" picks one from the server; VS Code's saved mssql
+;; connections are offered as well.
 ;; (setq kdb-sql-connections
-;;       '(("prod" :server "prod.database.windows.net" :database "mydb")
-;;         ("dev"  :server "dev.database.windows.net"  :database "mydb-dev")))
+;;       '(("dev" :product ms :server "dev.database.windows.net" :database "app")
+;;         ("pg-dev" :product postgres :server "pg-dev.postgres.database.azure.com"
+;;          :database "postgres" :user "db-admins")))
 
 ;; Evil mode — enable per-project or per-buffer
 ;; (setq kdb-evil-project-list '("/path/to/vim-project"))

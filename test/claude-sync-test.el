@@ -100,7 +100,7 @@ under a path limit that makes LONG's transcripts too long to open."
   `(let* ((root (file-name-as-directory (make-temp-file "claude-sync" t)))
           (projects (expand-file-name "projects/" root))
           (archive (expand-file-name "archive/" root))
-          (long (concat "-C--Users-k-OneDrive---Cardinal-Health-ñ-"
+          (long (concat "-C--Users-k-OneDrive---Example-Company-ñ-"
                         (make-string 59 ?x)))
           (kdb-claude--max-path (+ (length root) 100))
           (test-ps-sources nil)
@@ -128,7 +128,7 @@ under a path limit that makes LONG's transcripts too long to open."
                                                   "\\`s1\\.org\\'"))))
        ;; Shortened directory (40 chars + hash), same file name, so history
        ;; and resume (by session id) still work; SOURCE is the original.
-       (should (string-match-p "/-C--Users-k-OneDrive---Cardinal-Health-ñ-[0-9a-f]\\{8\\}/s1\\.org\\'" org))
+       (should (string-match-p "/-C--Users-k-OneDrive---Example-Company-ñ-[0-9a-f]\\{8\\}/s1\\.org\\'" org))
        (should-not (kdb-claude--path-too-long-p org))
        (should (equal (kdb-claude--org-keyword org "SOURCE")
                       (expand-file-name (concat long "/s1.jsonl") projects)))
@@ -230,24 +230,24 @@ under a path limit that makes LONG's transcripts too long to open."
 
 (ert-deftest project-name-of-worktrees ()
   (let* ((root (file-name-as-directory (make-temp-file "proj" t)))
-         (repo (expand-file-name "sns-technology/" root))
+         (repo (expand-file-name "example-repo/" root))
          (wt (expand-file-name "anywhere/brave-tesla-2a3f/" root)))
     (make-directory wt t)
     (make-directory (expand-file-name ".git/worktrees/brave-tesla-2a3f" repo) t)
     (with-temp-file (expand-file-name ".git" wt)
       (insert "gitdir: " repo ".git/worktrees/brave-tesla-2a3f\n"))
     ;; A live worktree: its main repository, wherever it lives.
-    (should (equal (kdb-claude--project-name wt) "sns-technology"))
+    (should (equal (kdb-claude--project-name wt) "example-repo"))
     ;; Gone worktrees, by layout; Windows paths too.
-    (should (equal (kdb-claude--project-name "/src/sns-technology/.claude/worktrees/brave-tesla") "sns-technology"))
-    (should (equal (kdb-claude--project-name "C:\\Users\\k\\src\\sns-technology\\.claude\\worktrees\\brave-tesla")
-                   "sns-technology"))
-    (should (equal (kdb-claude--project-name "C:\\Users\\k\\.claude-worktrees\\sns-technology\\brave-tesla")
-                   "sns-technology"))
+    (should (equal (kdb-claude--project-name "/src/example-repo/.claude/worktrees/brave-tesla") "example-repo"))
+    (should (equal (kdb-claude--project-name "C:\\Users\\k\\src\\example-repo\\.claude\\worktrees\\brave-tesla")
+                   "example-repo"))
+    (should (equal (kdb-claude--project-name "C:\\Users\\k\\.claude-worktrees\\example-repo\\brave-tesla")
+                   "example-repo"))
     ;; Not a worktree: its own name.
     (should (equal (kdb-claude--project-name "/home/k/src/emacs.d/") "emacs.d"))
     (should (equal (cdr (assoc "PROJECT" (test-convert (test-user "x" (directory-file-name wt)))))
-                   "sns-technology"))
+                   "example-repo"))
     (delete-directory root t)))
 
 (ert-deftest sync-upgrades-old-archives-and-history-shows-project ()
@@ -256,19 +256,19 @@ under a path limit that makes LONG's transcripts too long to open."
          (archive (expand-file-name "archive/" root))
          (org (expand-file-name "code-sessions/-p/s1.org" archive)))
     (test-jsonl-lines (expand-file-name "-p/s1.jsonl" projects)
-                      (test-user "hello" "/src/sns-technology/.claude/worktrees/brave-tesla")
+                      (test-user "hello" "/src/example-repo/.claude/worktrees/brave-tesla")
                       '((type . "ai-title") (aiTitle . "Fix login redirect loop")))
     ;; An archive written before #+PROJECT existed, newer than the transcript.
     (make-directory (file-name-directory org) t)
-    (with-temp-file org (insert "#+TITLE: hello\n#+CWD: /src/sns-technology/.claude/worktrees/brave-tesla\n\n"))
+    (with-temp-file org (insert "#+TITLE: hello\n#+CWD: /src/example-repo/.claude/worktrees/brave-tesla\n\n"))
     (set-file-times org (time-add nil 3600))
     (cl-letf (((symbol-function 'kdb-claude--projects-dir) (lambda () projects))
               ((symbol-function 'kdb-claude--ensure-archive) (lambda () archive)))
       (should (equal (kdb-claude-sync-code-sessions) "Synced 1 Claude Code sessions"))
-      (should (equal (kdb-claude--org-keyword org "PROJECT") "sns-technology"))
+      (should (equal (kdb-claude--org-keyword org "PROJECT") "example-repo"))
       (should (equal (kdb-claude-sync-code-sessions) "Synced 0 Claude Code sessions"))
       (let ((entry (car (kdb-claude--history-entries))))
-        (should (equal (aref (cadr entry) 3) "sns-technology"))
+        (should (equal (aref (cadr entry) 3) "example-repo"))
         (should (equal (aref (cadr entry) 5) "Fix login redirect loop"))))
     (delete-directory root t)))
 
