@@ -19,7 +19,9 @@
 ;; (setq kdb-claude-review-skill "team-code-review")
 ;; (setq kdb-claude-review-repos '(("apps" . "C:/src/apps/") ("data" . "C:/src/data/")))
 
-;; SQL connections (C-c C-a in sql-mode), signed in through az login.
+;; SQL (C-c d): where its "Open a script" starts, and the connections.
+;; (setq kdb-sql-scripts-directory "~/queries/")
+;; Connections are signed in through az login.
 ;; :database "" picks one from the server; VS Code's saved mssql
 ;; connections are offered as well.
 ;; (setq kdb-sql-connections

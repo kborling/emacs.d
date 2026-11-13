@@ -146,6 +146,7 @@
     (cl-letf (((symbol-function 'sql-send-buffer) (lambda () (setq sent 'buffer)))
               ((symbol-function 'sql-send-region) (lambda (&rest _) (setq sent 'region))))
       (with-temp-buffer
+        (sql-mode)
         (insert "DECLARE @x INT = 1;\n\nSELECT @x;\n")
         (goto-char (point-min))
         (kdb-sql-send-dwim)
@@ -366,6 +367,61 @@
               (with-temp-file file (insert "{ not json"))
               (should-not (kdb-sql--vscode-connections)))))
       (delete-directory dir t))))
+
+(ert-deftest sql-menu-from-any-buffer ()
+  (require 'transient)
+  (should (eq (key-binding (kbd "C-c d")) #'kdb-sql))
+  (should (commandp 'kdb-sql-menu))
+  ;; Every command the menu offers exists.
+  (dolist (cmd '(kdb-sql-connect kdb-sql-new-script kdb-sql-open-script kdb-sql-send-dwim
+                 kdb-sql-run-to-org kdb/export-deliverable kdb-sql-tables kdb-sql-use-database
+                 kdb-sql-switch-session kdb-sql-disconnect))
+    (should (commandp cmd)))
+  (with-temp-buffer
+    (should (string-match-p "\\`SQL: not connected" (kdb-sql--menu-status)))
+    ;; Run commands outside a script would run that buffer's text.
+    (insert "not SQL")
+    (should-error (kdb-sql-send-dwim) :type 'user-error)
+    (should-error (kdb-sql-run-to-org) :type 'user-error)))
+
+(ert-deftest sql-new-script-opens-a-connected-buffer ()
+  (let (connected-from)
+    (cl-letf (((symbol-function 'kdb-sql-connect)
+               (lambda (name) (setq connected-from (list name (current-buffer) major-mode)))))
+      (save-window-excursion
+        (kdb-sql-new-script "ETL x")
+        (unwind-protect
+            (progn
+              (should (equal (car connected-from) "ETL x"))
+              (should (eq (nth 2 connected-from) 'sql-mode))
+              (should (equal (buffer-name (nth 1 connected-from)) "ETL x.sql")))
+          (kill-buffer (nth 1 connected-from)))))))
+
+(ert-deftest sql-sessions-listed-switched-and-closed ()
+  (let* ((a (get-buffer-create "*SQL: a*"))
+         (pa (make-pipe-process :name "test-a" :buffer a :noquery t))
+         (dead (get-buffer-create "*SQL: dead*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer a (sql-interactive-mode)
+                               (setq kdb-sql--conn (list :product 'ms :server "s" :database "A")))
+          (with-current-buffer dead (sql-interactive-mode)
+                               (setq kdb-sql--conn (list :product 'ms :server "s" :database "D")))
+          ;; Only live sessions, and one with no process isn't one.
+          (should (equal (kdb-sql--sessions) (list a)))
+          (with-current-buffer a
+            (should (string-match-p "\\`SQL: \\*SQL: a\\*, on A\\'" (kdb-sql--menu-status))))
+          (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "*SQL: a*")))
+            (save-window-excursion
+              (kdb-sql-switch-session)
+              (should (eq (window-buffer) a)))
+            (with-temp-buffer (kdb-sql-disconnect)))
+          (should-not (process-live-p pa))
+          (should-not (kdb-sql--sessions))
+          (should-error (kdb-sql-switch-session) :type 'user-error))
+      (when (process-live-p pa) (delete-process pa))
+      (kill-buffer a)
+      (kill-buffer dead))))
 
 (ert-deftest term-buffer-closes-after-terms-own-sentinel ()
   (let* ((buf (generate-new-buffer " *term test*"))

@@ -864,6 +864,7 @@ If point is at the end of the line, kill the whole line including the newline."
 ;; `psql' with an az token do.  C-c C-a connects, C-c C-c runs the region
 ;; or the whole script, C-c C-u switches database, C-c C-o runs it into
 ;; org tables (C-c o x there exports CSV or Excel), C-c C-t lists tables.
+;; C-c d, from any buffer, has all of it in a menu.
 
 (defvar kdb-sql-connections nil
   "Saved connections for `kdb-sql-connect', as (NAME . PLIST); set in personal.el.
@@ -1078,6 +1079,7 @@ From a script, its session; from a SQLi buffer, that one."
 Not the paragraph: a script's DECLAREs and the statements using them,
 often with blank lines between, have to go as one batch."
   (interactive)
+  (kdb-sql--require-script)
   (if (use-region-p)
       (sql-send-region (region-beginning) (region-end))
     (sql-send-buffer)))
@@ -1259,6 +1261,7 @@ and a table list opened before must keep the database it lists."
   "Run the region, or else the whole script, with the results as org tables.
 On the database of the script's session (C-c C-a), in the background."
   (interactive)
+  (kdb-sql--require-script)
   (let* ((conn (kdb-sql--session-conn))
          (sql (if (use-region-p)
                   (buffer-substring-no-properties (region-beginning) (region-end))
@@ -1384,6 +1387,103 @@ On the database of the script's session (C-c C-a), in the background."
   (if (buffer-live-p kdb-sql--script)
       (with-current-buffer kdb-sql--script (kdb-sql-tables))
     (user-error "The script is gone; list tables from another with C-c C-t")))
+
+;; The C-c d menu: everything SQL, from any buffer.
+
+(defvar kdb-sql-scripts-directory "~/"
+  "Where `kdb-sql-open-script' starts looking; set in personal.el.")
+
+(defun kdb-sql--sessions ()
+  "Live SQL sessions started by `kdb-sql-connect', most recent first."
+  (seq-filter (lambda (b) (and (buffer-local-value 'kdb-sql--conn b)
+                               (get-buffer-process b)
+                               (process-live-p (get-buffer-process b))))
+              (buffer-list)))
+
+(defun kdb-sql--script-p ()
+  "Non-nil in a SQL script: what Run and Org results run."
+  (derived-mode-p 'sql-mode))
+
+(defun kdb-sql--require-script ()
+  "Signal unless in a SQL script."
+  (unless (kdb-sql--script-p)
+    (user-error "Not in a SQL script: C-c d n starts one, C-c d f opens one")))
+
+(defun kdb-sql-new-script (name)
+  "A new SQL script on connection NAME: a sql-mode buffer, connected."
+  (interactive
+   (list (completing-read "New script on: "
+                          (delete-dups (mapcar #'car (append kdb-sql-connections
+                                                             (kdb-sql--vscode-connections)))))))
+  (let ((script (generate-new-buffer (format "%s.sql" name))))
+    (pop-to-buffer-same-window script)
+    (sql-mode)
+    (kdb-sql-connect name)))
+
+(defun kdb-sql-open-script ()
+  "Open a SQL script file, from `kdb-sql-scripts-directory'."
+  (interactive)
+  (find-file (read-file-name "SQL script: " (file-name-as-directory kdb-sql-scripts-directory))))
+
+(defun kdb-sql-switch-session ()
+  "Go to an open SQL session's results buffer."
+  (interactive)
+  (let ((sessions (mapcar #'buffer-name (kdb-sql--sessions))))
+    (unless sessions (user-error "No SQL session open: C-c d c connects"))
+    (pop-to-buffer (completing-read "Session: " sessions nil t))))
+
+(defun kdb-sql-disconnect ()
+  "Close a SQL session: this script's, or one picked from the open ones."
+  (interactive)
+  (let* ((here (and (kdb-sql--script-p) (sql-buffer-live-p sql-buffer) (get-buffer sql-buffer)))
+         (sqli (or here
+                   (and (derived-mode-p 'sql-interactive-mode) (current-buffer))
+                   (let ((sessions (mapcar #'buffer-name (kdb-sql--sessions))))
+                     (unless sessions (user-error "No SQL session open"))
+                     (get-buffer (completing-read "Close session: " sessions nil t))))))
+    (delete-process (get-buffer-process sqli))
+    (message "Closed %s" (buffer-name sqli))))
+
+(defun kdb-sql--menu-status ()
+  "The menu's heading: the session the current buffer would use."
+  (let ((sqli (cond ((derived-mode-p 'sql-interactive-mode) (current-buffer))
+                    ((and (boundp 'sql-buffer) (sql-buffer-live-p sql-buffer)) (get-buffer sql-buffer)))))
+    (if-let* ((conn (and sqli (buffer-local-value 'kdb-sql--conn sqli))))
+        (format "SQL: %s, on %s" (buffer-name sqli)
+                (or (plist-get conn :database) (plist-get conn :server)))
+      (format "SQL: not connected (%d session%s open)" (length (kdb-sql--sessions))
+              (if (= 1 (length (kdb-sql--sessions))) "" "s")))))
+
+(with-eval-after-load 'transient
+  (transient-define-prefix kdb-sql-menu ()
+    "Everything SQL: connections, scripts, results and tables."
+    [:description kdb-sql--menu-status
+     ["Start"
+      ("c" "Connect…" kdb-sql-connect)
+      ("n" "New script on…" kdb-sql-new-script)
+      ("f" "Open a script…" kdb-sql-open-script)]
+     ["Run (in a script)"
+      ("r" "Run selection or script" kdb-sql-send-dwim :inapt-if-not kdb-sql--script-p)
+      ("o" "Run into org tables" kdb-sql-run-to-org :inapt-if-not kdb-sql--script-p)
+      ("x" "Export this org table (CSV/Excel)" kdb/export-deliverable
+       :inapt-if-not (lambda () (and (derived-mode-p 'org-mode) (org-at-table-p))))]
+     ["Browse"
+      ("t" "Tables and views" kdb-sql-tables)
+      ("u" "Switch database" kdb-sql-use-database)]
+     ["Sessions"
+      ("s" "Go to a session" kdb-sql-switch-session)
+      ("k" "Close a session" kdb-sql-disconnect)]]))
+
+(defun kdb-sql ()
+  "The SQL menu."
+  (interactive)
+  (require 'sql)
+  (require 'transient)
+  (kdb-sql-menu))
+
+(global-set-key (kbd "C-c d") #'kdb-sql)
+;; From org, as the C-c o commands are: org loads init-org.
+(autoload 'kdb/export-deliverable "org" nil t)
 
 (use-package sql
   :ensure nil
