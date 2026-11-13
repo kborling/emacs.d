@@ -862,7 +862,8 @@ If point is at the end of the line, kill the whole line including the newline."
 ;; Azure SQL and Azure Database for PostgreSQL, signed in with Entra ID
 ;; through the Azure CLI (az login), the way VS Code's mssql extension and
 ;; `psql' with an az token do.  C-c C-a connects, C-c C-c runs the region
-;; or the whole script, C-c C-u switches database.
+;; or the whole script, C-c C-u switches database, C-c C-o runs it into
+;; org tables (C-c o x there exports CSV or Excel), C-c C-t lists tables.
 
 (defvar kdb-sql-connections nil
   "Saved connections for `kdb-sql-connect', as (NAME . PLIST); set in personal.el.
@@ -1012,22 +1013,18 @@ after an expired token, or to start over on another database."
           ;; Long options with =: the Go sqlcmd quietly falls back to Windows
           ;; sign-in when they're mixed with -G or follow -d.
           (let* ((kdb-sql--args
-                  (append (list (concat "--server=" server))
-                          (if user
-                              (list (concat "--user-name=" user))
-                            (list "--authentication-method=ActiveDirectoryAzCli"))
-                          (unless (seq-empty-p database) (list (concat "--database-name=" database)))
-                          ;; -W: columns as wide as their values, not their types
-                          (list "--login-timeOut=10" "-W")))
+                  ;; -W: columns as wide as their values, not their types
+                  (append (kdb-sql--ms-args (plist-put (copy-sequence conn) :database database))
+                          (list "-W")))
                  (process-environment
                   (if user
                       (cons (concat "SQLCMDPASSWORD=" (read-passwd (format "Password for %s: " user)))
                             process-environment)
                     process-environment)))
             (sql-ms buf-name))
-        (let ((kdb-sql--args (list "-X" "-P" "pager=off" "-h" server
-                                   "-p" (number-to-string (or (plist-get conn :port) 5432))
-                                   "-U" user "-d" database))
+        (let ((kdb-sql--args (append (list "-X" "-P" "pager=off")
+                                     (kdb-sql--pg-args
+                                      (plist-put (copy-sequence conn) :database database))))
               ;; Read at sign-in only, so an expired token doesn't end the session.
               (process-environment (kdb-sql--pg-environment)))
           (sql-postgres buf-name)))
@@ -1082,6 +1079,288 @@ often with blank lines between, have to go as one batch."
       (sql-send-region (region-beginning) (region-end))
     (sql-send-buffer)))
 
+;; Results as org tables, and a list of tables.  Both run apart from the
+;; session, in the background, on its server and database: what the
+;; session set up itself (USE, temp tables) isn't there.
+
+(defconst kdb-sql--us (string #x1f) "Column separator in output read by machine.")
+(defconst kdb-sql--rs (string #x1e) "Row separator in psql's output read by machine.")
+
+(defun kdb-sql--ms-args (conn)
+  "sqlcmd's sign-in arguments for CONN: long options only (see `kdb-sql-connect')."
+  (append (list (concat "--server=" (plist-get conn :server)))
+          (if (plist-get conn :user)
+              (list (concat "--user-name=" (plist-get conn :user)))
+            (list "--authentication-method=ActiveDirectoryAzCli"))
+          (unless (seq-empty-p (plist-get conn :database))
+            (list (concat "--database-name=" (plist-get conn :database))))
+          (list "--login-timeOut=10")))
+
+(defun kdb-sql--pg-args (conn)
+  "psql's connection arguments for CONN."
+  (list "-h" (plist-get conn :server)
+        "-p" (number-to-string (or (plist-get conn :port) 5432))
+        "-U" (plist-get conn :user) "-d" (plist-get conn :database)))
+
+(defun kdb-sql--parse (product output)
+  "PRODUCT's machine-read OUTPUT as a list of (table HEADER ROWS) and (text STRING)."
+  (let ((split (lambda (rec) (split-string rec kdb-sql--us))))
+    (if (eq product 'postgres)
+        ;; header RS row RS ... RS (N rows): one result set after another.
+        (let ((footer (concat kdb-sql--rs "([0-9]+ rows?)\n?"))
+              (pos 0) results)
+          (while (string-match footer output pos)
+            ;; Positions first: split-string and string-trim reset the match data.
+            (let* ((end (match-end 0))
+                   (recs (split-string (substring output pos (match-beginning 0)) kdb-sql--rs)))
+              (push (list 'table (funcall split (string-trim-left (car recs)))
+                          (mapcar split (cdr recs)))
+                    results)
+              (setq pos end)))
+          (let ((rest (string-trim (substring output pos))))
+            (unless (string-empty-p rest) (push (list 'text rest) results)))
+          (nreverse results))
+      ;; sqlcmd: blocks between blank lines; a table's second line is dashes.
+      (mapcar (lambda (block)
+                (let ((lines (split-string block "\n")))
+                  (if (and (cdr lines)
+                           (string-match-p (concat "\\`[-" kdb-sql--us "]+\\'") (cadr lines)))
+                      (list 'table (funcall split (car lines)) (mapcar split (cddr lines)))
+                    (list 'text block))))
+              (split-string output "\n[ \t]*\n" t "[ \t\n]+")))))
+
+(defun kdb-sql--query (conn sql callback)
+  "Run SQL on CONN in the background, then call CALLBACK with its results.
+They're as `kdb-sql--parse' gives them, with anything on stderr (errors,
+notices) last, as text."
+  (let* ((product (plist-get conn :product))
+         (file (make-temp-file "kdb-sql" nil ".sql"))
+         (out (generate-new-buffer " *kdb-sql out*"))
+         (err (generate-new-buffer " *kdb-sql err*"))
+         ;; Its own pipe, quiet: the default sentinel would write
+         ;; "Process ... finished" into the errors shown with the results.
+         (err-pipe (make-pipe-process :name "kdb-sql-query stderr" :buffer err
+                                      :noquery t :sentinel #'ignore))
+         (process-environment
+          (cond ((eq product 'postgres)
+                 (cons "PGCLIENTENCODING=UTF8" (kdb-sql--pg-environment)))
+                ((plist-get conn :user)
+                 (cons (concat "SQLCMDPASSWORD="
+                               (read-passwd (format "Password for %s: " (plist-get conn :user))))
+                       process-environment))
+                (t process-environment)))
+         (coding-system-for-write 'utf-8))
+    (with-temp-file file
+      (insert (if (eq product 'postgres) sql (concat "SET NOCOUNT ON;\n" sql)) "\n"))
+    (condition-case err-data
+        (make-process
+         :name "kdb-sql-query" :buffer out :stderr err-pipe :noquery t
+         :coding 'utf-8-dos               ; sqlcmd ends lines with CRLF on Windows
+         :command (if (eq product 'postgres)
+                      (append (list "psql" "-X" "-q" "-A" "-F" kdb-sql--us "-R" kdb-sql--rs
+                                    "-P" "footer=on")
+                              (kdb-sql--pg-args conn) (list "-f" file))
+                    ;; -s before -i: -i takes the rest as more input files.
+                    (append (list (or (bound-and-true-p sql-ms-program) "sqlcmd"))
+                            (kdb-sql--ms-args conn) (list "-s" kdb-sql--us "-W" "-i" file)))
+         :sentinel
+         (lambda (proc _event)
+           (unless (process-live-p proc)
+             ;; stderr comes through its own pipe, which may still be draining.
+             (accept-process-output err-pipe 0.2)
+             (delete-process err-pipe)
+             (let ((results (kdb-sql--parse product (with-current-buffer out (buffer-string))))
+                   (errors (string-trim (with-current-buffer err (buffer-string)))))
+               (kill-buffer out)
+               (kill-buffer err)
+               (delete-file file)
+               (funcall callback (if (string-empty-p errors) results
+                                   (append results (list (list 'text errors)))))))))
+      ;; sqlcmd or psql not found: nothing to leave behind.
+      (error (delete-process err-pipe)
+             (kill-buffer out)
+             (kill-buffer err)
+             (delete-file file)
+             (signal (car err-data) (cdr err-data))))))
+
+(defun kdb-sql--org-cell (value)
+  "VALUE as an org table cell: | and newlines would break the table."
+  (replace-regexp-in-string "[\r\n]+" " " (string-replace "|" "¦" value)))
+
+(defun kdb-sql--show-results (name results title)
+  "Show RESULTS in org buffer NAME, under TITLE; return the buffer."
+  (with-current-buffer (get-buffer-create name)
+    (let ((inhibit-read-only t) (n 0))
+      (erase-buffer)
+      (unless (derived-mode-p 'org-mode) (org-mode))
+      (insert "#+TITLE: " title "\n"
+              "# " (format-time-string "%F %T")
+              ".  In a table, C-c o x exports it to CSV or Excel.\n")
+      (dolist (r results)
+        (pcase r
+          (`(table ,header ,rows)
+           (insert (format "\n* Result %d (%d row%s)\n" (setq n (1+ n)) (length rows)
+                           (if (= 1 (length rows)) "" "s")))
+           (let ((start (point)))
+             (dolist (row (cons header rows))
+               (insert "| " (mapconcat #'kdb-sql--org-cell row " | ") " |\n")
+               (when (eq row header) (insert "|-\n")))
+             ;; Aligning is slow on big results; unaligned, it's still a table.
+             (when (< (length rows) 2000)
+               (save-excursion (goto-char start) (org-table-align)))))
+          (`(text ,text)
+           (insert "\n#+begin_example\n" text "\n#+end_example\n"))))
+      ;; The Go sqlcmd prints nothing at all for a result set without rows.
+      (unless results
+        (insert "\nNo rows.\n"))
+      (goto-char (point-min))
+      (re-search-forward "^|" nil t)
+      (set-buffer-modified-p nil)
+      (current-buffer))))
+
+(defun kdb-sql--session-conn ()
+  "The connection of the current script's session (or SQLi buffer's)."
+  (let ((sqli (kdb-sql--session)))
+    (or (buffer-local-value 'kdb-sql--conn sqli)
+        (user-error "%s wasn't started by kdb-sql-connect" (buffer-name sqli)))))
+
+(defun kdb-sql--run-and-show (conn sql name title)
+  "Run SQL on CONN in the background, then show its results in NAME under TITLE."
+  (message "Running on %s..." (or (plist-get conn :database) (plist-get conn :server)))
+  (kdb-sql--query conn sql
+                  (lambda (results)
+                    (display-buffer (kdb-sql--show-results name results title))
+                    (message "%s: %d result set(s)" title
+                             (seq-count (lambda (r) (eq (car r) 'table)) results)))))
+
+(defun kdb-sql-run-to-org ()
+  "Run the region, or else the whole script, with the results as org tables.
+On the database of the script's session (C-c C-a), in the background."
+  (interactive)
+  (let* ((conn (kdb-sql--session-conn))
+         (sql (if (use-region-p)
+                  (buffer-substring-no-properties (region-beginning) (region-end))
+                (buffer-substring-no-properties (point-min) (point-max)))))
+    (kdb-sql--run-and-show conn sql (format "*SQL results: %s*" (buffer-name))
+                           (format "%s on %s" (buffer-name)
+                                   (or (plist-get conn :database) (plist-get conn :server))))))
+
+(defun kdb-sql--ident (product name)
+  "NAME quoted as a PRODUCT identifier."
+  (if (eq product 'postgres)
+      (format "\"%s\"" (string-replace "\"" "\"\"" name))
+    (format "[%s]" (string-replace "]" "]]" name))))
+
+(defun kdb-sql--literal (value)
+  "VALUE as an SQL string literal."
+  (format "'%s'" (string-replace "'" "''" value)))
+
+(defvar-local kdb-sql--script nil
+  "In a table list, the script it was opened from, for `kdb-sql-tables-insert'.")
+
+(defvar-keymap kdb-sql-tables-mode-map
+  :doc "Keys in a list of tables."
+  "RET" #'kdb-sql-tables-columns
+  "s" #'kdb-sql-tables-select
+  "w" #'kdb-sql-tables-copy
+  "i" #'kdb-sql-tables-insert
+  "g" #'kdb-sql-tables-refresh)
+
+(define-derived-mode kdb-sql-tables-mode tabulated-list-mode "SQL Tables"
+  "The tables and views of a database.
+\\<kdb-sql-tables-mode-map>\\[kdb-sql-tables-columns] its columns, \\[kdb-sql-tables-select] its first 100 rows, \\[kdb-sql-tables-insert] its name into the script, \\[kdb-sql-tables-copy] copy the name, \\[kdb-sql-tables-refresh] refresh."
+  (setq tabulated-list-format [("Schema" 24 t) ("Name" 56 t) ("Type" 12 t)]
+        tabulated-list-sort-key '("Schema" . nil))
+  (tabulated-list-init-header))
+
+(defun kdb-sql-tables ()
+  "List the tables and views of the script's session database, dired style."
+  (interactive)
+  (let ((conn (kdb-sql--session-conn))
+        (script (current-buffer)))
+    (message "Listing tables on %s..." (plist-get conn :database))
+    (kdb-sql--query
+     conn (concat "SELECT table_schema, table_name, table_type FROM information_schema.tables"
+                  " WHERE table_schema NOT IN ('pg_catalog', 'information_schema', 'sys')"
+                  " ORDER BY 1, 2;")
+     (lambda (results)
+       (let ((table (seq-find (lambda (r) (eq (car r) 'table)) results)))
+         (unless table
+           (user-error "No tables listed: %s" (or (cadr (assq 'text results)) "no output")))
+         (with-current-buffer (get-buffer-create
+                               (format "*SQL tables: %s*" (or (plist-get conn :database)
+                                                              (plist-get conn :server))))
+           (kdb-sql-tables-mode)
+           (setq kdb-sql--conn conn
+                 kdb-sql--script script
+                 tabulated-list-entries
+                 (mapcar (lambda (row)
+                           (list (cons (nth 0 row) (nth 1 row))
+                                 (vector (nth 0 row) (nth 1 row)
+                                         (string-remove-prefix "BASE " (nth 2 row)))))
+                         (nth 2 table)))
+           (tabulated-list-print)
+           (pop-to-buffer (current-buffer))))))))
+
+(defun kdb-sql--tables-at-point ()
+  "The (SCHEMA . TABLE) on this line."
+  (or (tabulated-list-get-id) (user-error "No table on this line")))
+
+(defun kdb-sql--qualified (product id)
+  "ID, (SCHEMA . TABLE), as a quoted PRODUCT name."
+  (concat (kdb-sql--ident product (car id)) "." (kdb-sql--ident product (cdr id))))
+
+(defun kdb-sql-tables-columns ()
+  "Show the columns of the table on this line."
+  (interactive)
+  (let ((id (kdb-sql--tables-at-point)))
+    (kdb-sql--run-and-show
+     kdb-sql--conn
+     (format (concat "SELECT column_name, data_type, character_maximum_length, is_nullable,"
+                     " column_default FROM information_schema.columns"
+                     " WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position;")
+             (kdb-sql--literal (car id)) (kdb-sql--literal (cdr id)))
+     (format "*SQL columns: %s.%s*" (car id) (cdr id))
+     (format "Columns of %s.%s" (car id) (cdr id)))))
+
+(defun kdb-sql-tables-select ()
+  "Show the first 100 rows of the table on this line."
+  (interactive)
+  (let* ((id (kdb-sql--tables-at-point))
+         (product (plist-get kdb-sql--conn :product))
+         (name (kdb-sql--qualified product id)))
+    (kdb-sql--run-and-show
+     kdb-sql--conn
+     (if (eq product 'postgres)
+         (format "SELECT * FROM %s LIMIT 100;" name)
+       (format "SELECT TOP 100 * FROM %s;" name))
+     (format "*SQL rows: %s.%s*" (car id) (cdr id))
+     (format "First 100 rows of %s.%s" (car id) (cdr id)))))
+
+(defun kdb-sql-tables-copy ()
+  "Copy the quoted name of the table on this line."
+  (interactive)
+  (let ((name (kdb-sql--qualified (plist-get kdb-sql--conn :product) (kdb-sql--tables-at-point))))
+    (kill-new name)
+    (message "Copied %s" name)))
+
+(defun kdb-sql-tables-insert ()
+  "Insert the quoted name of the table on this line into the script."
+  (interactive)
+  (let ((name (kdb-sql--qualified (plist-get kdb-sql--conn :product) (kdb-sql--tables-at-point))))
+    (unless (buffer-live-p kdb-sql--script) (user-error "The script is gone"))
+    (with-current-buffer kdb-sql--script (insert name))
+    (if-let* ((win (get-buffer-window kdb-sql--script)))
+        (select-window win)
+      (pop-to-buffer kdb-sql--script))))
+
+(defun kdb-sql-tables-refresh ()
+  "List the tables again."
+  (interactive)
+  (if (buffer-live-p kdb-sql--script)
+      (with-current-buffer kdb-sql--script (kdb-sql-tables))
+    (user-error "The script is gone; list tables from another with C-c C-t")))
+
 (use-package sql
   :ensure nil
   :defer t
@@ -1097,7 +1376,9 @@ often with blank lines between, have to go as one batch."
   :bind (:map sql-mode-map
               ("C-c C-c" . kdb-sql-send-dwim)
               ("C-c C-a" . kdb-sql-connect)
-              ("C-c C-u" . kdb-sql-use-database)))
+              ("C-c C-u" . kdb-sql-use-database)
+              ("C-c C-o" . kdb-sql-run-to-org)
+              ("C-c C-t" . kdb-sql-tables)))
 
 
 ;; Which Key =============================================== ;;

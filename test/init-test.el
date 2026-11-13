@@ -198,6 +198,47 @@
                                ("t" :product ms :server "t" :database nil :user "u")))))))
       (delete-directory dir t))))
 
+(ert-deftest sql-results-parsed-from-sqlcmd-and-psql ()
+  (let ((us (string #x1f)) (rs (string #x1e)))
+    ;; sqlcmd -s US -W: blocks between blank lines, a table's second line dashes.
+    (should (equal (kdb-sql--parse
+                    'ms (concat "name" us "n\n----" us "-\nab" us "NULL\nc" us "\n\n"
+                                "hello\nMsg 208, Level 16\n"))
+                   `((table ("name" "n") (("ab" "NULL") ("c" "")))
+                     (text "hello\nMsg 208, Level 16"))))
+    ;; psql -A -F US -R RS: header RS rows RS (N rows), one set after another;
+    ;; a value may hold a newline, and an empty set is a header alone.
+    (should (equal (kdb-sql--parse
+                    'postgres (concat "a" us "b" rs "1" us "x,y" rs "(1 row)\n"
+                                      "multi" rs "l1\nl2" rs "(1 row)\n"
+                                      "none" rs "(0 rows)\n"))
+                   '((table ("a" "b") (("1" "x,y")))
+                     (table ("multi") (("l1\nl2")))
+                     (table ("none") nil))))))
+
+(ert-deftest sql-results-shown-as-org-tables ()
+  (let ((buf (kdb-sql--show-results
+              " *test sql results*"
+              '((table ("a" "b|c") (("1" "two\nlines")))
+                (text "Msg 1"))
+              "test")))
+    (unwind-protect
+        (with-current-buffer buf
+          (should (derived-mode-p 'org-mode))
+          (should (string-match-p "^\\* Result 1 (1 row)$" (buffer-string)))
+          ;; | and newlines in values don't break the table.
+          (goto-char (point-min))
+          (re-search-forward "^| a")
+          (should (org-at-table-p))
+          (should (equal (org-table-to-lisp) '(("a" "b¦c") hline ("1" "two lines"))))
+          (should (string-match-p "#\\+begin_example\nMsg 1\n#\\+end_example" (buffer-string))))
+      (kill-buffer buf))))
+
+(ert-deftest sql-names-quoted-for-each-product ()
+  (should (equal (kdb-sql--qualified 'ms '("dbo" . "a]b")) "[dbo].[a]]b]"))
+  (should (equal (kdb-sql--qualified 'postgres '("public" . "a\"b")) "\"public\".\"a\"\"b\""))
+  (should (equal (kdb-sql--literal "O'Brien") "'O''Brien'")))
+
 (ert-deftest term-buffer-closes-after-terms-own-sentinel ()
   (let* ((buf (generate-new-buffer " *term test*"))
          (proc (make-pipe-process :name "term-test" :buffer buf :noquery t))
