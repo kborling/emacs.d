@@ -245,6 +245,12 @@
     ;; SELECT COUNT(*): a blank header, which the block trimming takes.
     (should (equal (kdb-sql--parse 'ms "  \n-\n11484\n")
                    '((table ("") (("11484"))))))
+    ;; SELECT COUNT(*), 7: two unnamed columns keep a header, as sqlcmd
+    ;; prints it (with spaces) and without; the dashes aren't a row.
+    (should (equal (kdb-sql--parse 'ms (concat " " us " \n-" us "-\n11484" us "7\n"))
+                   '((table ("" " ") (("11484" "7"))))))
+    (should (equal (kdb-sql--parse 'ms (concat us "\n-" us "-\n1" us "2\n"))
+                   '((table ("" "") (("1" "2"))))))
     ;; CRLF, as sqlcmd writes on Windows.
     (should (equal (kdb-sql--parse 'ms (concat "a" us "b\r\n-" us "-\r\n1" us "2\r\n"))
                    '((table ("a" "b") (("1" "2"))))))
@@ -389,12 +395,12 @@
     (cl-letf (((symbol-function 'kdb-sql-connect)
                (lambda (name) (setq connected-from (list name (current-buffer) major-mode)))))
       (save-window-excursion
-        (kdb-sql-new-script "ETL x")
+        (kdb-sql-new-script "dev x")
         (unwind-protect
             (progn
-              (should (equal (car connected-from) "ETL x"))
+              (should (equal (car connected-from) "dev x"))
               (should (eq (nth 2 connected-from) 'sql-mode))
-              (should (equal (buffer-name (nth 1 connected-from)) "ETL x.sql")))
+              (should (equal (buffer-name (nth 1 connected-from)) "dev x.sql")))
           (kill-buffer (nth 1 connected-from)))))))
 
 (ert-deftest sql-sessions-listed-switched-and-closed ()
@@ -422,6 +428,46 @@
       (when (process-live-p pa) (delete-process pa))
       (kill-buffer a)
       (kill-buffer dead))))
+
+(ert-deftest sql-new-script-cancelled-leaves-nothing ()
+  (let ((buffers (buffer-list)))
+    (cl-letf (((symbol-function 'kdb-sql-connect) (lambda (_) (user-error "No token"))))
+      (save-window-excursion
+        (should-error (kdb-sql-new-script "dev y") :type 'user-error)))
+    (should-not (seq-difference (buffer-list) buffers))))
+
+(ert-deftest sql-menu-has-no-autoloaded-entries ()
+  ;; transient loads autoloaded suffixes as the menu opens: an autoload
+  ;; from org there would load org on the first C-c d.
+  (require 'transient)
+  (let (cmds)
+    (cl-labels ((walk (x) (cond ((and (symbolp x) (commandp x)) (push x cmds))
+                                ((consp x) (walk (car x)) (walk (cdr x)))
+                                ((vectorp x) (mapc #'walk x)))))
+      (walk (get 'kdb-sql-menu 'transient--layout)))
+    (should (memq 'kdb-sql-connect cmds))
+    (should-not (seq-filter (lambda (c) (autoloadp (symbol-function c))) cmds))))
+
+(ert-deftest sql-script-menu-status-and-closing-its-own-session ()
+  (let* ((sqli (get-buffer-create "*SQL: b*"))
+         (proc (make-pipe-process :name "test-b" :buffer sqli :noquery t))
+         (script (generate-new-buffer "b.sql")))
+    (unwind-protect
+        (progn
+          (with-current-buffer sqli
+            (sql-interactive-mode)
+            (setq kdb-sql--conn (list :product 'ms :server "s" :database "B")))
+          (with-current-buffer script
+            (sql-mode)
+            (setq-local sql-buffer (buffer-name sqli))
+            (should (string-match-p "\\`SQL: \\*SQL: b\\*, on B\\'" (kdb-sql--menu-status)))
+            ;; From the script: its own session, no asking.
+            (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) (error "Asked"))))
+              (kdb-sql-disconnect)))
+          (should-not (process-live-p proc)))
+      (when (process-live-p proc) (delete-process proc))
+      (kill-buffer script)
+      (kill-buffer sqli))))
 
 (ert-deftest term-buffer-closes-after-terms-own-sentinel ()
   (let* ((buf (generate-new-buffer " *term test*"))

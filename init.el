@@ -1130,10 +1130,11 @@ often with blank lines between, have to go as one batch."
           (nreverse results))
       ;; sqlcmd: blocks between blank lines; a table's second line is dashes.
       ;; A lone unnamed column (SELECT COUNT(*)) has a blank header, which
-      ;; the trimming takes: the block then starts with the dashes.
+      ;; the trimming takes: the block then starts with plain dashes.  Not
+      ;; two or more: their header keeps its separators, so it stays.
       (mapcar (lambda (block)
                 (let ((lines (split-string block "\n")))
-                  (when (string-match-p (concat "\\`[-" kdb-sql--us "]+\\'") (car lines))
+                  (when (string-match-p "\\`-+\\'" (car lines))
                     (push "" lines))
                   (if (and (cdr lines)
                            (string-match-p (concat "\\`[-" kdb-sql--us "]+\\'") (cadr lines)))
@@ -1415,10 +1416,16 @@ On the database of the script's session (C-c C-a), in the background."
    (list (completing-read "New script on: "
                           (delete-dups (mapcar #'car (append kdb-sql-connections
                                                              (kdb-sql--vscode-connections)))))))
-  (let ((script (generate-new-buffer (format "%s.sql" name))))
-    (pop-to-buffer-same-window script)
-    (sql-mode)
-    (kdb-sql-connect name)))
+  (let ((script (generate-new-buffer (format "%s.sql" name)))
+        connected)
+    ;; Quit at a prompt, or no az token: no empty script left behind.
+    (unwind-protect
+        (progn
+          (pop-to-buffer-same-window script)
+          (sql-mode)
+          (kdb-sql-connect name)
+          (setq connected t))
+      (unless connected (kill-buffer script)))))
 
 (defun kdb-sql-open-script ()
   "Open a SQL script file, from `kdb-sql-scripts-directory'."
@@ -1451,8 +1458,8 @@ On the database of the script's session (C-c C-a), in the background."
     (if-let* ((conn (and sqli (buffer-local-value 'kdb-sql--conn sqli))))
         (format "SQL: %s, on %s" (buffer-name sqli)
                 (or (plist-get conn :database) (plist-get conn :server)))
-      (format "SQL: not connected (%d session%s open)" (length (kdb-sql--sessions))
-              (if (= 1 (length (kdb-sql--sessions))) "" "s")))))
+      (let ((n (length (kdb-sql--sessions))))
+        (format "SQL: not connected (%d session%s open)" n (if (= 1 n) "" "s"))))))
 
 (with-eval-after-load 'transient
   (transient-define-prefix kdb-sql-menu ()
@@ -1465,7 +1472,9 @@ On the database of the script's session (C-c C-a), in the background."
      ["Run (in a script)"
       ("r" "Run selection or script" kdb-sql-send-dwim :inapt-if-not kdb-sql--script-p)
       ("o" "Run into org tables" kdb-sql-run-to-org :inapt-if-not kdb-sql--script-p)
-      ("x" "Export this org table (CSV/Excel)" kdb/export-deliverable
+      ;; A lambda, not the autoloaded command: transient loads autoloads as
+      ;; the menu opens, which would load org on every first C-c d.
+      ("x" "Export this org table (CSV/Excel)" (lambda () (interactive) (kdb/export-deliverable))
        :inapt-if-not (lambda () (and (derived-mode-p 'org-mode) (org-at-table-p))))]
      ["Browse"
       ("t" "Tables and views" kdb-sql-tables)
@@ -1479,6 +1488,8 @@ On the database of the script's session (C-c C-a), in the background."
   (interactive)
   (require 'sql)
   (require 'transient)
+  ;; As if the menu were the command, else transient draws it twice.
+  (setq this-command 'kdb-sql-menu)
   (kdb-sql-menu))
 
 (global-set-key (kbd "C-c d") #'kdb-sql)
