@@ -23,7 +23,7 @@
     (current-buffer)))
 
 (ert-deftest tabs-round-trip-with-claude-session ()
-  (let* ((root (file-name-as-directory (make-temp-file "tabs" t)))
+  (let* ((root (file-name-as-directory (file-truename (make-temp-file "tabs" t))))
          (tabspaces-session-file (expand-file-name "tabsession.el" root))
          (file (expand-file-name "notes.txt" root))
          (resumed nil))
@@ -144,7 +144,8 @@
          (when (string-prefix-p "Claude Agent @ test" (buffer-name b)) (kill-buffer b))))))
 
 (defun test-project (name)
-  (let ((dir (file-name-as-directory (expand-file-name name (make-temp-file "proj" t)))))
+  ;; Truename: Windows gives the temp folder as KEVINB~1, files open under the long name.
+  (let ((dir (file-name-as-directory (expand-file-name name (file-truename (make-temp-file "proj" t))))))
     (make-directory dir t)
     dir))
 
@@ -303,7 +304,7 @@
 
 (ert-deftest pr-review-in-its-own-worktree-and-tab ()
   (test-with-tabs
-   (let* ((root (file-name-as-directory (make-temp-file "prs" t)))
+   (let* ((root (file-name-as-directory (file-truename (make-temp-file "prs" t))))
           (apps (file-name-as-directory (expand-file-name "apps" root)))
           (bin (expand-file-name "bin/" root))
           (gh (expand-file-name "gh" bin))
@@ -515,7 +516,7 @@
 
 (ert-deftest new-session-on-a-branch-from-origins-default ()
   (require 'agent-shell)
-  (let* ((root (file-name-as-directory (make-temp-file "wt" t)))
+  (let* ((root (file-name-as-directory (file-truename (make-temp-file "wt" t))))
          (origin (expand-file-name "origin.git" root))
          (seed (file-name-as-directory (expand-file-name "seed" root)))
          (repo (file-name-as-directory (expand-file-name "apps" root)))

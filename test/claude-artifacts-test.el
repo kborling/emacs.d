@@ -15,7 +15,8 @@
 
 (defun test-session ()
   "A stand-in session buffer, alone in the frame, in a fresh directory."
-  (setq test-dir (file-name-as-directory (make-temp-file "artifacts" t)))
+  ;; Truename: Windows gives the temp folder as KEVINB~1, files open under the long name.
+  (setq test-dir (file-name-as-directory (file-truename (make-temp-file "artifacts" t))))
   (delete-other-windows)
   (setq kdb-claude--artifact-pane nil)
   (let ((buf (generate-new-buffer "*Claude test*")))
