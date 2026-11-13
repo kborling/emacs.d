@@ -239,6 +239,134 @@
   (should (equal (kdb-sql--qualified 'postgres '("public" . "a\"b")) "\"public\".\"a\"\"b\""))
   (should (equal (kdb-sql--literal "O'Brien") "'O''Brien'")))
 
+(ert-deftest sql-results-parsed-edge-cases ()
+  (let ((us (string #x1f)) (rs (string #x1e)))
+    ;; SELECT COUNT(*): a blank header, which the block trimming takes.
+    (should (equal (kdb-sql--parse 'ms "  \n-\n11484\n")
+                   '((table ("") (("11484"))))))
+    ;; CRLF, as sqlcmd writes on Windows.
+    (should (equal (kdb-sql--parse 'ms (concat "a" us "b\r\n-" us "-\r\n1" us "2\r\n"))
+                   '((table ("a" "b") (("1" "2"))))))
+    ;; psql: a value that looks like the footer doesn't end the table.
+    (should (equal (kdb-sql--parse 'postgres (concat "v" rs "(1 row) x" rs "(1 row)" rs "(2 rows)\n"))
+                   '((table ("v") (("(1 row) x") ("(1 row)"))))))))
+
+(defun test-sql-dead-process ()
+  (let ((p (make-pipe-process :name "test-dead" :noquery t)))
+    (delete-process p)
+    p))
+
+(ert-deftest sql-query-command-lines-and-cleanup ()
+  (let ((us (string #x1f)) plist got)
+    (cl-letf (((symbol-function 'make-process) (lambda (&rest args) (setq plist args) 'started))
+              ((symbol-function 'kdb-sql--pg-environment) (lambda () process-environment)))
+      ;; sqlcmd: a batch of its own for NOCOUNT, whole values, messages on
+      ;; stderr, no $(name) substitution.
+      (let ((conn '(:product ms :server "s" :database "d")))
+        (kdb-sql--query conn "CREATE VIEW v AS SELECT 1 AS a;" (lambda (r) (setq got r)))
+        (let* ((cmd (plist-get plist :command))
+               (file (car (last cmd)))
+               (err-pipe (plist-get plist :stderr)))
+          (should (equal (cdr cmd) (append (kdb-sql--ms-args conn)
+                                           (list "-s" us "-W" "-y" "8000" "-r" "1" "-x" "-i" file))))
+          (should (equal (with-temp-buffer (insert-file-contents file) (buffer-string))
+                         "SET NOCOUNT ON;\nGO\nCREATE VIEW v AS SELECT 1 AS a;\n"))
+          ;; It finishes: the results, stderr last, nothing left behind.
+          (with-current-buffer (plist-get plist :buffer) (insert "a\n-\n1\n"))
+          (with-current-buffer (process-buffer err-pipe) (insert "Msg 1\n"))
+          (funcall (plist-get plist :sentinel) (test-sql-dead-process) "finished\n")
+          (should (equal got '((table ("a") (("1"))) (text "Msg 1"))))
+          (should-not (file-exists-p file))
+          (should-not (buffer-live-p (plist-get plist :buffer)))
+          (should-not (buffer-live-p (process-buffer err-pipe)))
+          (should-not (process-live-p err-pipe))))
+      ;; psql: the script as is.
+      (kdb-sql--query '(:product postgres :server "h" :database "db" :user "u") "SELECT 1;" #'ignore)
+      (let* ((cmd (plist-get plist :command))
+             (file (car (last cmd))))
+        (should (equal (car cmd) "psql"))
+        (should (equal (car (last cmd 2)) "-f"))
+        (should (equal (with-temp-buffer (insert-file-contents file) (buffer-string)) "SELECT 1;\n"))
+        (funcall (plist-get plist :sentinel) (test-sql-dead-process) "finished\n")))))
+
+(ert-deftest sql-query-quit-at-the-password-leaves-nothing ()
+  (let ((buffers (buffer-list))
+        (processes (process-list))
+        (files (directory-files temporary-file-directory nil "\\`kdb-sql.*\\.sql\\'")))
+    (cl-letf (((symbol-function 'read-passwd) (lambda (&rest _) (signal 'quit nil))))
+      ;; C-g isn't an error, so not should-error.
+      (should (eq (condition-case nil
+                      (kdb-sql--query '(:product ms :server "s" :database "d" :user "u")
+                                      "SELECT 1;" #'ignore)
+                    (quit 'quit))
+                  'quit)))
+    (should-not (seq-difference (buffer-list) buffers))
+    (should-not (seq-difference (process-list) processes))
+    (should (equal (directory-files temporary-file-directory nil "\\`kdb-sql.*\\.sql\\'") files))))
+
+(ert-deftest sql-session-conn-is-a-copy ()
+  ;; C-c C-u changes the session's own in place; a table list keeps its database.
+  (with-temp-buffer
+    (sql-interactive-mode)
+    (setq kdb-sql--conn (list :product 'ms :server "s" :database "a"))
+    (let ((conn (kdb-sql--session-conn)))
+      (should (equal conn kdb-sql--conn))
+      (plist-put kdb-sql--conn :database "b")
+      (should (equal (plist-get conn :database) "a")))))
+
+(ert-deftest sql-table-list-and-its-commands ()
+  (let (listed ran
+        (case-fold-search nil))         ; upper case is the point
+    (cl-letf (((symbol-function 'kdb-sql--session-conn) (lambda () (list :product 'ms :server "s" :database "d")))
+              ((symbol-function 'kdb-sql--query)
+               (lambda (_conn sql callback)
+                 (setq listed sql)
+                 (funcall callback '((table ("TABLE_SCHEMA" "TABLE_NAME" "TABLE_TYPE")
+                                            (("dbo" "a" "BASE TABLE") ("x y" "it's" "VIEW")))))))
+              ((symbol-function 'kdb-sql--run-and-show) (lambda (_conn sql &rest _) (push sql ran)))
+              ((symbol-function 'pop-to-buffer) #'ignore))
+      (unwind-protect
+          (progn
+            (with-temp-buffer (kdb-sql-tables))
+            (should (string-match-p "FROM INFORMATION_SCHEMA\\.TABLES" listed))
+            (with-current-buffer "*SQL tables: d*"
+              (should (equal (mapcar #'car tabulated-list-entries) '(("dbo" . "a") ("x y" . "it's"))))
+              (should (equal (aref (cadr (car tabulated-list-entries)) 2) "TABLE"))
+              ;; Odd names, quoted in the SQL that RET and s build.
+              (goto-char (point-min))
+              (forward-line 1)
+              (kdb-sql-tables-columns)
+              (kdb-sql-tables-select)
+              (should (member "SELECT TOP 100 * FROM [x y].[it's];" ran))
+              (should (seq-find (lambda (q) (string-match-p
+                                             "FROM INFORMATION_SCHEMA\\.COLUMNS WHERE TABLE_SCHEMA = 'x y' AND TABLE_NAME = 'it''s'"
+                                             q))
+                                ran))
+              ;; i and g once the script is gone.
+              (setq kdb-sql--script (generate-new-buffer "gone.sql"))
+              (kill-buffer kdb-sql--script)
+              (should-error (kdb-sql-tables-insert) :type 'user-error)
+              (should-error (kdb-sql-tables-refresh) :type 'user-error)))
+        (when (get-buffer "*SQL tables: d*") (kill-buffer "*SQL tables: d*"))))))
+
+(ert-deftest vscode-connections-survive-a-broken-settings-file ()
+  (let* ((dir (make-temp-file "vscode" t))
+         (file (expand-file-name "Code/User/settings.json" dir)))
+    (unwind-protect
+        (progn
+          (make-directory (file-name-directory file) t)
+          ;; A long string, and a file that isn't JSON at all.
+          (with-temp-file file
+            (insert "{\"x\": \"" (make-string 200000 ?a) "\", /* " (make-string 50000 ?b) " */\n"
+                    "\"mssql.connections\": [{\"server\": \"s\"}]}"))
+          (cl-letf (((symbol-function 'getenv) (lambda (v &rest _) (and (equal v "APPDATA") dir))))
+            (let ((system-type 'windows-nt))
+              (should (equal (kdb-sql--vscode-connections)
+                             '(("s" :product ms :server "s" :database nil :user nil))))
+              (with-temp-file file (insert "{ not json"))
+              (should-not (kdb-sql--vscode-connections)))))
+      (delete-directory dir t))))
+
 (ert-deftest term-buffer-closes-after-terms-own-sentinel ()
   (let* ((buf (generate-new-buffer " *term test*"))
          (proc (make-pipe-process :name "term-test" :buffer buf :noquery t))

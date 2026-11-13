@@ -889,10 +889,11 @@ previous connection's values: what made connecting work only sometimes."
 
 (defun kdb-sql--strip-jsonc ()
   "Turn the JSON with comments and trailing commas VS Code writes into JSON.
-Strings are matched first and kept, so // in a URL stays."
-  (dolist (junk '("//[^\n]*\\|/\\*\\(?:.\\|\n\\)*?\\*/" ",\\([ \t\r\n]*[]}]\\)"))
+Strings are matched first and kept, so // in a URL stays.  The patterns
+are unrolled, so a long string or comment can't overflow the matcher."
+  (dolist (junk '("//[^\n]*\\|/\\*[^*]*\\*+\\(?:[^/*][^*]*\\*+\\)*/" ",\\([ \t\r\n]*[]}]\\)"))
     (goto-char (point-min))
-    (while (re-search-forward (concat "\"\\(?:[^\"\\\\]\\|\\\\.\\)*\"\\|\\(" junk "\\)") nil t)
+    (while (re-search-forward (concat "\"[^\"\\\\]*\\(?:\\\\.[^\"\\\\]*\\)*\"\\|\\(" junk "\\)") nil t)
       (when (match-beginning 1)
         (replace-match (or (match-string 2) "") t t)))))
 
@@ -904,19 +905,21 @@ Strings are matched first and kept, so // in a URL stays."
                  ('windows-nt (getenv "APPDATA"))
                  ('darwin "~/Library/Application Support")
                  (_ "~/.config")))))
+    ;; Whatever is wrong with the file, saved connections still work.
     (when (file-readable-p file)
-      (with-temp-buffer
-        (insert-file-contents file)
-        (kdb-sql--strip-jsonc)
-        (goto-char (point-min))
-        (when-let* ((json (ignore-errors (json-parse-buffer :object-type 'alist :array-type 'list
-                                                            :null-object nil))))
+      (ignore-errors
+        (with-temp-buffer
+          (insert-file-contents file)
+          (kdb-sql--strip-jsonc)
+          (goto-char (point-min))
           (mapcar (lambda (c)
                     (let-alist c
                       (list (or .profileName .server)
                             :product 'ms :server .server :database .database
                             :user (and (equal .authenticationType "SqlLogin") .user))))
-                  (alist-get 'mssql.connections json)))))))
+                  (alist-get 'mssql.connections
+                             (json-parse-buffer :object-type 'alist :array-type 'list
+                                                :null-object nil))))))))
 
 (defun kdb-sql--lines (program &rest args)
   "PROGRAM's output lines, without its stderr (az's warnings, for one).
@@ -1104,10 +1107,13 @@ often with blank lines between, have to go as one batch."
 
 (defun kdb-sql--parse (product output)
   "PRODUCT's machine-read OUTPUT as a list of (table HEADER ROWS) and (text STRING)."
-  (let ((split (lambda (rec) (split-string rec kdb-sql--us))))
+  (let ((split (lambda (rec) (split-string rec kdb-sql--us)))
+        (output (string-replace "\r\n" "\n" output)))
     (if (eq product 'postgres)
-        ;; header RS row RS ... RS (N rows): one result set after another.
-        (let ((footer (concat kdb-sql--rs "([0-9]+ rows?)\n?"))
+        ;; header RS row RS ... RS (N rows) LF: one result set after another.
+        ;; The LF, which psql always ends the footer with, tells it from a
+        ;; value starting "(1 row)".  A value holding RS or US still splits.
+        (let ((footer (concat kdb-sql--rs "([0-9]+ rows?)\n"))
               (pos 0) results)
           (while (string-match footer output pos)
             ;; Positions first: split-string and string-trim reset the match data.
@@ -1121,8 +1127,12 @@ often with blank lines between, have to go as one batch."
             (unless (string-empty-p rest) (push (list 'text rest) results)))
           (nreverse results))
       ;; sqlcmd: blocks between blank lines; a table's second line is dashes.
+      ;; A lone unnamed column (SELECT COUNT(*)) has a blank header, which
+      ;; the trimming takes: the block then starts with the dashes.
       (mapcar (lambda (block)
                 (let ((lines (split-string block "\n")))
+                  (when (string-match-p (concat "\\`[-" kdb-sql--us "]+\\'") (car lines))
+                    (push "" lines))
                   (if (and (cdr lines)
                            (string-match-p (concat "\\`[-" kdb-sql--us "]+\\'") (cadr lines)))
                       (list 'table (funcall split (car lines)) (mapcar split (cddr lines)))
@@ -1134,13 +1144,8 @@ often with blank lines between, have to go as one batch."
 They're as `kdb-sql--parse' gives them, with anything on stderr (errors,
 notices) last, as text."
   (let* ((product (plist-get conn :product))
-         (file (make-temp-file "kdb-sql" nil ".sql"))
-         (out (generate-new-buffer " *kdb-sql out*"))
-         (err (generate-new-buffer " *kdb-sql err*"))
-         ;; Its own pipe, quiet: the default sentinel would write
-         ;; "Process ... finished" into the errors shown with the results.
-         (err-pipe (make-pipe-process :name "kdb-sql-query stderr" :buffer err
-                                      :noquery t :sentinel #'ignore))
+         ;; First: the password prompt and the az token can quit or fail,
+         ;; before there's a file, buffer or pipe to leave behind.
          (process-environment
           (cond ((eq product 'postgres)
                  (cons "PGCLIENTENCODING=UTF8" (kdb-sql--pg-environment)))
@@ -1149,9 +1154,18 @@ notices) last, as text."
                                (read-passwd (format "Password for %s: " (plist-get conn :user))))
                        process-environment))
                 (t process-environment)))
+         (file (make-temp-file "kdb-sql" nil ".sql"))
+         (out (generate-new-buffer " *kdb-sql out*"))
+         (err (generate-new-buffer " *kdb-sql err*"))
+         ;; Its own pipe, quiet: the default sentinel would write
+         ;; "Process ... finished" into the errors shown with the results.
+         (err-pipe (make-pipe-process :name "kdb-sql-query stderr" :buffer err
+                                      :noquery t :sentinel #'ignore))
          (coding-system-for-write 'utf-8))
     (with-temp-file file
-      (insert (if (eq product 'postgres) sql (concat "SET NOCOUNT ON;\n" sql)) "\n"))
+      ;; In a batch of its own: CREATE VIEW, PROCEDURE and the like must
+      ;; come first in theirs.  It's a session setting, so it carries over.
+      (insert (if (eq product 'postgres) sql (concat "SET NOCOUNT ON;\nGO\n" sql)) "\n"))
     (condition-case err-data
         (make-process
          :name "kdb-sql-query" :buffer out :stderr err-pipe :noquery t
@@ -1161,13 +1175,18 @@ notices) last, as text."
                                     "-P" "footer=on")
                               (kdb-sql--pg-args conn) (list "-f" file))
                     ;; -s before -i: -i takes the rest as more input files.
+                    ;; -y 8000: (max) and xml values whole, not cut at 256.
+                    ;; -r 1: PRINT and errors to stderr, not between tables.
+                    ;; -x: no $(name) substitution in the script.
                     (append (list (or (bound-and-true-p sql-ms-program) "sqlcmd"))
-                            (kdb-sql--ms-args conn) (list "-s" kdb-sql--us "-W" "-i" file)))
+                            (kdb-sql--ms-args conn)
+                            (list "-s" kdb-sql--us "-W" "-y" "8000" "-r" "1" "-x" "-i" file)))
          :sentinel
          (lambda (proc _event)
            (unless (process-live-p proc)
-             ;; stderr comes through its own pipe, which may still be draining.
-             (accept-process-output err-pipe 0.2)
+             ;; stderr comes through its own pipe, which may still be draining:
+             ;; until it's quiet for 0.2 s.
+             (while (accept-process-output err-pipe 0.2))
              (delete-process err-pipe)
              (let ((results (kdb-sql--parse product (with-current-buffer out (buffer-string))))
                    (errors (string-trim (with-current-buffer err (buffer-string)))))
@@ -1219,10 +1238,13 @@ notices) last, as text."
       (current-buffer))))
 
 (defun kdb-sql--session-conn ()
-  "The connection of the current script's session (or SQLi buffer's)."
+  "A copy of the connection of the current script's session (or SQLi buffer's).
+A copy: switching the session's database (C-c C-u) changes its own in place,
+and a table list opened before must keep the database it lists."
   (let ((sqli (kdb-sql--session)))
-    (or (buffer-local-value 'kdb-sql--conn sqli)
-        (user-error "%s wasn't started by kdb-sql-connect" (buffer-name sqli)))))
+    (copy-sequence
+     (or (buffer-local-value 'kdb-sql--conn sqli)
+         (user-error "%s wasn't started by kdb-sql-connect" (buffer-name sqli))))))
 
 (defun kdb-sql--run-and-show (conn sql name title)
   "Run SQL on CONN in the background, then show its results in NAME under TITLE."
@@ -1280,8 +1302,10 @@ On the database of the script's session (C-c C-a), in the background."
         (script (current-buffer)))
     (message "Listing tables on %s..." (plist-get conn :database))
     (kdb-sql--query
-     conn (concat "SELECT table_schema, table_name, table_type FROM information_schema.tables"
-                  " WHERE table_schema NOT IN ('pg_catalog', 'information_schema', 'sys')"
+     ;; Upper case for SQL Server databases with a case-sensitive collation;
+     ;; PostgreSQL folds unquoted names to lower case.
+     conn (concat "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES"
+                  " WHERE TABLE_SCHEMA NOT IN ('pg_catalog', 'information_schema', 'sys')"
                   " ORDER BY 1, 2;")
      (lambda (results)
        (let ((table (seq-find (lambda (r) (eq (car r) 'table)) results)))
@@ -1316,9 +1340,9 @@ On the database of the script's session (C-c C-a), in the background."
   (let ((id (kdb-sql--tables-at-point)))
     (kdb-sql--run-and-show
      kdb-sql--conn
-     (format (concat "SELECT column_name, data_type, character_maximum_length, is_nullable,"
-                     " column_default FROM information_schema.columns"
-                     " WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position;")
+     (format (concat "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE,"
+                     " COLUMN_DEFAULT FROM INFORMATION_SCHEMA.COLUMNS"
+                     " WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s ORDER BY ORDINAL_POSITION;")
              (kdb-sql--literal (car id)) (kdb-sql--literal (cdr id)))
      (format "*SQL columns: %s.%s*" (car id) (cdr id))
      (format "Columns of %s.%s" (car id) (cdr id)))))
@@ -2316,7 +2340,8 @@ zsh says \"'eat-truecolor': unknown terminal type\".  Compiled once, and
 again when eat's source changes; kept out of eat's own checkout."
   (let ((dir (locate-user-emacs-file "eat-terminfo/"))
         (src (expand-file-name "eat.ti" eat--install-path)))
-    (unless (seq-some (lambda (f) (file-newer-than-file-p f src))
+    ;; Up to date unless the source is newer: equal times (same second) too.
+    (unless (seq-some (lambda (f) (not (file-newer-than-file-p src f)))
                       (and (file-directory-p dir)
                            (directory-files-recursively dir "\\`eat-truecolor\\'")))
       (make-directory dir t)
