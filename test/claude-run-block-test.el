@@ -140,6 +140,44 @@ a folder a shell is still in."
     (test-kill-shells)
     (delete-directory root t)))
 
+(ert-deftest run-block-busy-shell-gets-one-beside-it ()
+  ;; A command sent to a shell running a server would wait for it to end,
+  ;; which it never does: a new shell instead.  An idle one is reused.
+  (test-kill-shells)
+  (let ((dir (file-name-as-directory (file-truename (make-temp-file "busy" t)))))
+    (let ((first (kdb-claude--block-to-shell 'bash "sleep 30" dir t)))
+      (test-shell-output first "sleep 30")
+      (should-not (kdb-claude--shell-at-prompt-p first))
+      (let ((second (kdb-claude--block-to-shell 'bash "echo beside" dir t)))
+        (should-not (eq first second))
+        (should (string-match-p "^beside" (test-shell-output second "^beside")))
+        ;; Back at its prompt: reused.
+        (let ((end (+ (float-time) 5)))
+          (while (and (not (kdb-claude--shell-at-prompt-p second)) (< (float-time) end))
+            (accept-process-output nil 0.05)))
+        (should (eq second (kdb-claude--block-shell 'bash dir)))))
+    (test-kill-shells)
+    (delete-directory dir t)))
+
+(ert-deftest claude-run-notes-each-step ()
+  (let ((kdb-claude-run-log (make-temp-file "run-log")))
+    (cl-letf (((symbol-function 'kdb-claude--in-session-tab) (lambda (_id fn &rest _) (funcall fn (current-buffer))))
+              ((symbol-function 'kdb-claude--block-to-shell) (lambda (&rest _) (get-buffer-create " *test shell*")))
+              ((symbol-function 'kdb-claude--use) #'ignore))
+      (unwind-protect
+          (progn
+            (should (equal (kdb-claude-run "s1" "dotnet run --project Api" default-directory "pwsh")
+                           " *test shell*"))
+            (let ((log (with-temp-buffer (insert-file-contents kdb-claude-run-log) (buffer-string))))
+              (should (string-match-p "s1: start dotnet run --project Api\n.*s1: in its tab\n.*s1: sent to  \\*test shell\\*\n.*s1: done after" log)))
+            ;; A step that never comes back is the last line.
+            (cl-letf (((symbol-function 'kdb-claude--block-to-shell) (lambda (&rest _) (error "Stuck"))))
+              (should-error (kdb-claude-run "s2" "x" default-directory "pwsh")))
+            (should (string-match-p "s2: in its tab\n.*s2: FAILED or quit after"
+                                    (with-temp-buffer (insert-file-contents kdb-claude-run-log) (buffer-string)))))
+        (kill-buffer " *test shell*")
+        (delete-file kdb-claude-run-log)))))
+
 (ert-deftest run-block-plain-block-is-machine-shell ()
   ;; A block naming no language runs in bash (Git Bash on Windows).
   (should (eq (kdb-claude--block-shell-kind "") (if (kdb-claude--bash) 'bash 'pwsh)))

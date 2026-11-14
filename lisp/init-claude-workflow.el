@@ -1498,10 +1498,36 @@ better in Emacs than PowerShell), or pwsh where there's no bash."
     (unless (string-match-p "/system32/" (downcase (subst-char-in-string ?\\ ?/ bash)))
       bash)))
 
+(defun kdb-claude--shell-at-prompt-p (buf)
+  "Non-nil if shell BUF waits at its prompt (\"$ \", pwsh's \"> \", \"? \").
+Not while it runs something: a server, a build, a long script."
+  (when-let* ((proc (get-buffer-process buf)))
+    (with-current-buffer buf
+      (save-excursion
+        (goto-char (process-mark proc))
+        (looking-back "[#$%>?] " (pos-bol))))))
+
+(defun kdb-claude--shell-free-p (buf)
+  "Non-nil if shell BUF can take a command now: not started, or at its prompt.
+A command sent just before may still be finishing: up to a second for
+its prompt to come back, which a server's never does."
+  (let ((proc (get-buffer-process buf))
+        (end (+ (float-time) 1)))
+    (or (not (process-live-p proc))
+        (progn
+          (while (and (process-live-p proc) (< (float-time) end)
+                      (not (kdb-claude--shell-at-prompt-p buf)))
+            (accept-process-output proc 0.05))
+          (or (not (process-live-p proc)) (kdb-claude--shell-at-prompt-p buf))))))
+
 (defun kdb-claude--block-shell (kind dir)
-  "DIR's shell of KIND, started if need be and shown in the bottom panel."
-  (let ((buf (or (seq-find (lambda (b) (equal (buffer-local-value 'kdb-claude--shell-for b)
-                                              (cons kind dir)))
+  "DIR's shell of KIND, started if need be and shown in the bottom panel.
+One busy running something gets a new shell beside it: a command sent
+there would only run once that ends, and a server never does."
+  (require 'shell)
+  (let ((buf (or (seq-find (lambda (b) (and (equal (buffer-local-value 'kdb-claude--shell-for b)
+                                                   (cons kind dir))
+                                            (kdb-claude--shell-free-p b)))
                            (buffer-list))
                  (generate-new-buffer
                   (format "*claude %s: %s*" kind (file-name-nondirectory (directory-file-name dir)))))))
@@ -1528,10 +1554,7 @@ better in Emacs than PowerShell), or pwsh where there's no bash."
               (end (+ (float-time) 5)))
           ;; Until the prompt ("$", or pwsh's "? ") ends the output.
           (while (and (process-live-p proc) (< (float-time) end)
-                      (not (with-current-buffer buf
-                             (save-excursion
-                               (goto-char (process-mark proc))
-                               (looking-back "[#$%>?] " (pos-bol))))))
+                      (not (kdb-claude--shell-at-prompt-p buf)))
             (accept-process-output proc 0.05)))))
     (display-buffer buf)
     buf))
@@ -2014,22 +2037,42 @@ DIR defaults to the session's directory.  SHELL is \"bash\" or \"pwsh\";
 by default bash (Git Bash on Windows, as Claude's own Bash tool uses),
 else pwsh.  The shell is kept, so cd and variables carry over.  Return
 the shell's buffer name, for `kdb-claude-output'.  Meant for
-`emacsclient --eval'."
-  (kdb-claude--in-session-tab
-   id (lambda (buf)
-        (let* ((dir (file-name-as-directory
-                     (expand-file-name (or dir (buffer-local-value 'default-directory buf)))))
-               (kind (pcase shell
-                       ("pwsh" 'pwsh)
-                       ("bash" 'bash)
-                       (_ (if (kdb-claude--bash) 'bash 'pwsh))))
-               (had (seq-find (lambda (b) (and (equal (buffer-local-value 'kdb-claude--shell-for b)
-                                                      (cons kind dir))
-                                               (get-buffer-process b)))
-                              (buffer-list)))
-               (shell (kdb-claude--block-to-shell kind command dir t)))
-          (kdb-claude--use shell id (not had))
-          (buffer-name shell)))))
+`emacsclient --eval'.  Each step goes to `kdb-claude-run-log', so if
+Emacs ever stops answering in one, its last line says which."
+  (let ((start (float-time)) done)
+    (kdb-claude--run-log "%s: start %s" id (truncate-string-to-width command 120 nil nil "…"))
+    (unwind-protect
+        (prog1
+            (kdb-claude--in-session-tab
+             id (lambda (buf)
+                  (kdb-claude--run-log "%s: in its tab" id)
+                  (let* ((dir (file-name-as-directory
+                               (expand-file-name (or dir (buffer-local-value 'default-directory buf)))))
+                         (kind (pcase shell
+                                 ("pwsh" 'pwsh)
+                                 ("bash" 'bash)
+                                 (_ (if (kdb-claude--bash) 'bash 'pwsh))))
+                         (before (buffer-list))
+                         (shell (kdb-claude--block-to-shell kind command dir t)))
+                    ;; Opened here (a new shell, or one beside a busy one): it's
+                    ;; the session's to close.
+                    (kdb-claude--use shell id (not (memq shell before)))
+                    (kdb-claude--run-log "%s: sent to %s" id (buffer-name shell))
+                    (buffer-name shell))))
+          (setq done t))
+      (kdb-claude--run-log "%s: %s after %.1fs" id (if done "done" "FAILED or quit")
+                           (- (float-time) start)))))
+
+(defvar kdb-claude-run-log (expand-file-name "kdb-claude-run.log" temporary-file-directory)
+  "Where `kdb-claude-run' notes its steps, newest last.")
+
+(defun kdb-claude--run-log (format-string &rest args)
+  "Append FORMAT-STRING with ARGS to `kdb-claude-run-log', timestamped.
+Written at once, so it survives a frozen Emacs being killed."
+  (ignore-errors
+    (let ((inhibit-message t))
+      (write-region (concat (format-time-string "%F %T.%3N ") (apply #'format format-string args) "\n")
+                    nil kdb-claude-run-log 'append 'silent))))
 
 ;;;###autoload
 (defun kdb-claude-output (buffer &optional lines)
