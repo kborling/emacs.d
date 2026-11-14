@@ -1075,7 +1075,8 @@ From a script, its session; from a SQLi buffer, that one."
 
 (defun kdb-sql--linked ()
   "The live session this buffer is linked to (a SQLi buffer is its own), or nil."
-  (cond ((derived-mode-p 'sql-interactive-mode) (current-buffer))
+  (cond ((derived-mode-p 'sql-interactive-mode)
+         (and (sql-buffer-live-p (current-buffer)) (current-buffer)))
         ((and (local-variable-p 'sql-buffer) (sql-buffer-live-p sql-buffer))
          (get-buffer sql-buffer))))
 
@@ -1086,9 +1087,11 @@ the buffer is linked to it, so the next run goes there without asking."
   (or (kdb-sql--linked)
       ;; Linked to one that has ended (an expired az sign-in, say): say so,
       ;; with its last words, rather than quietly connecting elsewhere.
-      (when-let* (((local-variable-p 'sql-buffer))
-                  (gone (get-buffer sql-buffer)))
-        (user-error "%s has ended: %s  (C-c d c connects again)" sql-buffer
+      ;; (sql-mode makes `sql-buffer' local in every script, nil until a
+      ;; first session: that's no ended one.)
+      (when-let* ((name (and (local-variable-p 'sql-buffer) sql-buffer))
+                  (gone (get-buffer name)))
+        (user-error "%s has ended: %s  (C-c d c connects again)" name
                     (with-current-buffer gone
                       (truncate-string-to-width
                        (string-trim (buffer-substring-no-properties
@@ -1491,7 +1494,7 @@ On the database of the buffer's session, in the background; any buffer."
 
 (defun kdb-sql--menu-status ()
   "The menu's heading: the session this buffer runs on, or what Run will do."
-  (if-let* ((sqli (and (boundp 'sql-buffer) (kdb-sql--linked)))
+  (if-let* ((sqli (kdb-sql--linked))
             (conn (buffer-local-value 'kdb-sql--conn sqli)))
       (format "SQL: this buffer runs on %s, %s" (buffer-name sqli)
               (or (plist-get conn :database) (plist-get conn :server)))

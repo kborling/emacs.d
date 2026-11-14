@@ -1500,35 +1500,38 @@ better in Emacs than PowerShell), or pwsh where there's no bash."
 
 (defun kdb-claude--shell-at-prompt-p (buf)
   "Non-nil if shell BUF waits at its prompt (\"$ \", pwsh's \"> \", \"? \").
-Not while it runs something: a server, a build, a long script."
+Not while it runs something: a server, a build, a long script.  No zsh
+\"% \": only bash and pwsh are started, and a progress line ends \"45% \"."
   (when-let* ((proc (get-buffer-process buf)))
     (with-current-buffer buf
       (save-excursion
         (goto-char (process-mark proc))
-        (looking-back "[#$%>?] " (pos-bol))))))
+        (looking-back "[#$>?] " (pos-bol))))))
 
-(defun kdb-claude--shell-free-p (buf)
-  "Non-nil if shell BUF can take a command now: not started, or at its prompt.
-A command sent just before may still be finishing: up to a second for
-its prompt to come back, which a server's never does."
-  (let ((proc (get-buffer-process buf))
-        (end (+ (float-time) 1)))
-    (or (not (process-live-p proc))
-        (progn
-          (while (and (process-live-p proc) (< (float-time) end)
-                      (not (kdb-claude--shell-at-prompt-p buf)))
-            (accept-process-output proc 0.05))
-          (or (not (process-live-p proc)) (kdb-claude--shell-at-prompt-p buf))))))
+(defun kdb-claude--shell-free-p (buf &optional deadline)
+  "Non-nil if shell BUF can take a command: not started, or at its prompt.
+A command sent just before may still be finishing: until DEADLINE (a
+`float-time'; default now, no wait) for its prompt to come back, which a
+server's never does."
+  (let ((proc (get-buffer-process buf)))
+    (while (and (process-live-p proc) (< (float-time) (or deadline 0))
+                (not (kdb-claude--shell-at-prompt-p buf)))
+      (accept-process-output proc 0.05))
+    (or (not (process-live-p proc)) (kdb-claude--shell-at-prompt-p buf))))
 
 (defun kdb-claude--block-shell (kind dir)
   "DIR's shell of KIND, started if need be and shown in the bottom panel.
 One busy running something gets a new shell beside it: a command sent
 there would only run once that ends, and a server never does."
   (require 'shell)
-  (let ((buf (or (seq-find (lambda (b) (and (equal (buffer-local-value 'kdb-claude--shell-for b)
-                                                   (cons kind dir))
-                                            (kdb-claude--shell-free-p b)))
-                           (buffer-list))
+  (let* ((mine (seq-filter (lambda (b) (equal (buffer-local-value 'kdb-claude--shell-for b)
+                                              (cons kind dir)))
+                           (buffer-list)))
+         ;; One free now first; else up to a second, shared, for one to finish.
+         (deadline (+ (float-time) 1))
+         (buf (or (seq-find #'kdb-claude--shell-free-p mine)
+                  (seq-find (lambda (b) (and (buffer-live-p b) (kdb-claude--shell-free-p b deadline)))
+                            mine)
                  (generate-new-buffer
                   (format "*claude %s: %s*" kind (file-name-nondirectory (directory-file-name dir)))))))
     (unless (comint-check-proc buf)
@@ -1550,12 +1553,8 @@ there would only run once that ends, and a server never does."
           ;; Dev servers log without end: keep only the recent lines.
           (setq-local comint-buffer-maximum-size 5000)
           (add-hook 'comint-output-filter-functions #'comint-truncate-buffer nil t))
-        (let ((proc (get-buffer-process buf))
-              (end (+ (float-time) 5)))
-          ;; Until the prompt ("$", or pwsh's "? ") ends the output.
-          (while (and (process-live-p proc) (< (float-time) end)
-                      (not (kdb-claude--shell-at-prompt-p buf)))
-            (accept-process-output proc 0.05)))))
+        ;; Until the prompt ("$", or pwsh's "> ") ends the output, at most 5 s.
+        (kdb-claude--shell-free-p buf (+ (float-time) 5))))
     (display-buffer buf)
     buf))
 
@@ -2040,7 +2039,9 @@ the shell's buffer name, for `kdb-claude-output'.  Meant for
 `emacsclient --eval'.  Each step goes to `kdb-claude-run-log', so if
 Emacs ever stops answering in one, its last line says which."
   (let ((start (float-time)) done)
-    (kdb-claude--run-log "%s: start %s" id (truncate-string-to-width command 120 nil nil "…"))
+    ;; One line per step, whatever the command spans: the last line names it.
+    (kdb-claude--run-log "%s: start %s" id
+                         (truncate-string-to-width (string-replace "\n" " ⏎ " command) 120 nil nil "…"))
     (unwind-protect
         (prog1
             (kdb-claude--in-session-tab
@@ -2052,11 +2053,11 @@ Emacs ever stops answering in one, its last line says which."
                                  ("pwsh" 'pwsh)
                                  ("bash" 'bash)
                                  (_ (if (kdb-claude--bash) 'bash 'pwsh))))
-                         (before (buffer-list))
+                         (before (process-list))
                          (shell (kdb-claude--block-to-shell kind command dir t)))
-                    ;; Opened here (a new shell, or one beside a busy one): it's
-                    ;; the session's to close.
-                    (kdb-claude--use shell id (not (memq shell before)))
+                    ;; Its shell started here (new, beside a busy one, or in a
+                    ;; buffer whose shell had ended): the session's to close.
+                    (kdb-claude--use shell id (not (memq (get-buffer-process shell) before)))
                     (kdb-claude--run-log "%s: sent to %s" id (buffer-name shell))
                     (buffer-name shell))))
           (setq done t))
@@ -2070,7 +2071,10 @@ Emacs ever stops answering in one, its last line says which."
   "Append FORMAT-STRING with ARGS to `kdb-claude-run-log', timestamped.
 Written at once, so it survives a frozen Emacs being killed."
   (ignore-errors
-    (let ((inhibit-message t))
+    ;; UTF-8 always: else a … in a command, from a Latin-1 buffer, asks
+    ;; which coding to write, and the emacsclient call waits for that.
+    (let ((inhibit-message t)
+          (coding-system-for-write 'utf-8))
       (write-region (concat (format-time-string "%F %T.%3N ") (apply #'format format-string args) "\n")
                     nil kdb-claude-run-log 'append 'silent))))
 

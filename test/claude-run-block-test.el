@@ -145,8 +145,9 @@ a folder a shell is still in."
   ;; which it never does: a new shell instead.  An idle one is reused.
   (test-kill-shells)
   (let ((dir (file-name-as-directory (file-truename (make-temp-file "busy" t)))))
-    (let ((first (kdb-claude--block-to-shell 'bash "sleep 30" dir t)))
-      (test-shell-output first "sleep 30")
+    ;; A builtin, so no child keeps the folder in use once bash is killed.
+    (let ((first (kdb-claude--block-to-shell 'bash "read -t 30 _" dir t)))
+      (test-shell-output first "read -t 30")
       (should-not (kdb-claude--shell-at-prompt-p first))
       (let ((second (kdb-claude--block-to-shell 'bash "echo beside" dir t)))
         (should-not (eq first second))
@@ -175,6 +176,64 @@ a folder a shell is still in."
               (should-error (kdb-claude-run "s2" "x" default-directory "pwsh")))
             (should (string-match-p "s2: in its tab\n.*s2: FAILED or quit after"
                                     (with-temp-buffer (insert-file-contents kdb-claude-run-log) (buffer-string)))))
+        (kill-buffer " *test shell*")
+        (delete-file kdb-claude-run-log)))))
+
+(ert-deftest shell-prompt-told-from-output ()
+  ;; At a prompt: bash's "$ ", pwsh's "PS C:\x> ".  Busy: a log line, a
+  ;; progress line ending "45% ", a password prompt.
+  (let* ((buf (generate-new-buffer " *test prompt*"))
+         (proc (make-pipe-process :name "test-prompt" :buffer buf :noquery t)))
+    (unwind-protect
+        (dolist (case '(("user@host MINGW64 ~/x\n$ " . t) ("PS C:\\x> " . t)
+                        ("info: Now listening on: http://127.0.0.1:5088\n" . nil)
+                        ("Restoring packages 45% " . nil) ("Password: " . nil)))
+          (with-current-buffer buf
+            (erase-buffer)
+            (insert (car case))
+            (set-marker (process-mark proc) (point-max)))
+          (should (eq (and (kdb-claude--shell-at-prompt-p buf) t) (cdr case))))
+      (delete-process proc)
+      (kill-buffer buf))))
+
+(ert-deftest claude-run-claims-only-shells-it-started ()
+  ;; A shell started by this run (new, or in a buffer whose shell had
+  ;; ended) is the session's to close; one already running isn't.
+  (let* ((buf (generate-new-buffer " *test claim*"))
+         (running (make-pipe-process :name "test-running" :buffer buf :noquery t))
+         opened)
+    (cl-letf (((symbol-function 'kdb-claude--in-session-tab) (lambda (_id fn &rest _) (funcall fn (current-buffer))))
+              ((symbol-function 'kdb-claude--use) (lambda (_b _id o) (setq opened o)))
+              ((symbol-function 'kdb-claude--run-log) #'ignore))
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'kdb-claude--block-to-shell) (lambda (&rest _) buf)))
+              (kdb-claude-run "s" "x" default-directory "bash")
+              (should-not opened))
+            (delete-process running)
+            (cl-letf (((symbol-function 'kdb-claude--block-to-shell)
+                       (lambda (&rest _) (make-pipe-process :name "test-restarted" :buffer buf :noquery t) buf)))
+              (kdb-claude-run "s" "x" default-directory "bash")
+              (should opened)))
+        (when (get-buffer-process buf) (delete-process (get-buffer-process buf)))
+        (kill-buffer buf)))))
+
+(ert-deftest claude-run-log-is-one-line-per-step-and-utf-8 ()
+  (let ((kdb-claude-run-log (make-temp-file "run-log")))
+    (cl-letf (((symbol-function 'kdb-claude--in-session-tab) (lambda (_id fn &rest _) (funcall fn (current-buffer))))
+              ((symbol-function 'kdb-claude--block-to-shell) (lambda (&rest _) (get-buffer-create " *test shell*")))
+              ((symbol-function 'kdb-claude--use) #'ignore))
+      (unwind-protect
+          (with-temp-buffer
+            ;; A Latin-1 buffer, and a command with a … : no coding prompt.
+            (setq buffer-file-coding-system 'iso-latin-1-dos)
+            (kdb-claude-run "s3" (concat "git commit -F - <<'EOF'\nfix … done\nEOF") default-directory "bash")
+            (let ((lines (with-temp-buffer
+                           (let ((coding-system-for-read 'utf-8))
+                             (insert-file-contents kdb-claude-run-log))
+                           (split-string (buffer-string) "\n" t))))
+              (should (= 4 (length lines)))
+              (should (string-match-p "s3: start git commit -F - <<'EOF' ⏎ fix … done ⏎ EOF" (car lines)))))
         (kill-buffer " *test shell*")
         (delete-file kdb-claude-run-log)))))
 

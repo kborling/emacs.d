@@ -121,8 +121,10 @@
               ;; psql's \g, which runs the previous query again on the new database.
               ((symbol-function 'sql-send-string) (lambda (s) (push (list 'via-sql-send s) sent)))
               ((symbol-function 'comint-send-string) (lambda (_proc s) (push s sent)))
-              ((symbol-function 'sql-ms) (lambda (name) (set-buffer (get-buffer-create name)) (sql-interactive-mode)))
-              ((symbol-function 'sql-postgres) (lambda (name) (set-buffer (get-buffer-create name)) (sql-interactive-mode))))
+              ((symbol-function 'sql-ms) (lambda (name) (set-buffer (get-buffer-create name)) (sql-interactive-mode)
+                                           (make-pipe-process :name name :buffer (current-buffer) :noquery t)))
+              ((symbol-function 'sql-postgres) (lambda (name) (set-buffer (get-buffer-create name)) (sql-interactive-mode)
+                                           (make-pipe-process :name name :buffer (current-buffer) :noquery t))))
       (unwind-protect
           (progn
             ;; No database saved: picked from the server's list.
@@ -316,6 +318,7 @@
   ;; C-c C-u changes the session's own in place; a table list keeps its database.
   (with-temp-buffer
     (sql-interactive-mode)
+    (make-pipe-process :name "test-copy" :buffer (current-buffer) :noquery t)
     (setq kdb-sql--conn (list :product 'ms :server "s" :database "a"))
     (let ((conn (kdb-sql--session-conn)))
       (should (equal conn kdb-sql--conn))
@@ -555,6 +558,55 @@
               (should (string-match-p "\\*SQL: gone\\* has ended: AADSTS50078" (cadr err))))
             (should-not connected))
         (kill-buffer gone)))))
+
+(ert-deftest sql-fresh-script-links-the-open-session ()
+  ;; sql-mode makes `sql-buffer' local, nil until a first session: that's
+  ;; not an ended one, and Run links the open session.
+  (let* ((a (get-buffer-create "*SQL: a*"))
+         (pa (make-pipe-process :name "test-a" :buffer a :noquery t))
+         sent)
+    (with-current-buffer a
+      (sql-interactive-mode)
+      (setq kdb-sql--conn (list :product 'ms :server "s" :database "A")))
+    (cl-letf (((symbol-function 'sql-send-buffer) (lambda () (push sql-buffer sent))))
+      (unwind-protect
+          (with-temp-buffer
+            (sql-mode)
+            (setq sql-buffer nil)
+            (kdb-sql-send-dwim)
+            (should (equal sent '("*SQL: a*"))))
+        (delete-process pa)
+        (kill-buffer a)))))
+
+(ert-deftest sql-other-buffers-dont-take-the-last-session ()
+  ;; sql.el sets the default `sql-buffer' to the last session; only a
+  ;; buffer's own link counts.
+  (let ((a (get-buffer-create "*SQL: a*"))
+        (old (default-value 'sql-buffer)))
+    (let ((pa (make-pipe-process :name "test-a" :buffer a :noquery t)))
+      (unwind-protect
+          (progn
+            (with-current-buffer a (sql-interactive-mode))
+            (setq-default sql-buffer "*SQL: a*")
+            (with-temp-buffer
+              (text-mode)
+              (should-not (kdb-sql--linked))))
+        (setq-default sql-buffer old)
+        (delete-process pa)
+        (kill-buffer a)))))
+
+(ert-deftest sql-ended-results-buffer-says-so ()
+  ;; Its own session ended (an expired sign-in): not a live link.
+  (let ((gone (get-buffer-create "*SQL: gone*")))
+    (unwind-protect
+        (with-current-buffer gone
+          (sql-interactive-mode)
+          (setq-local sql-buffer "*SQL: gone*")
+          (insert "AADSTS50078: expired\n")
+          (should-not (kdb-sql--linked))
+          (should-not (string-match-p "runs on" (kdb-sql--menu-status)))
+          (should-error (kdb-sql-send-dwim) :type 'user-error))
+      (kill-buffer gone))))
 
 (ert-deftest term-buffer-closes-after-terms-own-sentinel ()
   (let* ((buf (generate-new-buffer " *term test*"))
