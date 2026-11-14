@@ -1035,10 +1035,15 @@ after an expired token, or to start over on another database."
       (when-let* ((sqli (get-buffer buf-name)))
         (with-current-buffer sqli
           (setq kdb-sql--conn (plist-put (copy-sequence conn) :database database)))))
-    ;; Back to the script, the results showing beside it: connecting moves
-    ;; point to the empty SQLi buffer, which looks like a query that failed.
-    (when (with-current-buffer from (derived-mode-p 'sql-mode))
-      (with-current-buffer from (sql-set-product product))
+    ;; The buffer it was started from runs on it, whatever its mode: sql.el
+    ;; links only sql-mode ones.  Back there, the results showing beside it:
+    ;; connecting moves point to the empty SQLi buffer, which looks like a
+    ;; query that failed.
+    (unless (or (eq from (get-buffer buf-name))
+                (with-current-buffer from (derived-mode-p 'sql-interactive-mode)))
+      (with-current-buffer from
+        (setq-local sql-buffer buf-name)
+        (when (derived-mode-p 'sql-mode) (sql-set-product product)))
       (when-let* ((win (get-buffer-window from)))
         (select-window win)))))
 
@@ -1068,21 +1073,66 @@ From a script, its session; from a SQLi buffer, that one."
                           (kdb-sql--use-command (plist-get kdb-sql--conn :product) database)))
     (message "%s: now on %s" (buffer-name sqli) database)))
 
-(defun kdb-sql--session ()
-  "The SQLi buffer for the current buffer: itself, or its script's session."
+(defun kdb-sql--linked ()
+  "The live session this buffer is linked to (a SQLi buffer is its own), or nil."
   (cond ((derived-mode-p 'sql-interactive-mode) (current-buffer))
-        ((sql-buffer-live-p sql-buffer) (get-buffer sql-buffer))
-        (t (user-error "Not connected: C-c C-a first"))))
+        ((and (local-variable-p 'sql-buffer) (sql-buffer-live-p sql-buffer))
+         (get-buffer sql-buffer))))
+
+(defun kdb-sql--session ()
+  "The session for the current buffer, any buffer: the one it's linked to,
+else the only one open, else one picked, else a new connection.  Whichever,
+the buffer is linked to it, so the next run goes there without asking."
+  (or (kdb-sql--linked)
+      ;; Linked to one that has ended (an expired az sign-in, say): say so,
+      ;; with its last words, rather than quietly connecting elsewhere.
+      (when-let* (((local-variable-p 'sql-buffer))
+                  (gone (get-buffer sql-buffer)))
+        (user-error "%s has ended: %s  (C-c d c connects again)" sql-buffer
+                    (with-current-buffer gone
+                      (truncate-string-to-width
+                       (string-trim (buffer-substring-no-properties
+                                     (max (point-min) (- (point-max) 300)) (point-max)))
+                       160 nil nil "…"))))
+      (let ((sessions (kdb-sql--sessions)))
+        (if (null sessions)
+            (progn (call-interactively #'kdb-sql-connect)
+                   (or (kdb-sql--linked) (user-error "Not connected")))
+          (kdb-sql-use-session
+           (if (cdr sessions)
+               (completing-read "Run on session: " (mapcar #'buffer-name sessions) nil t)
+             (buffer-name (car sessions))))))))
+
+(defun kdb-sql-use-session (session)
+  "Run this buffer's SQL on SESSION from now on; return its buffer.
+Any buffer: a .sql file, an org or markdown note, a scratch buffer."
+  (interactive
+   (list (let ((sessions (mapcar #'buffer-name (kdb-sql--sessions))))
+           (unless sessions (user-error "No SQL session open: C-c d c connects"))
+           (completing-read "Run this buffer on: " sessions nil t))))
+  (let ((sqli (get-buffer session)))
+    (setq-local sql-buffer (buffer-name sqli))
+    (when (derived-mode-p 'sql-mode)
+      (sql-set-product (plist-get (buffer-local-value 'kdb-sql--conn sqli) :product)))
+    (when (called-interactively-p 'any)
+      (message "%s runs on %s" (buffer-name) session))
+    sqli))
 
 (defun kdb-sql-send-dwim ()
-  "Run the region, or else the whole buffer, as VS Code does.
+  "Run the region, or else the whole buffer, as VS Code does; any buffer.
 Not the paragraph: a script's DECLAREs and the statements using them,
 often with blank lines between, have to go as one batch."
   (interactive)
-  (kdb-sql--require-script)
+  (kdb-sql--session)
   (if (use-region-p)
       (sql-send-region (region-beginning) (region-end))
     (sql-send-buffer)))
+
+(defun kdb-sql-send-statement ()
+  "Run the statement at point: its paragraph, between blank lines; any buffer."
+  (interactive)
+  (kdb-sql--session)
+  (sql-send-paragraph))
 
 ;; Results as org tables, and a list of tables.  Both run apart from the
 ;; session, in the background, on its server and database: what the
@@ -1260,9 +1310,8 @@ and a table list opened before must keep the database it lists."
 
 (defun kdb-sql-run-to-org ()
   "Run the region, or else the whole script, with the results as org tables.
-On the database of the script's session (C-c C-a), in the background."
+On the database of the buffer's session, in the background; any buffer."
   (interactive)
-  (kdb-sql--require-script)
   (let* ((conn (kdb-sql--session-conn))
          (sql (if (use-region-p)
                   (buffer-substring-no-properties (region-beginning) (region-end))
@@ -1401,15 +1450,6 @@ On the database of the script's session (C-c C-a), in the background."
                                (process-live-p (get-buffer-process b))))
               (buffer-list)))
 
-(defun kdb-sql--script-p ()
-  "Non-nil in a SQL script: what Run and Org results run."
-  (derived-mode-p 'sql-mode))
-
-(defun kdb-sql--require-script ()
-  "Signal unless in a SQL script."
-  (unless (kdb-sql--script-p)
-    (user-error "Not in a SQL script: C-c d n starts one, C-c d f opens one")))
-
 (defun kdb-sql-new-script (name)
   "A new SQL script on connection NAME: a sql-mode buffer, connected."
   (interactive
@@ -1440,11 +1480,9 @@ On the database of the script's session (C-c C-a), in the background."
     (pop-to-buffer (completing-read "Session: " sessions nil t))))
 
 (defun kdb-sql-disconnect ()
-  "Close a SQL session: this script's, or one picked from the open ones."
+  "Close a SQL session: this buffer's, or one picked from the open ones."
   (interactive)
-  (let* ((here (and (kdb-sql--script-p) (sql-buffer-live-p sql-buffer) (get-buffer sql-buffer)))
-         (sqli (or here
-                   (and (derived-mode-p 'sql-interactive-mode) (current-buffer))
+  (let* ((sqli (or (kdb-sql--linked)
                    (let ((sessions (mapcar #'buffer-name (kdb-sql--sessions))))
                      (unless sessions (user-error "No SQL session open"))
                      (get-buffer (completing-read "Close session: " sessions nil t))))))
@@ -1452,14 +1490,15 @@ On the database of the script's session (C-c C-a), in the background."
     (message "Closed %s" (buffer-name sqli))))
 
 (defun kdb-sql--menu-status ()
-  "The menu's heading: the session the current buffer would use."
-  (let ((sqli (cond ((derived-mode-p 'sql-interactive-mode) (current-buffer))
-                    ((and (boundp 'sql-buffer) (sql-buffer-live-p sql-buffer)) (get-buffer sql-buffer)))))
-    (if-let* ((conn (and sqli (buffer-local-value 'kdb-sql--conn sqli))))
-        (format "SQL: %s, on %s" (buffer-name sqli)
-                (or (plist-get conn :database) (plist-get conn :server)))
-      (let ((n (length (kdb-sql--sessions))))
-        (format "SQL: not connected (%d session%s open)" n (if (= 1 n) "" "s"))))))
+  "The menu's heading: the session this buffer runs on, or what Run will do."
+  (if-let* ((sqli (and (boundp 'sql-buffer) (kdb-sql--linked)))
+            (conn (buffer-local-value 'kdb-sql--conn sqli)))
+      (format "SQL: this buffer runs on %s, %s" (buffer-name sqli)
+              (or (plist-get conn :database) (plist-get conn :server)))
+    (pcase (length (kdb-sql--sessions))
+      (0 "SQL: not connected; Run connects first")
+      (1 "SQL: this buffer isn't linked; Run uses the open session")
+      (n (format "SQL: this buffer isn't linked; Run asks which of %d sessions" n)))))
 
 (with-eval-after-load 'transient
   (transient-define-prefix kdb-sql-menu ()
@@ -1469,9 +1508,11 @@ On the database of the script's session (C-c C-a), in the background."
       ("c" "Connect…" kdb-sql-connect)
       ("n" "New script on…" kdb-sql-new-script)
       ("f" "Open a script…" kdb-sql-open-script)]
-     ["Run (in a script)"
-      ("r" "Run selection or script" kdb-sql-send-dwim :inapt-if-not kdb-sql--script-p)
-      ("o" "Run into org tables" kdb-sql-run-to-org :inapt-if-not kdb-sql--script-p)
+     ["Run (this buffer, any mode)"
+      ("r" "Selection, else whole buffer" kdb-sql-send-dwim)
+      ("p" "Statement at point" kdb-sql-send-statement)
+      ("o" "Selection or buffer → org tables" kdb-sql-run-to-org)
+      ("l" "Run this buffer on…" kdb-sql-use-session)
       ;; A lambda, not the autoloaded command: transient loads autoloads as
       ;; the menu opens, which would load org on every first C-c d.
       ("x" "Export this org table (CSV/Excel)" (lambda () (interactive) (kdb/export-deliverable))

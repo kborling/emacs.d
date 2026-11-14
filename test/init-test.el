@@ -144,7 +144,8 @@
   (require 'sql)
   (let (sent)
     (cl-letf (((symbol-function 'sql-send-buffer) (lambda () (setq sent 'buffer)))
-              ((symbol-function 'sql-send-region) (lambda (&rest _) (setq sent 'region))))
+              ((symbol-function 'sql-send-region) (lambda (&rest _) (setq sent 'region)))
+              ((symbol-function 'kdb-sql--session) #'ignore))
       (with-temp-buffer
         (sql-mode)
         (insert "DECLARE @x INT = 1;\n\nSELECT @x;\n")
@@ -380,15 +381,68 @@
   (should (commandp 'kdb-sql-menu))
   ;; Every command the menu offers exists.
   (dolist (cmd '(kdb-sql-connect kdb-sql-new-script kdb-sql-open-script kdb-sql-send-dwim
-                 kdb-sql-run-to-org kdb/export-deliverable kdb-sql-tables kdb-sql-use-database
+                 kdb-sql-send-statement kdb-sql-run-to-org kdb-sql-use-session
+                 kdb/export-deliverable kdb-sql-tables kdb-sql-use-database
                  kdb-sql-switch-session kdb-sql-disconnect))
     (should (commandp cmd)))
   (with-temp-buffer
-    (should (string-match-p "\\`SQL: not connected" (kdb-sql--menu-status)))
-    ;; Run commands outside a script would run that buffer's text.
-    (insert "not SQL")
-    (should-error (kdb-sql-send-dwim) :type 'user-error)
-    (should-error (kdb-sql-run-to-org) :type 'user-error)))
+    (should (string-match-p "\\`SQL: not connected" (kdb-sql--menu-status)))))
+
+(ert-deftest sql-run-from-any-buffer-links-a-session ()
+  ;; A note or a plain file runs too: linked to the only session, or the one
+  ;; picked from several, or a new connection when none is open.
+  (let* ((a (get-buffer-create "*SQL: a*"))
+         (pa (make-pipe-process :name "test-a" :buffer a :noquery t))
+         (b (get-buffer-create "*SQL: b*"))
+         (pb nil)
+         sent asked connected)
+    (dolist (s (list a b))
+      (with-current-buffer s
+        (sql-interactive-mode)
+        (setq kdb-sql--conn (list :product 'ms :server "s" :database (buffer-name s)))))
+    (cl-letf (((symbol-function 'sql-send-buffer)
+               (lambda () (push (list 'buffer sql-buffer) sent)))
+              ((symbol-function 'sql-send-paragraph)
+               (lambda () (push (list 'statement sql-buffer) sent)))
+              ((symbol-function 'completing-read)
+               (lambda (_prompt coll &rest _) (setq asked coll) "*SQL: b*"))
+              ((symbol-function 'kdb-sql-connect)
+               (lambda (name) (interactive (list "x")) (setq connected name)
+                 (setq-local sql-buffer "*SQL: a*"))))
+      (unwind-protect
+          (progn
+            ;; One session open: used, and the buffer linked to it.
+            (with-temp-buffer
+              (text-mode)
+              (should (string-match-p "uses the open session" (kdb-sql--menu-status)))
+              (kdb-sql-send-dwim)
+              (should (equal (car sent) '(buffer "*SQL: a*")))
+              (should (string-match-p "runs on \\*SQL: a\\*" (kdb-sql--menu-status)))
+              (kdb-sql-send-statement)
+              (should (equal (car sent) '(statement "*SQL: a*")))
+              (should-not asked))
+            ;; Two open: asked, once.
+            (setq pb (make-pipe-process :name "test-b" :buffer b :noquery t))
+            (with-temp-buffer
+              (kdb-sql-send-dwim)
+              (should (equal (car sent) '(buffer "*SQL: b*")))
+              (should (equal (sort (copy-sequence asked) #'string<) '("*SQL: a*" "*SQL: b*")))
+              (setq asked nil)
+              (kdb-sql-send-dwim)
+              (should-not asked))
+            ;; None open: connects first.
+            (delete-process pa)
+            (delete-process pb)
+            (with-temp-buffer
+              (setq pa (make-pipe-process :name "test-a2" :buffer a :noquery t))
+              (delete-process pa)
+              (cl-letf (((symbol-function 'kdb-sql--linked)
+                         (let ((calls 0)) (lambda () (when (> (setq calls (1+ calls)) 1) a)))))
+                (kdb-sql-send-dwim))
+              (should (equal connected "x"))))
+        (dolist (p (list pa pb)) (when (and p (process-live-p p)) (delete-process p)))
+        (kill-buffer a)
+        (kill-buffer b)))))
 
 (ert-deftest sql-new-script-opens-a-connected-buffer ()
   (let (connected-from)
@@ -416,7 +470,7 @@
           ;; Only live sessions, and one with no process isn't one.
           (should (equal (kdb-sql--sessions) (list a)))
           (with-current-buffer a
-            (should (string-match-p "\\`SQL: \\*SQL: a\\*, on A\\'" (kdb-sql--menu-status))))
+            (should (string-match-p "\\`SQL: this buffer runs on \\*SQL: a\\*, A\\'" (kdb-sql--menu-status))))
           (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "*SQL: a*")))
             (save-window-excursion
               (kdb-sql-switch-session)
@@ -460,7 +514,7 @@
           (with-current-buffer script
             (sql-mode)
             (setq-local sql-buffer (buffer-name sqli))
-            (should (string-match-p "\\`SQL: \\*SQL: b\\*, on B\\'" (kdb-sql--menu-status)))
+            (should (string-match-p "\\`SQL: this buffer runs on \\*SQL: b\\*, B\\'" (kdb-sql--menu-status)))
             ;; From the script: its own session, no asking.
             (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) (error "Asked"))))
               (kdb-sql-disconnect)))
@@ -468,6 +522,39 @@
       (when (process-live-p proc) (delete-process proc))
       (kill-buffer script)
       (kill-buffer sqli))))
+
+(ert-deftest sql-connect-from-any-buffer-links-it ()
+  ;; sql.el links only sql-mode buffers to the session they start.
+  (require 'sql)
+  (let ((kdb-sql-connections '(("ms" :product ms :server "s" :database "d")))
+        (note (generate-new-buffer "notes.md")))
+    (cl-letf (((symbol-function 'kdb-sql--vscode-connections) #'ignore)
+              ((symbol-function 'sql-ms) (lambda (name) (pop-to-buffer (get-buffer-create name)))))
+      (unwind-protect
+          (save-window-excursion
+            (switch-to-buffer note)
+            (text-mode)
+            (kdb-sql-connect "ms")
+            (should (eq (window-buffer (selected-window)) note))
+            (should (local-variable-p 'sql-buffer note))
+            (should (equal (buffer-local-value 'sql-buffer note) "*SQL: ms*"))
+            (should (eq (buffer-local-value 'major-mode note) 'text-mode)))
+        (kill-buffer note)
+        (when (get-buffer "*SQL: ms*") (kill-buffer "*SQL: ms*"))))))
+
+(ert-deftest sql-run-on-an-ended-session-says-why ()
+  ;; An expired az sign-in ends sqlcmd at once: say that, don't reconnect.
+  (let ((gone (get-buffer-create "*SQL: gone*"))
+        connected)
+    (with-current-buffer gone (insert "AADSTS50078: Presented multi-factor authentication has expired\n"))
+    (cl-letf (((symbol-function 'kdb-sql-connect) (lambda (&rest _) (interactive) (setq connected t))))
+      (unwind-protect
+          (with-temp-buffer
+            (setq-local sql-buffer "*SQL: gone*")
+            (let ((err (should-error (kdb-sql-send-dwim) :type 'user-error)))
+              (should (string-match-p "\\*SQL: gone\\* has ended: AADSTS50078" (cadr err))))
+            (should-not connected))
+        (kill-buffer gone)))))
 
 (ert-deftest term-buffer-closes-after-terms-own-sentinel ()
   (let* ((buf (generate-new-buffer " *term test*"))
