@@ -137,7 +137,8 @@
             (kdb-sql-connect "pg")
             (with-current-buffer "*SQL: pg*"
               (kdb-sql-use-database "my \"db\"")
-              (should (equal (car sent) "\\connect \"my \"\"db\"\"\"\n"))
+              (should (equal (car sent) (concat "\\connect \"host='h' port='5432' user='u'"
+                                                " dbname='my \"\"db\"\"' sslmode='require' password='tok'\"\n")))
               (should (equal (plist-get kdb-sql--conn :database) "my \"db\"")))
             (should-not (assq 'via-sql-send sent)))
         (dolist (b '("*SQL: ms*" "*SQL: pg*")) (when (get-buffer b) (kill-buffer b)))))))
@@ -145,19 +146,19 @@
 (ert-deftest sql-run-sends-the-region-or-the-whole-script ()
   (require 'sql)
   (let (sent)
-    (cl-letf (((symbol-function 'sql-send-buffer) (lambda () (setq sent 'buffer)))
-              ((symbol-function 'sql-send-region) (lambda (&rest _) (setq sent 'region)))
+    (cl-letf (((symbol-function 'sql-send-region) (lambda (beg end) (setq sent (cons beg end))))
               ((symbol-function 'kdb-sql--session) #'ignore))
       (with-temp-buffer
         (sql-mode)
         (insert "DECLARE @x INT = 1;\n\nSELECT @x;\n")
         (goto-char (point-min))
+        ;; No selection: all of it, past the blank line.
         (kdb-sql-send-dwim)
-        (should (eq sent 'buffer))
+        (should (equal sent (cons (point-min) (point-max))))
         (transient-mark-mode 1)
-        (set-mark (point-min)) (goto-char (point-max)) (activate-mark)
+        (set-mark 1) (goto-char 20) (activate-mark)
         (kdb-sql-send-dwim)
-        (should (eq sent 'region))))))
+        (should (equal sent '(1 . 20)))))))
 
 (ert-deftest sql-comint-uses-the-exact-arguments ()
   (require 'sql)
@@ -403,10 +404,9 @@
       (with-current-buffer s
         (sql-interactive-mode)
         (setq kdb-sql--conn (list :product 'ms :server "s" :database (buffer-name s)))))
-    (cl-letf (((symbol-function 'sql-send-buffer)
-               (lambda () (push (list 'buffer sql-buffer) sent)))
-              ((symbol-function 'sql-send-paragraph)
-               (lambda () (push (list 'statement sql-buffer) sent)))
+    (cl-letf (((symbol-function 'sql-send-region)
+               (lambda (&rest _) (push (list (if (eq this-command 'statement) 'statement 'buffer) sql-buffer)
+                                       sent)))
               ((symbol-function 'completing-read)
                (lambda (_prompt coll &rest _) (setq asked coll) "*SQL: b*"))
               ((symbol-function 'kdb-sql-connect)
@@ -421,7 +421,7 @@
               (kdb-sql-send-dwim)
               (should (equal (car sent) '(buffer "*SQL: a*")))
               (should (string-match-p "runs on \\*SQL: a\\*" (kdb-sql--menu-status)))
-              (kdb-sql-send-statement)
+              (let ((this-command 'statement)) (kdb-sql-send-statement))
               (should (equal (car sent) '(statement "*SQL: a*")))
               (should-not asked))
             ;; Two open: asked, once.
@@ -568,7 +568,7 @@
     (with-current-buffer a
       (sql-interactive-mode)
       (setq kdb-sql--conn (list :product 'ms :server "s" :database "A")))
-    (cl-letf (((symbol-function 'sql-send-buffer) (lambda () (push sql-buffer sent))))
+    (cl-letf (((symbol-function 'sql-send-region) (lambda (&rest _) (push sql-buffer sent))))
       (unwind-protect
           (with-temp-buffer
             (sql-mode)
@@ -607,6 +607,60 @@
           (should-not (string-match-p "runs on" (kdb-sql--menu-status)))
           (should-error (kdb-sql-send-dwim) :type 'user-error))
       (kill-buffer gone))))
+
+(ert-deftest sql-named-database-read-from-the-text-or-the-buffer ()
+  (with-temp-buffer
+    (insert "-- Database: TopDb\n-- what this does\n\nSELECT 1;\n")
+    (should (equal (kdb-sql--named-database "-- database: Other\nSELECT 2;") "Other"))
+    ;; A selection without one: the buffer's, near the top.
+    (should (equal (kdb-sql--named-database "SELECT 2;") "TopDb"))
+    (erase-buffer)
+    (should-not (kdb-sql--named-database "SELECT 2; -- no database here"))))
+
+(ert-deftest sql-run-switches-to-the-named-database-first ()
+  (let* ((a (get-buffer-create "*SQL: a*"))
+         (pa (make-pipe-process :name "test-a" :buffer a :noquery t))
+         switched sent shown)
+    (with-current-buffer a
+      (sql-interactive-mode)
+      (setq kdb-sql--conn (list :product 'postgres :server "h" :database "postgres" :user "u")))
+    (cl-letf (((symbol-function 'kdb-sql-use-database)
+               (lambda (db) (push db switched)
+                 (with-current-buffer a (setq kdb-sql--conn (plist-put kdb-sql--conn :database db)))))
+              ((symbol-function 'sql-send-region)
+               (lambda (beg end) (push (buffer-substring-no-properties beg end) sent)))
+              ((symbol-function 'kdb-sql--run-and-show)
+               (lambda (conn &rest _) (setq shown conn))))
+      (unwind-protect
+          (with-temp-buffer
+            (setq-local sql-buffer "*SQL: a*")
+            (insert "-- database: patients\nSELECT count(*) FROM t;\n")
+            (kdb-sql-send-dwim)
+            (should (equal switched '("patients")))
+            (should (string-prefix-p "-- database: patients" (car sent)))
+            ;; Already there: no switch.
+            (kdb-sql-send-dwim)
+            (should (equal switched '("patients")))
+            ;; The statement at point, with the buffer's line at the top.
+            (goto-char (point-max))
+            (insert "\n-- database: other\n\nSELECT 2;\n")
+            (backward-char 2)
+            (kdb-sql-send-statement)
+            (should (equal (car switched) "patients"))   ; top of buffer still names patients
+            ;; Org results: their own connection on the named one; the session stays.
+            (with-current-buffer a (setq kdb-sql--conn (plist-put kdb-sql--conn :database "postgres")))
+            (kdb-sql-run-to-org)
+            (should (equal (plist-get shown :database) "patients"))
+            (should (equal (plist-get (buffer-local-value 'kdb-sql--conn a) :database) "postgres")))
+        (delete-process pa)
+        (kill-buffer a)))))
+
+(ert-deftest sql-postgres-switch-uses-a-fresh-token ()
+  (cl-letf (((symbol-function 'kdb-sql--az-token) (lambda () "eyJ.tok")))
+    (should (equal (kdb-sql--use-command '(:product postgres :server "h" :user "db admins") "it's")
+                   (concat "\\connect \"host='h' port='5432' user='db admins' dbname='it\\'s'"
+                           " sslmode='require' password='eyJ.tok'\"\n")))
+    (should (equal (kdb-sql--use-command '(:product ms :server "s") "a]b") "USE [a]]b];\ngo\n"))))
 
 (ert-deftest term-buffer-closes-after-terms-own-sentinel ()
   (let* ((buf (generate-new-buffer " *term test*"))

@@ -980,7 +980,7 @@ A SQL login (ms with USER) isn't listed: it would ask for the password twice."
 (defun kdb-sql--pick-database (product server user)
   "Ask for a database on SERVER, from its list when it can be read."
   (if-let* ((dbs (kdb-sql--databases product server user)))
-      (completing-read (format "Database on %s: " server) dbs nil t)
+      (completing-read (format "Database on %s: " server) dbs)
     (read-string (format "Database on %s (RET for its default): " server))))
 
 (defun kdb-sql-connect (name)
@@ -1047,12 +1047,26 @@ after an expired token, or to start over on another database."
       (when-let* ((win (get-buffer-window from)))
         (select-window win)))))
 
-(defun kdb-sql--use-command (product database)
-  "The command that switches a PRODUCT session to DATABASE, newline included."
-  (if (eq product 'postgres)
-      ;; psql reconnects with the az token it started with, good for about
-      ;; an hour; after that, C-c C-a again.
-      (format "\\connect \"%s\"\n" (string-replace "\"" "\"\"" database))
+(defun kdb-sql--conninfo-value (value)
+  "VALUE quoted for a libpq connection string."
+  (format "'%s'" (replace-regexp-in-string "['\\\\]" "\\\\\\&" value)))
+
+(defun kdb-sql--use-command (conn database)
+  "The command that switches session CONN to DATABASE, newline included.
+PostgreSQL gets a whole connection string with a fresh az token: psql
+would reuse the one it started with, which lasts about an hour."
+  (if (eq (plist-get conn :product) 'postgres)
+      (format "\\connect \"%s\"\n"
+              (string-replace
+               "\"" "\"\""
+               (mapconcat (lambda (kv) (concat (car kv) "=" (kdb-sql--conninfo-value (cdr kv))))
+                          `(("host" . ,(plist-get conn :server))
+                            ("port" . ,(number-to-string (or (plist-get conn :port) 5432)))
+                            ("user" . ,(plist-get conn :user))
+                            ("dbname" . ,database)
+                            ("sslmode" . "require")
+                            ("password" . ,(kdb-sql--az-token)))
+                          " ")))
     (format "USE [%s];\ngo\n" (string-replace "]" "]]" database))))
 
 (defun kdb-sql-use-database (database)
@@ -1069,8 +1083,7 @@ From a script, its session; from a SQLi buffer, that one."
       (setq kdb-sql--conn (plist-put kdb-sql--conn :database database))
       ;; Straight to the process, not sql-send-string: that adds psql's \g,
       ;; which would run the previous query again on the new database.
-      (comint-send-string (get-buffer-process sqli)
-                          (kdb-sql--use-command (plist-get kdb-sql--conn :product) database)))
+      (comint-send-string (get-buffer-process sqli) (kdb-sql--use-command kdb-sql--conn database)))
     (message "%s: now on %s" (buffer-name sqli) database)))
 
 (defun kdb-sql--linked ()
@@ -1121,21 +1134,49 @@ Any buffer: a .sql file, an org or markdown note, a scratch buffer."
       (message "%s runs on %s" (buffer-name) session))
     sqli))
 
+(defun kdb-sql--named-database (text)
+  "The database TEXT names in a \"-- database: NAME\" line, else the
+buffer's first such line (near the top), else nil.
+Claude sessions start the SQL they share with one; a selection out of
+the middle of a script still has the buffer's."
+  (let ((case-fold-search t)
+        (line "^[ \t]*--[ \t]*database:[ \t]*\\([^ \t\r\n]+\\)"))
+    (cond ((string-match line text) (match-string 1 text))
+          ((save-excursion
+             (goto-char (point-min))
+             (re-search-forward line (min (point-max) 4000) t))
+           (match-string-no-properties 1)))))
+
+(defun kdb-sql--to-named-database (text)
+  "Switch this buffer's session to the database TEXT names, if another."
+  (when-let* ((database (kdb-sql--named-database text))
+              (sqli (kdb-sql--session))
+              (conn (buffer-local-value 'kdb-sql--conn sqli))
+              ((not (string-equal-ignore-case database (or (plist-get conn :database) "")))))
+    (kdb-sql-use-database database)))
+
 (defun kdb-sql-send-dwim ()
   "Run the region, or else the whole buffer, as VS Code does; any buffer.
 Not the paragraph: a script's DECLAREs and the statements using them,
-often with blank lines between, have to go as one batch."
+often with blank lines between, have to go as one batch.  On the
+database a \"-- database: NAME\" line names, switching to it first."
   (interactive)
   (kdb-sql--session)
-  (if (use-region-p)
-      (sql-send-region (region-beginning) (region-end))
-    (sql-send-buffer)))
+  (let ((beg (if (use-region-p) (region-beginning) (point-min)))
+        (end (if (use-region-p) (region-end) (point-max))))
+    (kdb-sql--to-named-database (buffer-substring-no-properties beg end))
+    (sql-send-region beg end)))
 
 (defun kdb-sql-send-statement ()
-  "Run the statement at point: its paragraph, between blank lines; any buffer."
+  "Run the statement at point: its paragraph, between blank lines; any buffer.
+On the database a \"-- database: NAME\" line names, as `kdb-sql-send-dwim'."
   (interactive)
   (kdb-sql--session)
-  (sql-send-paragraph))
+  (pcase-let ((`(,beg . ,end) (save-excursion
+                                (cons (progn (backward-paragraph) (point))
+                                      (progn (forward-paragraph) (point))))))
+    (kdb-sql--to-named-database (buffer-substring-no-properties beg end))
+    (sql-send-region beg end)))
 
 ;; Results as org tables, and a list of tables.  Both run apart from the
 ;; session, in the background, on its server and database: what the
@@ -1319,6 +1360,9 @@ On the database of the buffer's session, in the background; any buffer."
          (sql (if (use-region-p)
                   (buffer-substring-no-properties (region-beginning) (region-end))
                 (buffer-substring-no-properties (point-min) (point-max)))))
+    ;; Its own connection: on the named database, the session left as is.
+    (when-let* ((database (kdb-sql--named-database sql)))
+      (setq conn (plist-put conn :database database)))
     (kdb-sql--run-and-show conn sql (format "*SQL results: %s*" (buffer-name))
                            (format "%s on %s" (buffer-name)
                                    (or (plist-get conn :database) (plist-get conn :server))))))
