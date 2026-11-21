@@ -786,4 +786,61 @@
       (should-not (memq (alist-get 'state (process-attributes child)) '("R" "S" "D")))
       (should-not (process-live-p parent)))))
 
+(ert-deftest reply-files-of-any-type-are-links ()
+  (require 'agent-shell)
+  (require 'agent-shell-markdown)
+  (let* ((dir (file-name-as-directory (make-temp-file "session" t)))
+         (elsewhere (file-name-as-directory (make-temp-file "artifacts" t)))
+         (query (expand-file-name "out/query.sql" elsewhere))
+         (plan (expand-file-name "notes/plan.org" dir)))
+    (make-directory (file-name-directory query) t)
+    (make-directory (file-name-directory plan) t)
+    (with-temp-file query (insert "select 1;"))
+    (with-temp-file plan (insert "* plan"))
+    (with-temp-buffer
+      (setq default-directory dir)
+      (setq kdb-claude--seen-files (list query))
+      (insert "Wrote query.sql and out\\query.sql; see notes/plan.org. Not v1.2 or e.g. "
+              "or https://example.com/a.sql or missing.sql.")
+      (kdb-claude--link-documents)
+      (cl-flet ((link-at (text) (goto-char (point-min)) (search-forward text)
+                         (get-text-property (match-beginning 0) 'agent-shell-markdown-url)))
+        ;; Any type; by name alone, from where the session's tools put it.
+        (should (equal (link-at "query.sql") query))
+        (should (equal (link-at "out\\query.sql") query))   ; a Windows path
+        (should (equal (link-at "notes/plan.org") plan))
+        (should-not (link-at "v1.2"))
+        (should-not (link-at "e.g."))
+        (should-not (link-at "a.sql"))                        ; a URL's tail
+        (should-not (link-at "missing.sql")))
+      ;; w on a link copies its address; the hint says so.
+      (goto-char (point-min))
+      (search-forward "query.sql")
+      (let ((interprogram-cut-function nil) (interprogram-paste-function nil))
+        (should (eq (lookup-key (get-text-property (match-beginning 0) 'keymap) "w")
+                    #'kdb-claude-copy-link))
+        (kdb-claude-copy-link (match-beginning 0))
+        (should (equal (current-kill 0) query)))
+      (should (string-suffix-p "(w copies it)"
+                               (agent-shell-markdown--action-hint
+                                :action #'agent-shell-markdown-open-link-at-point
+                                :keymap (get-text-property (match-beginning 0) 'keymap)
+                                :verb "open: x")))
+      ;; Right-click on it: "Copy link address".
+      (let ((menu (make-sparse-keymap)))
+        (cl-letf (((symbol-function 'event-start) (lambda (_) 'posn))
+                  ((symbol-function 'posn-point) (lambda (_) (match-beginning 0))))
+          (kdb-claude--link-context-menu menu 'click))
+        (should (lookup-key menu [kdb-claude-copy-link]))))
+    (delete-directory dir t)
+    (delete-directory elsewhere t)))
+
+(ert-deftest seen-files-newest-first ()
+  (let ((buf (generate-new-buffer "s")))
+    (kdb-claude--note-seen-file buf '((:raw-input . ((file_path . "/a/x.sql")))))
+    (kdb-claude--note-seen-file buf '((:raw-input . ((file_path . "/b/x.sql")))))
+    (kdb-claude--note-seen-file buf '((:raw-input . ((file_path . "/a/x.sql")))))
+    (should (equal (buffer-local-value 'kdb-claude--seen-files buf) '("/a/x.sql" "/b/x.sql")))
+    (kill-buffer buf)))
+
 ;;; claude-artifacts-test.el ends here

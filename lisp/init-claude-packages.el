@@ -18,6 +18,7 @@
               kdb-claude--start-with kdb-claude-spawn kdb-claude-message
               kdb-claude-show kdb-claude-run kdb-claude-output kdb-claude-cleanup
               kdb-claude--rename-keeps-tab kdb-claude--permission-message
+              kdb-claude--link-copy-key kdb-claude--link-hint kdb-claude--link-context-menu
               kdb-claude--permission-title
               kdb-claude--tag-client kdb-claude--render-markdown
               kdb-claude--track-artifacts kdb-claude--track-emacs-session
@@ -114,6 +115,10 @@ paragraph for its direction, which is costly in long sessions."
   (advice-add 'agent-shell-restart :around #'kdb-claude--keep-across-restart)
   (advice-add 'rename-buffer :around #'kdb-claude--rename-keeps-tab)
   (advice-add 'agent-shell--permission-title :around #'kdb-claude--permission-title)
+  ;; Every link: w copies its address, and its hint says so.
+  (with-eval-after-load 'agent-shell-markdown
+    (advice-add 'agent-shell-markdown--apply-link-properties :after #'kdb-claude--link-copy-key)
+    (advice-add 'agent-shell-markdown--action-hint :around #'kdb-claude--link-hint))
   (advice-add 'agent-shell--fetch-agent-icon :before-until #'kdb-claude--logo-icon)
   (dolist (fn '(agent-shell--make-header-model agent-shell--header-model-refresh-frame))
     (advice-add fn :filter-return #'kdb-claude--logo-header))

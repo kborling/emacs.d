@@ -1055,32 +1055,96 @@ A `display-buffer' action, for `agent-shell-file-display-action'."
 
 (declare-function agent-shell-markdown--apply-link-properties "agent-shell-markdown")
 
+(defvar-local kdb-claude--seen-files nil
+  "Files this session's tools read, wrote or edited, newest first.
+A reply names them by name alone (`report.sql'), wherever they are.")
+(put 'kdb-claude--seen-files 'permanent-local t)
+
+(defun kdb-claude--note-seen-file (buf tool-call)
+  "Remember the file TOOL-CALL of session BUF read, wrote or edited."
+  (when-let* (((buffer-live-p buf))
+              (file (kdb-claude--tool-call-file tool-call)))
+    (with-current-buffer buf
+      (unless (equal file (car kdb-claude--seen-files))
+        (setq kdb-claude--seen-files
+              (seq-take (cons file (delete file kdb-claude--seen-files)) 500))))))
+
+(defun kdb-claude--resolve-file (name)
+  "The existing file a reply means by NAME, or nil.
+As written (absolute, ~), then in the session's folder, then among the
+files its tools touched, by trailing path or name, newest first: an
+artifact written elsewhere is usually cited by name alone."
+  (let ((name (string-trim-right name "[.:,;]")))
+    (or (let ((file (expand-file-name name)))
+          (and (file-regular-p file) file))
+        (unless (file-name-absolute-p name)
+          (let ((tail (concat "/" (subst-char-in-string ?\\ ?/ name))))
+            (seq-find (lambda (f) (and (string-suffix-p tail (subst-char-in-string ?\\ ?/ f)
+                                                        (memq system-type '(windows-nt darwin)))
+                                       (file-regular-p f)))
+                      kdb-claude--seen-files))))))
+
 (defun kdb-claude--link-documents ()
-  "Link bare paths of documents that exist, in this (narrowed) reply.
-agent-shell links a path only when it names a line; a document Claude
-wrote is usually cited whole, as `notes/plan.org' or ~/report.md."
-  (let ((case-fold-search t)
-        (ext (concat "\\.\\(?:" (regexp-opt kdb-claude-artifact-extensions) "\\)\\b")))
+  "Link bare file paths in this (narrowed) reply, any file type.
+agent-shell links a path only when it names a line; a file Claude wrote
+or read is usually cited whole, as `notes/plan.org', ~/report.md or just
+`query.sql', which `kdb-claude--resolve-file' finds wherever it is.
+Clicking one opens it in the pane beside the chat."
+  (let ((case-fold-search t))
     (save-excursion
       (goto-char (point-min))
-      (while (re-search-forward ext nil t)
+      ;; A word ending in a file extension: a dot, then a letter and up to 9 more.
+      (while (re-search-forward "\\.[[:alpha:]][[:alnum:]]\\{0,9\\}\\_>" nil t)
         (let ((end (point)) start)
           (save-excursion
             ;; Bounded, so a long run of path chars costs little.
-            (skip-chars-backward "[:alnum:]._~/@+-" (max (point-min) (- end 300)))
+            (skip-chars-backward "[:alnum:]._~/\\\\@+-" (max (point-min) (- end 300)))
             (when (looking-back "\\b[A-Za-z]:" (max (point-min) (- (point) 2))) ; C:/...
               (backward-char 2))
             (setq start (point)))
-          (when-let* (((< start end))
+          (when-let* (((< (1+ start) end))
                       ((not (file-remote-p default-directory)))
                       ;; Not the tail of a URL (https://host/x.md) or a share.
                       ((not (string-prefix-p "//" (buffer-substring-no-properties
                                                    start (min end (+ start 2))))))
-                      ((not (get-text-property start 'agent-shell-markdown-url)))
+                      ((not (text-property-not-all start end 'agent-shell-markdown-url nil)))
                       ((not (get-text-property start 'agent-shell-markdown-source-block-body)))
-                      (file (expand-file-name (buffer-substring-no-properties start end)))
-                      ((file-regular-p file)))
+                      (file (kdb-claude--resolve-file (buffer-substring-no-properties start end))))
             (agent-shell-markdown--apply-link-properties :start start :end end :url file)))))))
+
+;;;###autoload
+(defun kdb-claude-copy-link (&optional pos)
+  "Copy the address of the link at POS (point): a URL, or a file's path."
+  (interactive)
+  (let ((url (or (get-text-property (or pos (point)) 'agent-shell-markdown-url)
+                 (user-error "No link here"))))
+    (kill-new url)
+    (message "Copied %s" url)))
+
+;;;###autoload
+(defun kdb-claude--link-copy-key (&rest args)
+  "After agent-shell makes a link: w on it copies its address."
+  (when-let* ((start (plist-get args :start))
+              (map (get-text-property start 'keymap))
+              ((keymapp map)))
+    (define-key map "w" #'kdb-claude-copy-link)))
+
+;;;###autoload
+(defun kdb-claude--link-hint (hint-fn &rest args)
+  "Around agent-shell's hints: a link's says w copies it too."
+  (let ((hint (apply hint-fn args)))
+    (if (and hint (eq (plist-get args :action) 'agent-shell-markdown-open-link-at-point))
+        (concat hint "  (w copies it)")
+      hint)))
+
+;;;###autoload
+(defun kdb-claude--link-context-menu (menu click)
+  "Right-click on a link: \"Copy link address\" in MENU."
+  (when-let* ((pos (posn-point (event-start click)))
+              ((get-text-property pos 'agent-shell-markdown-url)))
+    (define-key-after menu [kdb-claude-copy-link]
+      `(menu-item "Copy link address" ,(lambda () (interactive) (kdb-claude-copy-link pos)))))
+  menu)
 
 (defun kdb-claude--note-artifact (buf id tool-call)
   "Record the file tool call ID wrote in session BUF, showing it if a document.
@@ -1355,14 +1419,17 @@ never one you chose; the same for the tab."
 
 ;;;###autoload
 (defun kdb-claude--track-artifacts ()
-  "Note the files this shell's session writes; show documents as they land."
+  "Note the files this shell's session touches and writes; show documents.
+Also gives its links a right-click \"Copy link address\"."
   (let ((buf (current-buffer)))
     (agent-shell-subscribe-to
      :shell-buffer buf :event 'tool-call-update
      :on-event (lambda (event)
                  (let ((data (map-elt event :data)))
+                   (kdb-claude--note-seen-file buf (map-elt data :tool-call))
                    (kdb-claude--note-artifact buf (map-elt data :tool-call-id)
-                                              (map-elt data :tool-call)))))))
+                                              (map-elt data :tool-call)))))
+    (add-hook 'context-menu-functions #'kdb-claude--link-context-menu nil t)))
 
 ;;;###autoload
 (defun kdb-reveal-in-file-manager (file)

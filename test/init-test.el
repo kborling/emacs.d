@@ -196,7 +196,13 @@
                     " \"authenticationType\": \"AzureMFA\"},\n"
                     "    {\"server\": \"t\", \"database\": null, \"authenticationType\": \"SqlLogin\","
                     " \"user\": \"u\"},\n  ],\n}\n"))
-          (cl-letf (((symbol-function 'getenv) (lambda (v &rest _) (and (equal v "APPDATA") dir))))
+          (cl-letf (((symbol-function 'getenv) (lambda (v &rest _) (and (equal v "APPDATA") dir)))
+                    ;; Pretending to be Windows sends file names through
+                    ;; this, which only Windows Emacs has.
+                    ((symbol-function 'w32-convert-standard-filename)
+                     (if (fboundp 'w32-convert-standard-filename)
+                         (symbol-function 'w32-convert-standard-filename)
+                       #'identity)))
             (let ((system-type 'windows-nt))
               (should (equal (kdb-sql--vscode-connections)
                              '(("Dev" :product ms :server "s" :database "d" :user nil)
@@ -371,7 +377,13 @@
           (with-temp-file file
             (insert "{\"x\": \"" (make-string 200000 ?a) "\", /* " (make-string 50000 ?b) " */\n"
                     "\"mssql.connections\": [{\"server\": \"s\"}]}"))
-          (cl-letf (((symbol-function 'getenv) (lambda (v &rest _) (and (equal v "APPDATA") dir))))
+          (cl-letf (((symbol-function 'getenv) (lambda (v &rest _) (and (equal v "APPDATA") dir)))
+                    ;; Pretending to be Windows sends file names through
+                    ;; this, which only Windows Emacs has.
+                    ((symbol-function 'w32-convert-standard-filename)
+                     (if (fboundp 'w32-convert-standard-filename)
+                         (symbol-function 'w32-convert-standard-filename)
+                       #'identity)))
             (let ((system-type 'windows-nt))
               (should (equal (kdb-sql--vscode-connections)
                              '(("s" :product ms :server "s" :database nil :user nil))))
