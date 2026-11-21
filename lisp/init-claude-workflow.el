@@ -1069,20 +1069,50 @@ A reply names them by name alone (`report.sql'), wherever they are.")
         (setq kdb-claude--seen-files
               (seq-take (cons file (delete file kdb-claude--seen-files)) 500))))))
 
+(defvar-local kdb-claude--project-files nil
+  "(TIME ROOT . FILES): the session project's files, from git, and when.")
+
+(defun kdb-claude--touched-files ()
+  "Files this session's tools read, wrote or edited, newest first.
+From agent-shell's own record of the tool calls, so a session opened
+before tracking began has them too."
+  (delete-dups
+   (append kdb-claude--seen-files
+           (seq-keep (lambda (tc) (ignore-errors (kdb-claude--tool-call-file (cdr tc))))
+                     (reverse (and (boundp 'agent-shell--state)
+                                   (map-elt agent-shell--state :tool-calls)))))))
+
+(defun kdb-claude--session-project-files ()
+  "Files in the session's git project, new ones too, cached a minute."
+  (let ((root (kdb-claude--project-dir default-directory)))
+    (unless (and kdb-claude--project-files
+                 (equal (cadr kdb-claude--project-files) root)
+                 (< (float-time (time-subtract nil (car kdb-claude--project-files))) 60))
+      (setq kdb-claude--project-files
+            (cons (current-time)
+                  (cons root (mapcar (lambda (f) (expand-file-name f root))
+                                     ;; New files too: what Claude writes isn't committed yet.
+                                     (kdb-claude--git-lines root "ls-files" "--cached" "--others"
+                                                            "--exclude-standard"))))))
+    (cddr kdb-claude--project-files)))
+
 (defun kdb-claude--resolve-file (name)
-  "The existing file a reply means by NAME, or nil.
-As written (absolute, ~), then in the session's folder, then among the
-files its tools touched, by trailing path or name, newest first: an
-artifact written elsewhere is usually cited by name alone."
-  (let ((name (string-trim-right name "[.:,;]")))
-    (or (let ((file (expand-file-name name)))
-          (and (file-regular-p file) file))
-        (unless (file-name-absolute-p name)
-          (let ((tail (concat "/" (subst-char-in-string ?\\ ?/ name))))
-            (seq-find (lambda (f) (and (string-suffix-p tail (subst-char-in-string ?\\ ?/ f)
-                                                        (memq system-type '(windows-nt darwin)))
-                                       (file-regular-p f)))
-                      kdb-claude--seen-files))))))
+  "The existing file or folder a reply means by NAME, or nil.
+As written (absolute, ~), then in the session's folder, then by trailing
+path or name among the files its tools touched (newest first), then
+among its project's files: an artifact written elsewhere, or a file
+only talked about, is usually cited by name alone."
+  (let* ((name (string-trim-right name "[.:,;]"))
+         (as-is (expand-file-name name))
+         (tail (concat "/" (subst-char-in-string ?\\ ?/ name)))
+         (ends (lambda (f) (string-suffix-p tail (subst-char-in-string ?\\ ?/ f)
+                                            (memq system-type '(windows-nt darwin))))))
+    (cond ((file-regular-p as-is) as-is)
+          ((and (string-match-p "[/\\]" name) (file-directory-p as-is)) as-is)
+          ((file-name-absolute-p name) nil)
+          ((seq-find (lambda (f) (and (funcall ends f) (file-regular-p f)))
+                     (kdb-claude--touched-files)))
+          ((seq-find ends (kdb-claude--session-project-files))))))
 
 (defun kdb-claude--link-documents ()
   "Link bare file paths in this (narrowed) reply, any file type.
@@ -1093,10 +1123,12 @@ Clicking one opens it in the pane beside the chat."
   (let ((case-fold-search t))
     (save-excursion
       (goto-char (point-min))
-      ;; A word ending in a file extension: a dot, then a letter and up to 9 more.
-      (while (re-search-forward "\\.[[:alpha:]][[:alnum:]]\\{0,9\\}\\_>" nil t)
-        (let ((end (point)) start)
+      ;; A word ending in a file extension (a dot, then a letter and up to 9
+      ;; more), or a folder path ending in a slash.
+      (while (re-search-forward "\\.[[:alpha:]][[:alnum:]]\\{0,9\\}\\_>\\|[[:alnum:]_.~-]/\\(?:[[:space:]]\\|\\'\\)" nil t)
+        (let ((end (if (memq (char-before) '(?\s ?\t ?\n)) (1- (point)) (point))) start)
           (save-excursion
+            (goto-char end)
             ;; Bounded, so a long run of path chars costs little.
             (skip-chars-backward "[:alnum:]._~/\\\\@+-" (max (point-min) (- end 300)))
             (when (looking-back "\\b[A-Za-z]:" (max (point-min) (- (point) 2))) ; C:/...
@@ -1107,10 +1139,26 @@ Clicking one opens it in the pane beside the chat."
                       ;; Not the tail of a URL (https://host/x.md) or a share.
                       ((not (string-prefix-p "//" (buffer-substring-no-properties
                                                    start (min end (+ start 2))))))
-                      ((not (text-property-not-all start end 'agent-shell-markdown-url nil)))
                       ((not (get-text-property start 'agent-shell-markdown-source-block-body)))
-                      (file (kdb-claude--resolve-file (buffer-substring-no-properties start end))))
-            (agent-shell-markdown--apply-link-properties :start start :end end :url file)))))))
+                      ;; More extensions may follow (x.el.template, a.tar.gz):
+                      ;; the longest name that exists wins.
+                      (found (seq-some
+                              (lambda (e)
+                                (when-let* (((not (text-property-not-all start e 'agent-shell-markdown-url nil)))
+                                            ;; Only where the path ends: .emacs.d in
+                                            ;; ~/.emacs.d/init.el isn't the name.
+                                            ((not (memq (char-after e) '(?/ ?\\))))
+                                            (file (kdb-claude--resolve-file
+                                                   (buffer-substring-no-properties start e))))
+                                  (cons e file)))
+                              (delete-dups
+                               (list (save-excursion
+                                       (goto-char end)
+                                       (while (looking-at "\\.[[:alnum:]_-]+") (goto-char (match-end 0)))
+                                       (point))
+                                     end)))))
+            (agent-shell-markdown--apply-link-properties :start start :end (car found) :url (cdr found))
+            (goto-char (max (point) (car found)))))))))
 
 ;;;###autoload
 (defun kdb-claude-copy-link (&optional pos)

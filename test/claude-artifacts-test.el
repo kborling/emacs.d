@@ -843,4 +843,52 @@
     (should (equal (buffer-local-value 'kdb-claude--seen-files buf) '("/a/x.sql" "/b/x.sql")))
     (kill-buffer buf)))
 
+(ert-deftest reply-files-found-by-tool-calls-project-and-folders ()
+  ;; A name alone: from the session's own tool calls, else its project.
+  (require 'agent-shell)
+  (require 'agent-shell-markdown)
+  (let* ((root (file-name-as-directory (make-temp-file "proj" t)))
+         (edited (expand-file-name "test/init-test.el" root))
+         (talked (expand-file-name "lisp/init-claude-packages.el" root)))
+    (make-directory (file-name-directory edited) t)
+    (make-directory (file-name-directory talked) t)
+    (with-temp-file edited (insert ";;"))
+    (with-temp-file talked (insert ";;"))
+    (let ((default-directory root))
+      (call-process "git" nil nil nil "init" "-q")
+      (call-process "git" nil nil nil "add" "."))
+    (with-temp-buffer
+      (setq default-directory root)
+      ;; As agent-shell records an Edit, in a session opened before tracking.
+      (setq-local agent-shell--state
+                  (list (cons :tool-calls
+                              (list (cons "t1" (list (cons :raw-input (list (cons 'file_path edited)))))))))
+      (with-temp-file (expand-file-name "lisp/init-claude-packages.el.template" root) (insert ";;"))
+      (insert "Edited init-test.el; see init-claude-packages.el, the lisp/ folder and "
+              (abbreviate-file-name root) " too. Not nothere.el. "
+              "Copy init-claude-packages.el.template.")
+      (kdb-claude--link-documents)
+      (cl-flet ((link-at (text) (goto-char (point-min)) (search-forward text)
+                         (get-text-property (match-beginning 0) 'agent-shell-markdown-url)))
+        ;; The whole name, not the shorter one that also exists.
+        (should (equal (link-at "init-claude-packages.el.template")
+                       (concat talked ".template")))
+        (goto-char (point-min)) (search-forward "init-claude-packages.el.template")
+        (should (= (next-single-property-change (match-beginning 0) 'agent-shell-markdown-url)
+                   (match-end 0)))
+        (should (equal (link-at "init-test.el") edited))
+        (should (equal (link-at "init-claude-packages.el") talked))
+        (should (equal (file-name-as-directory (link-at "lisp/")) (file-name-directory talked)))
+        (should-not (link-at "nothere.el"))
+        ;; A path through a dotted folder links whole, not just the folder.
+        (let ((deep (expand-file-name "lisp/init-claude-packages.el" root)))
+          (erase-buffer)
+          (insert "Open " deep " now.")
+          (kdb-claude--link-documents)
+          (should (equal (link-at deep) deep))
+          (goto-char (point-min)) (search-forward deep)
+          (should (= (next-single-property-change (match-beginning 0) 'agent-shell-markdown-url)
+                     (match-end 0))))))
+    (delete-directory root t)))
+
 ;;; claude-artifacts-test.el ends here
