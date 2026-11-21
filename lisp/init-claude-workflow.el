@@ -1082,26 +1082,54 @@ before tracking began has them too."
                      (reverse (and (boundp 'agent-shell--state)
                                    (map-elt agent-shell--state :tool-calls)))))))
 
-(defun kdb-claude--session-project-files ()
-  "Files in the session's git project, new ones too, cached a minute."
-  (let ((root (kdb-claude--project-dir default-directory)))
-    (unless (and kdb-claude--project-files
-                 (equal (cadr kdb-claude--project-files) root)
-                 (< (float-time (time-subtract nil (car kdb-claude--project-files))) 60))
-      (setq kdb-claude--project-files
-            (cons (current-time)
-                  (cons root (mapcar (lambda (f) (expand-file-name f root))
-                                     ;; New files too: what Claude writes isn't committed yet.
-                                     (kdb-claude--git-lines root "ls-files" "--cached" "--others"
-                                                            "--exclude-standard"))))))
-    (cddr kdb-claude--project-files)))
+(defvar-local kdb-claude--project-files-reading nil
+  "The git process listing this session's project files, while it runs.")
 
-(defun kdb-claude--resolve-file (name)
+(defun kdb-claude--refresh-project-files (&optional buf)
+  "List session BUF's project files with git, in the background.
+At most once a minute: on a big repo it takes a while, and drawing a
+reply must never wait for it.  New files too: Claude's aren't committed."
+  (with-current-buffer (or buf (current-buffer))
+    (let ((root (kdb-claude--project-dir default-directory))
+          (session (current-buffer)))
+      (unless (or (process-live-p kdb-claude--project-files-reading)
+                  (file-remote-p root)
+                  (and kdb-claude--project-files
+                       (equal (cadr kdb-claude--project-files) root)
+                       (< (float-time (time-subtract nil (car kdb-claude--project-files))) 60)))
+        (let ((out (generate-new-buffer " *claude project files*"))
+              (default-directory root))
+          (setq kdb-claude--project-files-reading
+                (ignore-errors
+                  (make-process
+                   :name "claude-project-files" :buffer out :noquery t
+                   :command '("git" "ls-files" "--cached" "--others" "--exclude-standard")
+                   :sentinel
+                   (lambda (proc _)
+                     (unless (process-live-p proc)
+                       (when (and (zerop (process-exit-status proc)) (buffer-live-p session))
+                         (let ((files (with-current-buffer out
+                                        (mapcar (lambda (f) (expand-file-name f root))
+                                                (split-string (buffer-string) "\n" t "\r")))))
+                           (with-current-buffer session
+                             (setq kdb-claude--project-files
+                                   (cons (current-time) (cons root files))))))
+                       (kill-buffer out)))))))))))
+
+(defun kdb-claude--session-project-files ()
+  "The session project's files as last listed; never waits for git.
+A stale or missing list is refreshed in the background for next time."
+  (kdb-claude--refresh-project-files)
+  (and (equal (cadr kdb-claude--project-files) (kdb-claude--project-dir default-directory))
+       (cddr kdb-claude--project-files)))
+
+(defun kdb-claude--resolve-file (name &optional touched project)
   "The existing file or folder a reply means by NAME, or nil.
 As written (absolute, ~), then in the session's folder, then by trailing
 path or name among the files its tools touched (newest first), then
 among its project's files: an artifact written elsewhere, or a file
-only talked about, is usually cited by name alone."
+only talked about, is usually cited by name alone.  TOUCHED and PROJECT
+are those lists, when the caller has them already."
   (let* ((name (string-trim-right name "[.:,;]"))
          (as-is (expand-file-name name))
          (tail (concat "/" (subst-char-in-string ?\\ ?/ name)))
@@ -1111,8 +1139,8 @@ only talked about, is usually cited by name alone."
           ((and (string-match-p "[/\\]" name) (file-directory-p as-is)) as-is)
           ((file-name-absolute-p name) nil)
           ((seq-find (lambda (f) (and (funcall ends f) (file-regular-p f)))
-                     (kdb-claude--touched-files)))
-          ((seq-find ends (kdb-claude--session-project-files))))))
+                     (or touched (kdb-claude--touched-files))))
+          ((seq-find ends (or project (kdb-claude--session-project-files)))))))
 
 (defun kdb-claude--link-documents ()
   "Link bare file paths in this (narrowed) reply, any file type.
@@ -1120,7 +1148,10 @@ agent-shell links a path only when it names a line; a file Claude wrote
 or read is usually cited whole, as `notes/plan.org', ~/report.md or just
 `query.sql', which `kdb-claude--resolve-file' finds wherever it is.
 Clicking one opens it in the pane beside the chat."
-  (let ((case-fold-search t))
+  (let ((case-fold-search t)
+        ;; Once per draw, not once per word that might be a file name.
+        (touched (kdb-claude--touched-files))
+        (project (kdb-claude--session-project-files)))
     (save-excursion
       (goto-char (point-min))
       ;; A word ending in a file extension (a dot, then a letter and up to 9
@@ -1149,7 +1180,8 @@ Clicking one opens it in the pane beside the chat."
                                             ;; ~/.emacs.d/init.el isn't the name.
                                             ((not (memq (char-after e) '(?/ ?\\))))
                                             (file (kdb-claude--resolve-file
-                                                   (buffer-substring-no-properties start e))))
+                                                   (buffer-substring-no-properties start e)
+                                                   touched project)))
                                   (cons e file)))
                               (delete-dups
                                (list (save-excursion
@@ -1233,7 +1265,8 @@ And name it after its title once it has one, to tell it from others."
                  (when-let* (((buffer-live-p buf))
                              (id (agent-shell-session-id :shell-buffer buf)))
                    (kdb-claude--note-emacs-session id)
-                   (kdb-claude--name-session buf))))))
+                   (kdb-claude--name-session buf)
+                   (kdb-claude--refresh-project-files buf))))))
 
 (defvar comint-prompt-regexp)
 (declare-function agent-shell--prompt-face-p "agent-shell-prompt")

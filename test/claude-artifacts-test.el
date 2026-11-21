@@ -864,6 +864,15 @@
                   (list (cons :tool-calls
                               (list (cons "t1" (list (cons :raw-input (list (cons 'file_path edited)))))))))
       (with-temp-file (expand-file-name "lisp/init-claude-packages.el.template" root) (insert ";;"))
+      ;; Drawing never waits for git: with no list yet, it only starts one.
+      (cl-letf (((symbol-function 'process-lines) (lambda (&rest _) (error "Git run while drawing")))
+                ((symbol-function 'call-process) (lambda (&rest _) (error "Git run while drawing"))))
+        (insert "init-claude-packages.el")
+        (kdb-claude--link-documents)
+        (should-not (get-text-property 1 'agent-shell-markdown-url))
+        (should (process-live-p kdb-claude--project-files-reading))
+        (erase-buffer))
+      (while (process-live-p kdb-claude--project-files-reading) (accept-process-output nil 0.05))
       (insert "Edited init-test.el; see init-claude-packages.el, the lisp/ folder and "
               (abbreviate-file-name root) " too. Not nothere.el. "
               "Copy init-claude-packages.el.template.")
