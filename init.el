@@ -273,7 +273,7 @@ itself shows messages as usual.  For `set-message-functions'."
 (setq-default mode-line-format
               '("%e"
                 mode-line-front-space
-                ;; Pane number, for C-c w 1-9, when the tab has more than one
+                ;; Pane number, for M-o then a digit, when the tab has more than one
                 (:eval (kdb-pane-number))
                 ;; Modified / read-only indicator
                 (:eval (cond (buffer-read-only
