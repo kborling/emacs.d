@@ -176,12 +176,13 @@ In the history list (`C-c l h`): `RET` open, `u` resume (imported chats continue
 
 ### Panes (`C-c w`)
 
-`C-c w`, then single keys that keep working until you press another:
+`C-c w`, then single keys that keep working until you press another. With more than one pane in a tab, each pane's mode line starts with its number.
 
 | Key | Action | Key | Action |
 |-----|--------|-----|--------|
 | `w` `a` `s` `d` | Move to the pane up / left / down / right | `W` `A` `S` `D` | Swap with that pane |
-| `2` `3` | Split below / right | `x` | Close the pane |
+| `1`…`9` | Go to the pane with that number in its mode line | `x` | Close the pane |
+| `\|` `_` | Split right / below | `f` | Float the pane into its own frame |
 | `z` | Zoom the pane to the whole tab, again to restore | `=` | Balance sizes |
 | `+` `-` | Taller / shorter | `>` `<` | Wider / narrower |
 | `q` `e` | Previous / next tab | | |

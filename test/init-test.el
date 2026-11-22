@@ -728,4 +728,22 @@
     (kill-buffer a)
     (kill-buffer b)))
 
+(ert-deftest panes-are-numbered-and-chosen-by-number ()
+  (delete-other-windows)
+  (should-not (kdb-pane-number))                    ; one pane: no number
+  (split-window-right)
+  (split-window-below)
+  (let ((panes (kdb-pane--windows)))
+    (should (= 3 (length panes)))
+    (with-selected-window (nth 1 panes)
+      (should (equal (substring-no-properties (kdb-pane-number)) " 2 ")))
+    ;; C-c w 3: the third pane.
+    (let ((last-command-event ?3))
+      (call-interactively #'kdb-pane-select))
+    (should (eq (selected-window) (nth 2 panes)))
+    (should (eq (keymap-lookup nil "C-c w 3") #'kdb-pane-select))
+    (should (eq (keymap-lookup nil "C-c w |") #'kdb-pane-split-right))
+    (should-error (kdb-pane-select 9) :type 'user-error))
+  (delete-other-windows))
+
 ;;; init-test.el ends here

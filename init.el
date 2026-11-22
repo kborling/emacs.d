@@ -139,10 +139,35 @@ itself shows messages as usual.  For `set-message-functions'."
 (setq window-combination-resize t)
 
 ;; Panes: C-c w, then single keys that repeat until another key.
-;; w a s d move, W A S D swap with that neighbour, 2 3 split, x close,
-;; z zoom one pane to the whole tab and back, = balance, + - < > resize,
-;; q e the previous / next tab.  Their own names, so only C-c w repeats:
-;; C-x 2 then typing "w" still types a w.
+;; w a s d move, W A S D swap with that neighbour, 1-9 go to the pane
+;; numbered so in its mode line, | _ split right / below, x close,
+;; z zoom one pane to the whole tab and back, f float it into its own
+;; frame, = balance, + - < > resize, q e the previous / next tab.  Their
+;; own names, so only C-c w repeats: C-x 2 then "w" still types a w.
+(defun kdb-pane--windows ()
+  "This tab's panes, in reading order: top left first."
+  (window-list nil 'never (frame-first-window)))
+
+(defun kdb-pane-number ()
+  "This pane's number, for the mode line, when its tab has more than one."
+  (let ((panes (kdb-pane--windows)))
+    (when (cdr panes)
+      (when-let* ((n (seq-position panes (selected-window))))
+        (propertize (format " %d " (1+ n)) 'face 'mode-line-emphasis)))))
+
+(defun kdb-pane-select (n)
+  "Go to pane number N, as its mode line shows it."
+  (interactive (list (- last-command-event ?0)))
+  (select-window (or (nth (1- n) (kdb-pane--windows))
+                     (user-error "No pane %d" n))))
+
+(defun kdb-pane-float ()
+  "Take this pane out into its own frame."
+  (interactive)
+  (let ((buf (current-buffer)))
+    (unless (one-window-p t) (delete-window))
+    (select-frame-set-input-focus (window-frame (display-buffer-pop-up-frame buf nil)))))
+
 (defun kdb-pane-zoom ()
   "Give the selected pane the whole tab; again to put the others back."
   (interactive)
@@ -174,8 +199,11 @@ itself shows messages as usual.  For `set-message-functions'."
   "w" #'kdb-pane-up "a" #'kdb-pane-left "s" #'kdb-pane-down "d" #'kdb-pane-right
   "W" #'kdb-pane-swap-up "A" #'kdb-pane-swap-left
   "S" #'kdb-pane-swap-down "D" #'kdb-pane-swap-right
-  "2" #'kdb-pane-split-below "3" #'kdb-pane-split-right
-  "x" #'kdb-pane-close "z" #'kdb-pane-zoom "=" #'kdb-pane-balance
+  "|" #'kdb-pane-split-right "_" #'kdb-pane-split-below
+  "1" #'kdb-pane-select "2" #'kdb-pane-select "3" #'kdb-pane-select
+  "4" #'kdb-pane-select "5" #'kdb-pane-select "6" #'kdb-pane-select
+  "7" #'kdb-pane-select "8" #'kdb-pane-select "9" #'kdb-pane-select
+  "x" #'kdb-pane-close "z" #'kdb-pane-zoom "f" #'kdb-pane-float "=" #'kdb-pane-balance
   "+" #'kdb-pane-taller "-" #'kdb-pane-shorter
   ">" #'kdb-pane-wider "<" #'kdb-pane-narrower
   "q" #'kdb-pane-prev-tab "e" #'kdb-pane-next-tab)
@@ -282,6 +310,8 @@ itself shows messages as usual.  For `set-message-functions'."
 (setq-default mode-line-format
               '("%e"
                 mode-line-front-space
+                ;; Pane number, for C-c w 1-9, when the tab has more than one
+                (:eval (kdb-pane-number))
                 ;; Modified / read-only indicator
                 (:eval (cond (buffer-read-only
                               (propertize " RO " 'face 'mode-line-emphasis))
