@@ -699,4 +699,33 @@
       (should-not completion-category-defaults)
       (should icomplete-scroll))))
 
+(ert-deftest pane-keys-repeat-only-from-their-prefix ()
+  (should (eq (keymap-lookup nil "C-c w d") #'kdb-pane-right))
+  (should (eq (keymap-lookup nil "C-c w z") #'kdb-pane-zoom))
+  ;; C-c w then single keys repeat...
+  (should (eq (get 'kdb-pane-right 'repeat-map) 'kdb-pane-map))
+  ;; ...but Emacs's own commands don't: C-x 2 then "w" still types a w.
+  (dolist (cmd '(windmove-up windmove-left split-window-below delete-window balance-windows))
+    (should-not (get cmd 'repeat-map))))
+
+(ert-deftest pane-zoom-and-back ()
+  (delete-other-windows)
+  (let ((a (get-buffer-create "*pane a*"))
+        (b (get-buffer-create "*pane b*")))
+    (switch-to-buffer a)
+    (split-window-right)
+    (other-window 1)
+    (switch-to-buffer b)
+    (split-window-below)
+    (should (= 3 (length (window-list))))
+    (kdb-pane-zoom)
+    (should (one-window-p t))
+    (should (eq (window-buffer) b))
+    (kdb-pane-zoom)
+    (should (= 3 (length (window-list))))
+    (should (memq a (mapcar #'window-buffer (window-list))))
+    (delete-other-windows)
+    (kill-buffer a)
+    (kill-buffer b)))
+
 ;;; init-test.el ends here

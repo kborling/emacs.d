@@ -1054,6 +1054,7 @@ A `display-buffer' action, for `agent-shell-file-display-action'."
     (display-buffer-pop-up-window buffer nil)))
 
 (declare-function agent-shell-markdown--apply-link-properties "agent-shell-markdown")
+(declare-function agent-shell-markdown-open-link-at-point "agent-shell-markdown")
 
 (defvar-local kdb-claude--seen-files nil
   "Files this session's tools read, wrote or edited, newest first.
@@ -1200,6 +1201,37 @@ Clicking one opens it in the pane beside the chat."
                  (user-error "No link here"))))
     (kill-new url)
     (message "Copied %s" url)))
+
+;;;###autoload
+(defun kdb-claude-link-jump (&optional copy)
+  "Put a letter on each link in view; type one to open it.
+With prefix arg COPY, copy its address instead (as w on a link does)."
+  (interactive "P")
+  (let* ((keys "asdfjklghqweruiopzxcvbnmty")
+         (links (let (found (pos (window-start)) (end (window-end nil t)))
+                  (while (and (< pos end) (< (length found) (length keys)))
+                    (let ((next (or (next-single-property-change pos 'agent-shell-markdown-url nil end) end)))
+                      (when (get-text-property pos 'agent-shell-markdown-url)
+                        (push pos found))
+                      (setq pos next)))
+                  (nreverse found)))
+         (labels (seq-mapn #'cons (string-to-list keys) links))
+         overlays)
+    (unless labels (user-error "No links in view"))
+    (unwind-protect
+        (progn
+          (pcase-dolist (`(,key . ,pos) labels)
+            (let ((ov (make-overlay pos pos)))
+              (overlay-put ov 'before-string
+                           (propertize (string key) 'face '(:inherit isearch :weight bold)))
+              (push ov overlays)))
+          (let ((pos (cdr (assq (read-char (if copy "Copy link: " "Open link: ")) labels))))
+            (unless pos (user-error "No link with that letter"))
+            (if copy
+                (kdb-claude-copy-link pos)
+              (goto-char pos)
+              (agent-shell-markdown-open-link-at-point))))
+      (mapc #'delete-overlay overlays))))
 
 ;;;###autoload
 (defun kdb-claude--link-copy-key (&rest args)
@@ -2846,7 +2878,8 @@ session to stop."
     ("o" "Last reply → org" kdb-claude-reply-to-org)
     ("a" "Open a file Claude created" kdb-claude-open-artifact)
     ("e" "Open its folder" kdb-claude-reveal-artifact)
-    ("T" "Transcript, all of it" kdb-claude-transcript)]]
+    ("T" "Transcript, all of it" kdb-claude-transcript)
+    ("j" "Jump to a link (C-u copies)" kdb-claude-link-jump)]]
   [["Sessions (C-c ' answers)"
     ("c" "Switch / continue" kdb-claude-recent)
     ("P" "Status & processes" kdb-claude-processes)

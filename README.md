@@ -161,6 +161,7 @@ Small coding models via [Ollama](https://ollama.com), sized for a 4 GB GPU; noth
 | `z` | Throwaway (one-off question) | `R` | Review a GitHub PR (URL) | `a` | Open a file Claude created |
 | `t` | Schedule a session | `w` | Watch PR CI, auto-fix | `e` | Open its folder |
 | `m` | New with another model | | | `T` | Transcript, all of it |
+| | | | | `j` | Jump to a link by letter (`C-u` copies) |
 
 | | **Sessions** | | **Queue** | | **History** | | **Setup** |
 |---|---|---|---|---|---|---|---|
@@ -172,6 +173,18 @@ Small coding models via [Ollama](https://ollama.com), sized for a 4 GB GPU; noth
 In the history list (`C-c l h`): `RET` open, `u` resume (imported chats continue in a new session that reads the old one), `w` copy id, `D` open in Claude Desktop, `/` filter, `s` search, `A` ask, `g` refresh.
 
 `C-c '` (no transient needed) answers the oldest permission request from any session, else jumps to the next waiting session. `M-1`…`M-9` go to a tab.
+
+### Panes (`C-c w`)
+
+`C-c w`, then single keys that keep working until you press another:
+
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| `w` `a` `s` `d` | Move to the pane up / left / down / right | `W` `A` `S` `D` | Swap with that pane |
+| `2` `3` | Split below / right | `x` | Close the pane |
+| `z` | Zoom the pane to the whole tab, again to restore | `=` | Balance sizes |
+| `+` `-` | Taller / shorter | `>` `<` | Wider / narrower |
+| `q` `e` | Previous / next tab | | |
 
 ### Eglot / LSP (`C-c c`)
 

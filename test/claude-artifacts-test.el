@@ -900,4 +900,33 @@
                      (match-end 0))))))
     (delete-directory root t)))
 
+(ert-deftest link-letters-open-or-copy ()
+  (require 'agent-shell-markdown)
+  (with-current-buffer (get-buffer-create "*links*")
+    (erase-buffer)
+    (insert "one https://a.example two https://b.example end")
+    (dolist (url '("https://a.example" "https://b.example"))
+      (goto-char (point-min)) (search-forward url)
+      (put-text-property (match-beginning 0) (match-end 0) 'agent-shell-markdown-url url))
+    (switch-to-buffer (current-buffer))
+    (let (opened (interprogram-cut-function nil) (interprogram-paste-function nil))
+      (cl-letf (((symbol-function 'agent-shell-markdown-open-link-at-point)
+                 (lambda () (setq opened (get-text-property (point) 'agent-shell-markdown-url))))
+                ((symbol-function 'read-char)
+                 (lambda (&rest _)
+                   ;; Each link wears its letter while you choose.
+                   (should (= 2 (length (seq-filter (lambda (o) (overlay-get o 'before-string))
+                                                    (overlays-in (point-min) (point-max))))))
+                   ?s)))
+        (kdb-claude-link-jump)                ; s: the second link
+        (should (equal opened "https://b.example"))
+        (kdb-claude-link-jump t)              ; C-u: copy it instead
+        (should (equal (current-kill 0) "https://b.example")))
+      ;; Labels gone afterwards, even when you quit.
+      (cl-letf (((symbol-function 'read-char) (lambda (&rest _) (signal 'quit nil))))
+        (ignore-errors (condition-case nil (kdb-claude-link-jump) (quit nil))))
+      (should-not (seq-filter (lambda (o) (overlay-get o 'before-string))
+                              (overlays-in (point-min) (point-max)))))
+    (kill-buffer)))
+
 ;;; claude-artifacts-test.el ends here

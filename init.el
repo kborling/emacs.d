@@ -138,6 +138,54 @@ itself shows messages as usual.  For `set-message-functions'."
 ;; A new window takes its share from all those beside it, not half of one.
 (setq window-combination-resize t)
 
+;; Panes: C-c w, then single keys that repeat until another key.
+;; w a s d move, W A S D swap with that neighbour, 2 3 split, x close,
+;; z zoom one pane to the whole tab and back, = balance, + - < > resize,
+;; q e the previous / next tab.  Their own names, so only C-c w repeats:
+;; C-x 2 then typing "w" still types a w.
+(defun kdb-pane-zoom ()
+  "Give the selected pane the whole tab; again to put the others back."
+  (interactive)
+  (if-let* ((saved (window-parameter nil 'kdb-pane-unzoom))
+            ((one-window-p t)))
+      (progn (set-window-parameter nil 'kdb-pane-unzoom nil)
+             (set-window-configuration saved))
+    (let ((saved (current-window-configuration)))
+      (delete-other-windows)
+      (set-window-parameter nil 'kdb-pane-unzoom saved))))
+
+(dolist (pair '((kdb-pane-up . windmove-up) (kdb-pane-left . windmove-left)
+                (kdb-pane-down . windmove-down) (kdb-pane-right . windmove-right)
+                (kdb-pane-swap-up . windmove-swap-states-up)
+                (kdb-pane-swap-left . windmove-swap-states-left)
+                (kdb-pane-swap-down . windmove-swap-states-down)
+                (kdb-pane-swap-right . windmove-swap-states-right)
+                (kdb-pane-split-below . split-window-below)
+                (kdb-pane-split-right . split-window-right)
+                (kdb-pane-close . delete-window) (kdb-pane-balance . balance-windows)
+                (kdb-pane-taller . enlarge-window) (kdb-pane-shorter . shrink-window)
+                (kdb-pane-wider . enlarge-window-horizontally)
+                (kdb-pane-narrower . shrink-window-horizontally)
+                (kdb-pane-prev-tab . tab-previous) (kdb-pane-next-tab . tab-next)))
+  (defalias (car pair) (cdr pair)))
+
+(defvar-keymap kdb-pane-map
+  :repeat t
+  "w" #'kdb-pane-up "a" #'kdb-pane-left "s" #'kdb-pane-down "d" #'kdb-pane-right
+  "W" #'kdb-pane-swap-up "A" #'kdb-pane-swap-left
+  "S" #'kdb-pane-swap-down "D" #'kdb-pane-swap-right
+  "2" #'kdb-pane-split-below "3" #'kdb-pane-split-right
+  "x" #'kdb-pane-close "z" #'kdb-pane-zoom "=" #'kdb-pane-balance
+  "+" #'kdb-pane-taller "-" #'kdb-pane-shorter
+  ">" #'kdb-pane-wider "<" #'kdb-pane-narrower
+  "q" #'kdb-pane-prev-tab "e" #'kdb-pane-next-tab)
+(keymap-global-set "C-c w" kdb-pane-map)
+
+;; A thin line between side-by-side panes; stacked ones have mode lines.
+(setq window-divider-default-places 'right-only
+      window-divider-default-right-width 2)
+(add-hook 'after-init-hook #'window-divider-mode)
+
 ;; Popup/window management — consistent buffer placement
 (setq display-buffer-alist
       '(;; Hide noise
