@@ -77,7 +77,7 @@
   (global-set-key (kbd "M-0") 'delete-window)
   
   ;; Since tmux handles panes, make Emacs window switching easier
-  (global-set-key (kbd "M-o") 'other-window)
+  (global-set-key (kbd "M-o") 'kdb-pane-next)
   (global-set-key (kbd "M-O") (lambda () (interactive) (other-window -1))))
 
 ;; Tmux integration commands

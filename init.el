@@ -138,12 +138,9 @@ itself shows messages as usual.  For `set-message-functions'."
 ;; A new window takes its share from all those beside it, not half of one.
 (setq window-combination-resize t)
 
-;; Panes: C-c w, then single keys that repeat until another key.
-;; w a s d move, W A S D swap with that neighbour, 1-9 go to the pane
-;; numbered so in its mode line, | _ split right / below, x close,
-;; z zoom one pane to the whole tab and back, f float it into its own
-;; frame, = balance, + - < > resize, q e the previous / next tab.  Their
-;; own names, so only C-c w repeats: C-x 2 then "w" still types a w.
+;; Panes: M-o goes to the next one; then o keeps going, and a digit goes
+;; to the pane with that number in its mode line (shown when a tab has
+;; more than one).  Tabs: M-1..M-9, or C-x t o then o.
 (defun kdb-pane--windows ()
   "This tab's panes, in reading order: top left first."
   (window-list nil 'never (frame-first-window)))
@@ -155,59 +152,25 @@ itself shows messages as usual.  For `set-message-functions'."
       (when-let* ((n (seq-position panes (selected-window))))
         (propertize (format " %d " (1+ n)) 'face 'mode-line-emphasis)))))
 
+(defun kdb-pane-next ()
+  "Go to the next pane; o then keeps going, a digit picks one by number."
+  (interactive)
+  (other-window 1))
+
 (defun kdb-pane-select (n)
   "Go to pane number N, as its mode line shows it."
   (interactive (list (- last-command-event ?0)))
   (select-window (or (nth (1- n) (kdb-pane--windows))
                      (user-error "No pane %d" n))))
 
-(defun kdb-pane-float ()
-  "Take this pane out into its own frame."
-  (interactive)
-  (let ((buf (current-buffer)))
-    (unless (one-window-p t) (delete-window))
-    (select-frame-set-input-focus (window-frame (display-buffer-pop-up-frame buf nil)))))
-
-(defun kdb-pane-zoom ()
-  "Give the selected pane the whole tab; again to put the others back."
-  (interactive)
-  (if-let* ((saved (window-parameter nil 'kdb-pane-unzoom))
-            ((one-window-p t)))
-      (progn (set-window-parameter nil 'kdb-pane-unzoom nil)
-             (set-window-configuration saved))
-    (let ((saved (current-window-configuration)))
-      (delete-other-windows)
-      (set-window-parameter nil 'kdb-pane-unzoom saved))))
-
-(dolist (pair '((kdb-pane-up . windmove-up) (kdb-pane-left . windmove-left)
-                (kdb-pane-down . windmove-down) (kdb-pane-right . windmove-right)
-                (kdb-pane-swap-up . windmove-swap-states-up)
-                (kdb-pane-swap-left . windmove-swap-states-left)
-                (kdb-pane-swap-down . windmove-swap-states-down)
-                (kdb-pane-swap-right . windmove-swap-states-right)
-                (kdb-pane-split-below . split-window-below)
-                (kdb-pane-split-right . split-window-right)
-                (kdb-pane-close . delete-window) (kdb-pane-balance . balance-windows)
-                (kdb-pane-taller . enlarge-window) (kdb-pane-shorter . shrink-window)
-                (kdb-pane-wider . enlarge-window-horizontally)
-                (kdb-pane-narrower . shrink-window-horizontally)
-                (kdb-pane-prev-tab . tab-previous) (kdb-pane-next-tab . tab-next)))
-  (defalias (car pair) (cdr pair)))
-
 (defvar-keymap kdb-pane-map
-  :repeat t
-  "w" #'kdb-pane-up "a" #'kdb-pane-left "s" #'kdb-pane-down "d" #'kdb-pane-right
-  "W" #'kdb-pane-swap-up "A" #'kdb-pane-swap-left
-  "S" #'kdb-pane-swap-down "D" #'kdb-pane-swap-right
-  "|" #'kdb-pane-split-right "_" #'kdb-pane-split-below
+  ;; A digit picks a pane and ends it, so a number typed next is typed.
+  :repeat (:exit (kdb-pane-select))
+  "o" #'kdb-pane-next
   "1" #'kdb-pane-select "2" #'kdb-pane-select "3" #'kdb-pane-select
   "4" #'kdb-pane-select "5" #'kdb-pane-select "6" #'kdb-pane-select
-  "7" #'kdb-pane-select "8" #'kdb-pane-select "9" #'kdb-pane-select
-  "x" #'kdb-pane-close "z" #'kdb-pane-zoom "f" #'kdb-pane-float "=" #'kdb-pane-balance
-  "+" #'kdb-pane-taller "-" #'kdb-pane-shorter
-  ">" #'kdb-pane-wider "<" #'kdb-pane-narrower
-  "q" #'kdb-pane-prev-tab "e" #'kdb-pane-next-tab)
-(keymap-global-set "C-c w" kdb-pane-map)
+  "7" #'kdb-pane-select "8" #'kdb-pane-select "9" #'kdb-pane-select)
+(keymap-global-set "M-o" #'kdb-pane-next)
 
 ;; A thin line between side-by-side panes; stacked ones have mode lines.
 (setq window-divider-default-places 'right-only
@@ -1902,7 +1865,7 @@ On the database of the buffer's session, in the background; any buffer."
             (lambda () (ibuffer-switch-to-saved-filter-groups "Default")))
 
   :bind (:map ibuffer-mode-map
-              ("M-o" . other-window)
+              ("M-o" . kdb-pane-next)
               ("/" . ibuffer-filter-by-name)))
 
 

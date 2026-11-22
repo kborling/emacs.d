@@ -699,34 +699,17 @@
       (should-not completion-category-defaults)
       (should icomplete-scroll))))
 
-(ert-deftest pane-keys-repeat-only-from-their-prefix ()
-  (should (eq (keymap-lookup nil "C-c w d") #'kdb-pane-right))
-  (should (eq (keymap-lookup nil "C-c w z") #'kdb-pane-zoom))
-  ;; C-c w then single keys repeat...
-  (should (eq (get 'kdb-pane-right 'repeat-map) 'kdb-pane-map))
-  ;; ...but Emacs's own commands don't: C-x 2 then "w" still types a w.
-  (dolist (cmd '(windmove-up windmove-left split-window-below delete-window balance-windows))
-    (should-not (get cmd 'repeat-map))))
-
-(ert-deftest pane-zoom-and-back ()
-  (delete-other-windows)
-  (let ((a (get-buffer-create "*pane a*"))
-        (b (get-buffer-create "*pane b*")))
-    (switch-to-buffer a)
-    (split-window-right)
-    (other-window 1)
-    (switch-to-buffer b)
-    (split-window-below)
-    (should (= 3 (length (window-list))))
-    (kdb-pane-zoom)
-    (should (one-window-p t))
-    (should (eq (window-buffer) b))
-    (kdb-pane-zoom)
-    (should (= 3 (length (window-list))))
-    (should (memq a (mapcar #'window-buffer (window-list))))
-    (delete-other-windows)
-    (kill-buffer a)
-    (kill-buffer b)))
+(ert-deftest pane-keys-m-o-then-o-or-a-digit ()
+  (should (eq (keymap-lookup nil "M-o") #'kdb-pane-next))
+  ;; After M-o, o keeps going; a digit picks a pane and ends it.
+  (should (eq (get 'kdb-pane-next 'repeat-map) 'kdb-pane-map))
+  (should-not (get 'kdb-pane-select 'repeat-map))
+  (should (eq (keymap-lookup kdb-pane-map "o") #'kdb-pane-next))
+  (should (eq (keymap-lookup kdb-pane-map "3") #'kdb-pane-select))
+  ;; Emacs's own commands keep their behaviour.
+  (dolist (cmd '(windmove-up split-window-below delete-window))
+    (should-not (get cmd 'repeat-map)))
+  (should-not (keymap-lookup nil "C-c w")))
 
 (ert-deftest panes-are-numbered-and-chosen-by-number ()
   (delete-other-windows)
@@ -737,12 +720,10 @@
     (should (= 3 (length panes)))
     (with-selected-window (nth 1 panes)
       (should (equal (substring-no-properties (kdb-pane-number)) " 2 ")))
-    ;; C-c w 3: the third pane.
+    ;; M-o 3: the third pane.
     (let ((last-command-event ?3))
       (call-interactively #'kdb-pane-select))
     (should (eq (selected-window) (nth 2 panes)))
-    (should (eq (keymap-lookup nil "C-c w 3") #'kdb-pane-select))
-    (should (eq (keymap-lookup nil "C-c w |") #'kdb-pane-split-right))
     (should-error (kdb-pane-select 9) :type 'user-error))
   (delete-other-windows))
 

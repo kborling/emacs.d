@@ -174,18 +174,10 @@ In the history list (`C-c l h`): `RET` open, `u` resume (imported chats continue
 
 `C-c '` (no transient needed) answers the oldest permission request from any session, else jumps to the next waiting session. `M-1`…`M-9` go to a tab.
 
-### Panes (`C-c w`)
+### Panes and tabs
 
-`C-c w`, then single keys that keep working until you press another. With more than one pane in a tab, each pane's mode line starts with its number.
-
-| Key | Action | Key | Action |
-|-----|--------|-----|--------|
-| `w` `a` `s` `d` | Move to the pane up / left / down / right | `W` `A` `S` `D` | Swap with that pane |
-| `1`…`9` | Go to the pane with that number in its mode line | `x` | Close the pane |
-| `\|` `_` | Split right / below | `f` | Float the pane into its own frame |
-| `z` | Zoom the pane to the whole tab, again to restore | `=` | Balance sizes |
-| `+` `-` | Taller / shorter | `>` `<` | Wider / narrower |
-| `q` `e` | Previous / next tab | | |
+- `M-o` goes to the next pane; then `o` keeps going, and a digit goes to the pane with that number in its mode line (shown when a tab has more than one pane)
+- `M-1`…`M-9` go to a tab; `C-x t o`, then `o`, goes through them
 
 ### Eglot / LSP (`C-c c`)
 
