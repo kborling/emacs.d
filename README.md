@@ -35,6 +35,7 @@ lisp/
   init-local-models.el        Local coding models: Ollama, gptel chat, minuet completion
   init-org.el                 Org mode, capture templates, org-modern
   init-vc.el                  VC/Git transient menu (Magit-like, built-in VC)
+  init-sql.el                 SQL: Azure SQL and PostgreSQL sessions, C-c d menu
   init-exwm.el                EXWM window manager (X11 only)
   init-terminal.el            Terminal/tmux optimizations
 ```
