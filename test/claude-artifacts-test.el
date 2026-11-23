@@ -337,6 +337,7 @@
   (let ((a (generate-new-buffer "*claude a*"))
         (b (generate-new-buffer "*claude b*"))
         (agent-shell-attention--pending (make-hash-table :test #'eq))
+        (kdb-claude--waiting-drawn nil)
         (tab-bar-tab-hints t)
         (tabspaces-mode nil))
     (unwind-protect
@@ -346,7 +347,8 @@
           (switch-to-buffer a)
           (tab-bar-new-tab)
           (switch-to-buffer b)                     ; tab 1 shows a, tab 2 shows b
-          (cl-flet ((names () (mapcar (lambda (tab)
+          (cl-flet ((names () (kdb-claude--redraw-tabs)   ; marks read its snapshot
+                      (mapcar (lambda (tab)
                                         (substring-no-properties
                                          (kdb-claude--tab-name-waiting
                                           "x" tab (1+ (seq-position (frame-parameter nil 'tabs) tab)))))
@@ -514,6 +516,37 @@
       (should-error (kdb-claude-copy-session-id) :type 'user-error)
       (should-error (kdb-claude-remote-control) :type 'user-error))))
 
+(ert-deftest tab-mark-only-where-the-drawing-isnt ()
+  ;; On a graphic frame the tab's drawing shows the state in color.
+  (let ((buf (generate-new-buffer "Claude Agent @ test mark"))
+        (tab-bar-tab-name-format-functions '(kdb-tab-name-layout kdb-claude--tab-name-waiting)))
+    (cl-letf (((symbol-function 'kdb-claude--tab-waiting) (lambda (&rest _) 'input)))
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+                      ((symbol-function 'image-type-available-p) (lambda (&rest _) t)))
+              (should (equal (kdb-claude--tab-name-waiting "1 x" '(current-tab) 1) "1 x")))
+            (should (string-match-p "●" (kdb-claude--tab-name-waiting "1 x" '(current-tab) 1))))
+        (kill-buffer buf)))))
+
+(ert-deftest project-file-list-leaves-out-git-warnings ()
+  ;; stderr goes elsewhere: a warning in the output would read as a file.
+  (let ((captured nil))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args) (setq captured args) (make-pipe-process :name "fake-git" :noquery t))))
+      (with-temp-buffer
+        (setq default-directory (file-name-as-directory (file-truename temporary-file-directory)))
+        (clrhash kdb-claude--project-files)
+        (clrhash kdb-claude--project-files-reading)
+        (kdb-claude--refresh-project-files)
+        (should (processp (plist-get captured :stderr)))
+        (should-not (eq (plist-get captured :stderr) (plist-get captured :buffer)))
+        (delete-process (plist-get captured :stderr))
+        (dolist (p (process-list))
+          (when (string-prefix-p "fake-git" (process-name p)) (delete-process p)))
+        (kill-buffer (plist-get captured :buffer))
+        (clrhash kdb-claude--project-files-reading)))))
+
 (ert-deftest marked-tab-mark-sits-in-its-tab ()
   ;; After the tab's number, on the tab's own face: highlighted with its tab,
   ;; and the name still starts as a tab's does, so it's sized like the rest
@@ -521,9 +554,11 @@
   (require 'agent-shell-attention)
   (let ((a (generate-new-buffer "*claude a*"))
         (agent-shell-attention--pending (make-hash-table :test #'eq))
-        (agent-shell-attention--busy (make-hash-table :test #'eq)))
+        (agent-shell-attention--busy (make-hash-table :test #'eq))
+        (kdb-claude--waiting-drawn nil))
     (switch-to-buffer a)
     (puthash a 1 agent-shell-attention--busy)
+    (kdb-claude--redraw-tabs)
     (let ((name (kdb-claude--tab-name-waiting
                  (propertize "2 Fix the parser" 'face 'tab-bar-tab) '(current-tab) 2)))
       (should (equal (substring-no-properties name) "2 ◌ Fix the parser"))
@@ -545,7 +580,8 @@
       (delete-other-windows)
       (switch-to-buffer a)                          ; the current tab shows a, and b for index 1
       (let ((tabspaces-mode nil))
-        (cl-flet ((mark (index) (when (= index 1) (split-window) (switch-to-buffer b))
+        (cl-flet ((mark (index) (kdb-claude--redraw-tabs)
+                    (when (= index 1) (split-window) (switch-to-buffer b))
                     (prog1 (substring-no-properties
                             (kdb-claude--tab-name-waiting "x" '(current-tab) (1+ index)))
                       (when (= index 1) (delete-other-windows) (switch-to-buffer a)))))
@@ -566,9 +602,10 @@
           ;; Done working: the mark goes, and the bar redraws.
           (clrhash agent-shell-attention--pending)
           (remhash a agent-shell-attention--busy)
-          (kdb-claude--redraw-tabs)
-          (should (equal (mark 0) "x"))
-          (should (= redraws 2)))))
+          (let ((before redraws))
+            (kdb-claude--redraw-tabs)
+            (should (= redraws (1+ before))))
+          (should (equal (mark 0) "x")))))
     (kill-buffer a) (kill-buffer b)))
 
 (defun test-process-tree (agent-pid t0)
@@ -786,6 +823,29 @@
       (should-not (memq (alist-get 'state (process-attributes child)) '("R" "S" "D")))
       (should-not (process-live-p parent)))))
 
+(defun test-project-reader (dir)
+  "The git process listing DIR's project files, while it runs."
+  (gethash (kdb-claude--project-dir dir) kdb-claude--project-files-reading))
+
+(defun test-wait-for-project (dir)
+  "Wait, up to 10 seconds, until DIR's project files are read."
+  (let ((end (+ (float-time) 10)))
+    (while (and (or (process-live-p (test-project-reader dir))
+                    (not (gethash (kdb-claude--project-dir dir) kdb-claude--project-files)))
+                (< (float-time) end))
+      (accept-process-output nil 0.05))))
+
+(defun test-git-repo (&rest files)
+  "A new git repository with FILES added; its folder."
+  (let ((root (file-name-as-directory (file-truename (make-temp-file "proj" t)))))
+    (dolist (f files)
+      (make-directory (file-name-directory (expand-file-name f root)) t)
+      (with-temp-file (expand-file-name f root) (insert ";;")))
+    (let ((default-directory root))
+      (call-process "git" nil nil nil "init" "-q")
+      (call-process "git" nil nil nil "add" "."))
+    root))
+
 (ert-deftest reply-files-of-any-type-are-links ()
   (require 'agent-shell)
   (require 'agent-shell-markdown)
@@ -880,13 +940,13 @@
         (insert "init-claude-packages.el")
         (kdb-claude--link-documents)
         (should-not (get-text-property 1 'agent-shell-markdown-url))
-        (should (process-live-p kdb-claude--project-files-reading))
+        (should (process-live-p (test-project-reader root)))
         (erase-buffer))
-      (while (process-live-p kdb-claude--project-files-reading) (accept-process-output nil 0.05))
+      (test-wait-for-project root)
       (insert "Edited init-test.el; see init-claude-packages.el, the lisp/ folder and "
               (abbreviate-file-name root) " too. Not nothere.el. "
               "Copy init-claude-packages.el.template.")
-      (kdb-claude--link-documents)
+      (kdb-claude--link-documents nil t)          ; complete: it ends in a name
       (cl-flet ((link-at (text) (goto-char (point-min)) (search-forward text)
                          (get-text-property (match-beginning 0) 'agent-shell-markdown-url)))
         ;; The whole name, not the shorter one that also exists.
@@ -944,7 +1004,8 @@
   (let ((buf (generate-new-buffer "s"))
         (agent-shell-attention--pending (make-hash-table :test #'eq))
         (agent-shell-attention--busy (make-hash-table :test #'eq))
-        (kdb-claude--background nil))
+        (kdb-claude--background nil)
+        (kdb-claude--waiting-drawn nil))
     (with-current-buffer buf
       (setq major-mode 'agent-shell-mode)
       (kdb-claude--session-mode-line)
@@ -952,10 +1013,181 @@
       (should (null mode-line-modes))
       (should (equal (substring-no-properties (kdb-claude--mode-line-state)) "ready"))
       (puthash buf 1 agent-shell-attention--busy)
+      (kdb-claude--redraw-tabs)                 ; the mode line reads its snapshot
       (should (equal (substring-no-properties (kdb-claude--mode-line-state)) "◌ working"))
       (puthash buf (list :label "Permission: ls" :timestamp 1.0) agent-shell-attention--pending)
+      (kdb-claude--redraw-tabs)
       (should (equal (substring-no-properties (kdb-claude--mode-line-state)) "● needs you")))
     (with-temp-buffer (should-not (kdb-claude--mode-line-state)))
     (kill-buffer buf)))
+
+(defun test-reader-buffers ()
+  "Buffers git's project file lists are read into."
+  (seq-filter (lambda (b) (string-prefix-p " *claude project files*" (buffer-name b)))
+              (buffer-list)))
+
+(ert-deftest project-files-outside-a-repo-tried-once-a-minute ()
+  ;; git fails there; drawing a reply mustn't start it on every chunk.
+  (let* ((dir (file-name-as-directory (file-truename (make-temp-file "norepo" t))))
+         (kdb-claude--project-files (make-hash-table :test #'equal))
+         (kdb-claude--project-files-reading (make-hash-table :test #'equal))
+         (make (symbol-function 'make-process))
+         (started 0))
+    (with-temp-buffer
+      (setq default-directory dir)
+      (cl-letf (((symbol-function 'make-process)
+                 (lambda (&rest args) (cl-incf started) (apply make args))))
+        (kdb-claude--session-project-files)
+        (test-wait-for-project dir)
+        (dotimes (_ 5) (kdb-claude--session-project-files))
+        (should (= started 1))
+        (should-not (test-reader-buffers))
+        ;; No git on PATH: no error, no buffer left, and not tried again at once.
+        (clrhash kdb-claude--project-files)
+        (let ((exec-path nil))
+          (dotimes (_ 3) (should (hash-table-empty-p (kdb-claude--session-project-files)))))
+        (should (= started 2))
+        (should-not (test-reader-buffers))))
+    (delete-directory dir t)))
+
+(ert-deftest sessions-in-one-project-share-its-file-list ()
+  ;; One list and one git per project, however many sessions; names as
+  ;; written, not quoted (notes/r\303\251sum\303\251.md).
+  (let* ((kdb-claude--project-files (make-hash-table :test #'equal))
+         (kdb-claude--project-files-reading (make-hash-table :test #'equal))
+         (root (test-git-repo "lisp/x.el" "notes/résumé.md"))
+         (a (generate-new-buffer "a")) (b (generate-new-buffer "b"))
+         (make (symbol-function 'make-process))
+         (started 0))
+    (dolist (s (list a b)) (with-current-buffer s (setq default-directory root)))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args) (cl-incf started) (apply make args))))
+      (with-current-buffer a (kdb-claude--session-project-files))
+      (with-current-buffer b (kdb-claude--session-project-files))   ; while a's runs
+      (test-wait-for-project root)
+      (with-current-buffer b (kdb-claude--session-project-files))   ; and after
+      (should (= started 1)))
+    (let ((index (with-current-buffer b (kdb-claude--session-project-files))))
+      (should (eq index (with-current-buffer a (kdb-claude--session-project-files))))
+      (should (equal (gethash "x.el" index) (list (expand-file-name "lisp/x.el" root))))
+      (should (equal (gethash "résumé.md" index) (list (expand-file-name "notes/résumé.md" root)))))
+    (kill-buffer a) (kill-buffer b)
+    (delete-directory root t)))
+
+(ert-deftest ambiguous-name-links-by-the-last-touched-file ()
+  (let* ((root (expand-file-name "/proj/"))
+         (index (make-hash-table :test #'equal))
+         (top (expand-file-name "README.md" root))
+         (web (expand-file-name "web/README.md" root))
+         (default-directory (file-name-as-directory (make-temp-file "elsewhere" t))))
+    (puthash "readme.md" (list top web) index)
+    (puthash "app.ts" (list (expand-file-name "web/src/app.ts" root)) index)
+    (cl-flet ((resolve (name touched) (kdb-claude--resolve-file name (list (expand-file-name touched)) index)))
+      (should (equal (resolve "README.md" "/proj/web/app.ts") web))
+      (should (equal (resolve "README.md" "/proj/init.el") top))    ; both there: the nearer
+      (should-not (resolve "README.md" "/other/x.el"))               ; no telling which
+      (should (equal (resolve "web/README.md" "/other/x.el") web))   ; the path says
+      (should (equal (resolve "app.ts" "/other/x.el") (expand-file-name "web/src/app.ts" root))))
+    (delete-directory default-directory t)))
+
+(ert-deftest render-links-only-the-new-text ()
+  (require 'agent-shell-markdown)
+  (let ((dir (file-name-as-directory (make-temp-file "render" t)))
+        asked)
+    (with-temp-buffer
+      (setq default-directory dir)
+      (cl-letf (((symbol-function 'kdb-claude--session-project-files) #'ignore)
+                ((symbol-function 'kdb-claude--resolve-file)
+                 (lambda (name &rest _) (push name asked) nil)))
+        (insert "Old a.el and b.el.\n")
+        (kdb-claude--render-markdown)
+        (setq asked nil)
+        (goto-char (point-max))
+        (insert "New c.el.\n")
+        (kdb-claude--render-markdown)
+        (should (equal asked '("c.el")))))
+    (delete-directory dir t)))
+
+(ert-deftest names-split-across-chunks-link-whole ()
+  (require 'agent-shell-markdown)
+  (let* ((dir (file-name-as-directory (file-truename (make-temp-file "split" t))))
+         (default-directory dir))
+    (make-directory (expand-file-name "lisp" dir))
+    (dolist (f '("lisp/init.el" "x.el" "x.el.template" "y.el"))
+      (with-temp-file (expand-file-name f dir) (insert ";;")))
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'kdb-claude--session-project-files) #'ignore))
+        (cl-flet ((link-at (text) (goto-char (point-min)) (search-forward text)
+                           (get-text-property (match-beginning 0) 'agent-shell-markdown-url))
+                  (whole-p (text) (goto-char (point-min)) (search-forward text)
+                           (= (or (next-single-property-change (match-beginning 0) 'agent-shell-markdown-url)
+                                  (point-max))
+                              (match-end 0)))
+                  (chunk (text &optional complete) (goto-char (point-max)) (insert text)
+                         (kdb-claude--link-documents nil complete)))
+          ;; Only from FROM: what's above was an earlier render's.
+          (insert "y.el before.\n")
+          (let ((from (point)))
+            (insert "x.el after.\n")
+            (kdb-claude--link-documents from))
+          (should-not (link-at "y.el"))
+          (should (equal (link-at "x.el") (expand-file-name "x.el" dir)))
+          ;; Streamed: a name a chunk ends in waits for the rest of it.
+          (erase-buffer)
+          (chunk "See lisp/")
+          (should-not (link-at "lisp/"))
+          (chunk "init.el, then x.el")
+          (should (equal (link-at "lisp/init.el") (expand-file-name "lisp/init.el" dir)))
+          (should (whole-p "lisp/init.el"))
+          (should-not (link-at "x.el"))
+          (chunk ".")
+          (should-not (link-at "x.el"))
+          (chunk "template")
+          (should-not (link-at "x.el"))
+          (chunk "" t)                                  ; the complete render
+          (should (equal (link-at "x.el.template") (expand-file-name "x.el.template" dir)))
+          (should (whole-p "x.el.template"))
+          ;; A reply ending in prose gets no complete render: its turn's end links it.
+          (erase-buffer)
+          (insert (propertize "Wrote y.el" 'agent-shell-ui-section 'body) "\n> ")
+          (save-restriction                             ; as it streamed, the body alone
+            (narrow-to-region (point-min) (1+ (length "Wrote y.el")))
+            (kdb-claude--link-documents))
+          (should-not (link-at "y.el"))
+          (kdb-claude--link-reply-end)
+          (should (equal (link-at "y.el") (expand-file-name "y.el" dir))))))
+    (delete-directory dir t)))
+
+(ert-deftest chat-folder-links-open-in-the-pane-too ()
+  (let* ((buf (test-session))
+         (session-window (selected-window))
+         (action '((display-buffer-reuse-window kdb-claude--display-in-pane)))
+         (file (expand-file-name "doc.md" test-dir)))
+    (with-temp-file file (insert "# doc\n"))
+    (make-directory (expand-file-name "sub" test-dir))
+    (let ((win (display-buffer (find-file-noselect file) action)))
+      ;; Dired has no file name, but goes where the document went.  (Batch's
+      ;; frame is too small to split by default: the chat would be reused.)
+      (let ((split-width-threshold 20) (split-height-threshold nil))
+        (should (eq win (display-buffer (dired-noselect (expand-file-name "sub/" test-dir)) action))))
+      (should (= 2 (length (window-list))))
+      (should (eq (window-buffer session-window) buf)))
+    (kill-buffer buf)))
+
+(ert-deftest restarted-session-keeps-the-files-it-touched ()
+  (let ((old (generate-new-buffer "*claude r*")) new)
+    (with-current-buffer old
+      (setq kdb-claude--id "r-1"
+            kdb-claude--seen-files (list (expand-file-name "/a/x.sql"))))
+    (cl-letf (((symbol-function 'agent-shell--current-shell) (lambda () old)))
+      (kdb-claude--keep-across-restart
+       (lambda ()
+         ;; As agent-shell does: kill it, then start anew under its name.
+         (kill-buffer old)
+         (setq new (generate-new-buffer "*claude r*"))
+         (with-current-buffer new (setq kdb-claude--id "r-1")))))
+    (should (equal (buffer-local-value 'kdb-claude--seen-files new)
+                   (list (expand-file-name "/a/x.sql"))))
+    (kill-buffer new)))
 
 ;;; claude-artifacts-test.el ends here

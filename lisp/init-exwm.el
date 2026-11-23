@@ -45,29 +45,20 @@
                       ignore
                       :help "Current workspace"))))
 
-(defun kdb-exwm-tab-bar-time ()
-  "Display current time in 24-hour format."
-  `((time menu-item
-          ,(format-time-string " %H:%M ")
-          ignore
-          :help ,(format-time-string "%A, %B %d, %Y %H:%M"))))
-
 (defun kdb-exwm-tab-bar-spacer ()
   "Add spacing for systemtray on the right."
   '((systemtray-spacer menu-item "     " ignore)))
 
-(defvar kdb-exwm--clock-timer nil
-  "The timer redrawing the tab bar's clock.")
-
 (defun kdb-exwm-setup-tab-bar ()
   "Configure tab-bar for EXWM."
+  ;; The status has Claude's count and `global-mode-string': the time
+  ;; (`display-time-mode', which redraws it; 24-hour, as EXWM's own clock
+  ;; was) and battery.
+  (setq display-time-24hr-format t)
   (setq tab-bar-format '(kdb-exwm-tab-bar-workspace-name
                          tab-bar-format-align-right
-                         kdb-exwm-tab-bar-time
-                         kdb-exwm-tab-bar-spacer))
-  ;; Update time display every minute: one timer, however often this runs
-  (unless (timerp kdb-exwm--clock-timer)
-    (setq kdb-exwm--clock-timer (run-with-timer 0 60 #'force-mode-line-update t))))
+                         kdb-tab-bar-status
+                         kdb-exwm-tab-bar-spacer)))
 
 ;;; Window Management ====================================================
 

@@ -188,14 +188,17 @@ they were in them; side panels stay put."
   (interactive)
   (let* ((wins (seq-remove (lambda (w) (window-parameter w 'window-side)) (kdb-pane--windows)))
          (n (length wins))
-         (shown (mapcar (lambda (w) (list (window-buffer w) (window-point w) (window-start w))) wins))
+         (shown (mapcar (lambda (w) (list (window-buffer w) (window-point w) (window-start w)
+                                          (window-parameters w) (window-dedicated-p w)))
+                        wins))
          (here (seq-position wins (selected-window)))
          ;; Two panes: main + stack and grid would just be columns again.
          (cycle (if (< n 3) '(columns rows) '(main columns rows grid)))
          (layout (car (or (cdr (memq (kdb-pane--layout-now) cycle)) cycle))))
     (when (< n 2) (user-error "One pane: nothing to arrange"))
     (select-window (car wins))
-    (delete-other-windows)
+    ;; Not `delete-other-windows': it deletes side windows too.
+    (mapc #'delete-window (cdr wins))
     (let ((new
            (pcase layout
              ('columns (let ((ws (list (selected-window))))
@@ -225,7 +228,12 @@ they were in them; side panels stay put."
                                     (window-total-width (car new)))
                        t t))
       (cl-mapc (lambda (w s) (set-window-buffer w (nth 0 s))
-                 (set-window-start w (nth 2 s)) (set-window-point w (nth 1 s)))
+                 (set-window-start w (nth 2 s)) (set-window-point w (nth 1 s))
+                 ;; Its parameters (a Claude session's file pane, quit-restore)
+                 ;; and dedication go with it; the region overlay is the old window's.
+                 (pcase-dolist (`(,k . ,v) (nth 3 s))
+                   (unless (eq k 'internal-region-overlay) (set-window-parameter w k v)))
+                 (set-window-dedicated-p w (nth 4 s)))
                new shown)
       (select-window (nth (or here 0) new))
       (message "Layout: %s" (pcase layout ('main "main + stack") (_ layout))))))
@@ -238,6 +246,9 @@ they were in them; side panels stay put."
   "1" #'kdb-pane-select "2" #'kdb-pane-select "3" #'kdb-pane-select
   "4" #'kdb-pane-select "5" #'kdb-pane-select "6" #'kdb-pane-select
   "7" #'kdb-pane-select "8" #'kdb-pane-select "9" #'kdb-pane-select)
+;; An o or a digit typed a moment after landing in a pane is text.  On
+;; these commands only: other repeat maps (C-x u u ...) keep no timeout.
+(dolist (cmd '(kdb-pane-next kdb-pane-layout)) (put cmd 'repeat-exit-timeout 1))
 (keymap-global-set "M-o" #'kdb-pane-next)
 
 ;; A thin line between side-by-side panes; stacked ones have mode lines.
@@ -346,11 +357,13 @@ A chat or a shell isn't a file: changed all the time, and nothing to save."
         (t "    ")))
 
 (defun kdb-mode-line-misc ()
-  "`mode-line-misc-info' without what's on the tab bar once for all panes."
-  (format-mode-line
-   (seq-remove (lambda (e) (or (eq (car-safe e) 'global-mode-string)
-                               (equal e '(:eval (agent-shell-attention--indicator)))))
-               mode-line-misc-info)))
+  "`mode-line-misc-info', without what the tab bar shows once for all panes."
+  (if (and (memq 'kdb-tab-bar-status tab-bar-format)
+           (< 0 (or (frame-parameter nil 'tab-bar-lines) 0)))
+      (seq-remove (lambda (e) (or (eq (car-safe e) 'global-mode-string)
+                                  (equal e '(:eval (agent-shell-attention--indicator)))))
+                  mode-line-misc-info)
+    mode-line-misc-info))
 
 (setq-default mode-line-format
               '("%e"
@@ -2021,7 +2034,8 @@ The current tab's from its windows; another's from its saved layout."
   (let* ((h (max 10 (round (* 0.8 (frame-char-height)))))
          (w (round (* 1.8 h)))
          (stroke (or (face-attribute 'tab-bar :foreground nil t) "gray60"))
-         (states (and (fboundp 'kdb-claude--waiting) (kdb-claude--waiting)))
+         ;; The snapshot the 1 s redraw keeps, not a fresh scan per tab per redraw.
+         (states (bound-and-true-p kdb-claude--waiting-drawn))
          (fill (lambda (buf)
                  (pcase (cdr (assq buf states))
                    ('input (face-foreground 'warning nil t))

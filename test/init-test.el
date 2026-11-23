@@ -6,6 +6,8 @@
 (require 'ert)
 (require 'cl-lib)
 
+(defvar kdb-claude--waiting-drawn)       ; init-claude-workflow's
+
 (ert-deftest messages-window-goes-to-its-own-end ()
   ;; Shown from a short buffer: *Messages*' end, not the caller's.
   (with-current-buffer (messages-buffer)
@@ -646,23 +648,23 @@
       (unwind-protect
           (with-temp-buffer
             (setq-local sql-buffer "*SQL: a*")
-            (insert "-- database: patients\nSELECT count(*) FROM t;\n")
+            (insert "-- database: inventory\nSELECT count(*) FROM t;\n")
             (kdb-sql-send-dwim)
-            (should (equal switched '("patients")))
-            (should (string-prefix-p "-- database: patients" (car sent)))
+            (should (equal switched '("inventory")))
+            (should (string-prefix-p "-- database: inventory" (car sent)))
             ;; Already there: no switch.
             (kdb-sql-send-dwim)
-            (should (equal switched '("patients")))
+            (should (equal switched '("inventory")))
             ;; The statement at point, with the buffer's line at the top.
             (goto-char (point-max))
             (insert "\n-- database: other\n\nSELECT 2;\n")
             (backward-char 2)
             (kdb-sql-send-statement)
-            (should (equal (car switched) "patients"))   ; top of buffer still names patients
+            (should (equal (car switched) "inventory"))   ; top of buffer still names inventory
             ;; Org results: their own connection on the named one; the session stays.
             (with-current-buffer a (setq kdb-sql--conn (plist-put kdb-sql--conn :database "postgres")))
             (kdb-sql-run-to-org)
-            (should (equal (plist-get shown :database) "patients"))
+            (should (equal (plist-get shown :database) "inventory"))
             (should (equal (plist-get (buffer-local-value 'kdb-sql--conn a) :database) "postgres")))
         (delete-process pa)
         (kill-buffer a)))))
@@ -752,17 +754,38 @@
       (should (< (abs (- (nth 2 (car panes)) 0.5)) 0.05)))
     ;; Drawn, each pane filled by its session's state; reused when unchanged.
     (when (image-type-available-p 'svg)
-      (cl-letf (((symbol-function 'kdb-claude--waiting) (lambda () (list (cons b 'input)))))
-        (let* ((panes (list (list 0 0 0.5 1 a nil) (list 0.5 0 0.5 1 b t)))
-               (img (kdb-tab--layout-image panes))
-               (svg (plist-get (cdr img) :data)))
-          (should (eq (car img) 'image))
-          (should (string-match-p (regexp-quote (face-foreground 'warning nil t)) svg))
-          (should (eq img (kdb-tab--layout-image panes))))))
+      (let* ((kdb-claude--waiting-drawn (list (cons b 'input)))
+             (panes (list (list 0 0 0.5 1 a nil) (list 0.5 0 0.5 1 b t)))
+             (img (kdb-tab--layout-image panes))
+             (svg (plist-get (cdr img) :data)))
+        (should (eq (car img) 'image))
+        (should (string-match-p (regexp-quote (face-foreground 'warning nil t)) svg))
+        (should (eq img (kdb-tab--layout-image panes)))))
     (tab-bar-close-other-tabs)
     (tab-bar-mode -1)
     (delete-other-windows)
     (kill-buffer a) (kill-buffer b)))
+
+(ert-deftest tab-layout-image-reads-the-redraw-snapshot ()
+  ;; What the 1 s redraw last saw, not a fresh scan for each tab.
+  (skip-unless (image-type-available-p 'svg))
+  (let* ((b (get-buffer-create "*lay snap*"))
+         (panes (list (list 0 0 1 1 b t)))
+         (warn (regexp-quote (face-foreground 'warning nil t)))
+         (had (boundp 'kdb-claude--waiting-drawn))
+         (old (bound-and-true-p kdb-claude--waiting-drawn)))
+    (cl-letf (((symbol-function 'kdb-claude--waiting) (lambda () (list (cons b 'input)))))
+      (unwind-protect
+          (progn
+            ;; init-claude-workflow not loaded yet: nothing filled.
+            (makunbound 'kdb-claude--waiting-drawn)
+            (should-not (string-match-p warn (plist-get (cdr (kdb-tab--layout-image panes)) :data)))
+            (setq kdb-claude--waiting-drawn nil)
+            (should-not (string-match-p warn (plist-get (cdr (kdb-tab--layout-image panes)) :data)))
+            (setq kdb-claude--waiting-drawn (list (cons b 'input)))
+            (should (string-match-p warn (plist-get (cdr (kdb-tab--layout-image panes)) :data))))
+        (if had (setq kdb-claude--waiting-drawn old) (makunbound 'kdb-claude--waiting-drawn))
+        (kill-buffer b)))))
 
 (ert-deftest pane-layouts-cycle-keeping-buffers ()
   (delete-other-windows)
@@ -785,8 +808,29 @@
     (dolist (expected '(rows columns rows))
       (kdb-pane-layout)
       (should (eq (kdb-pane--layout-now) expected)))
+    ;; A side panel stays; a pane keeps its parameters and dedication.
+    (let* ((side-buf (get-buffer-create "*pane side*"))
+           (side (display-buffer-in-side-window side-buf '((side . bottom)))))
+      (set-window-parameter (get-buffer-window (nth 1 bufs)) 'kdb-claude-session "s1")
+      (set-window-dedicated-p (get-buffer-window (nth 1 bufs)) t)
+      (kdb-pane-layout)
+      (should (window-live-p side))
+      (should (eq (window-buffer side) side-buf))
+      (should (eq (kdb-pane--layout-now) 'columns))
+      (let ((w (get-buffer-window (nth 1 bufs))))
+        (should (equal (window-parameter w 'kdb-claude-session) "s1"))
+        (should (window-dedicated-p w)))
+      (should-not (window-parameter (get-buffer-window (nth 0 bufs)) 'kdb-claude-session))
+      (set-window-dedicated-p (get-buffer-window (nth 1 bufs)) nil)
+      (delete-window side)
+      (kill-buffer side-buf))
     (delete-other-windows)
     (mapc #'kill-buffer bufs)))
+
+(ert-deftest pane-map-ends-a-moment-after-landing ()
+  ;; o or a digit typed after a pause is text, not another pane command.
+  (should (eql (get 'kdb-pane-next 'repeat-exit-timeout) 1))
+  (should (eql (get 'kdb-pane-layout 'repeat-exit-timeout) 1)))
 
 (ert-deftest mode-line-chats-and-global-info ()
   ;; A file's ** shows; a chat or shell isn't a file, so none.
@@ -800,13 +844,20 @@
       (set-buffer-modified-p nil)
       (kill-buffer))
     (delete-file file))
-  ;; The time, battery and Claude count are on the tab bar, not each pane.
-  ;; Batch format-mode-line renders nothing, so check what it's given.
+  ;; The time, battery and Claude count are on the tab bar, not each pane;
+  ;; with no tab bar, or one without them (EXWM's before), each pane has them.
   (let ((global-mode-string '("" "12:00")) seen)
+    (tab-bar-mode 1)
+    (unwind-protect
+        (progn
+          (should-not (assq 'global-mode-string (kdb-mode-line-misc)))
+          (let ((tab-bar-format '(tab-bar-format-tabs)))
+            (should (assq 'global-mode-string (kdb-mode-line-misc)))))
+      (tab-bar-mode -1))
+    (should (assq 'global-mode-string (kdb-mode-line-misc)))
+    ;; Batch format-mode-line renders nothing, so check what it's given.
     (cl-letf (((symbol-function 'format-mode-line)
                (lambda (f &rest _) (push f seen) "")))
-      (kdb-mode-line-misc)
-      (should-not (assq 'global-mode-string (car seen)))
       (kdb-tab-bar-status)
       (should (member global-mode-string seen))))
   (should (memq 'kdb-tab-bar-status tab-bar-format)))

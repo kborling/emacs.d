@@ -917,18 +917,25 @@ KIND is `input' for a permission request, `done' for a finished reply,
           (push (cons b 'busy) waiting)))
       waiting)))
 
+(defvar kdb-claude--waiting-drawn nil
+  "`kdb-claude--waiting' as of the last `kdb-claude--redraw-tabs'.
+An alist of (BUFFER . STATE), STATE `input', `done' or `busy'.  Tab
+marks and mode lines read this: they are redrawn often, and it changes
+only when that runs, after every attention change and each second.")
+
 (defun kdb-claude--tab-waiting (tab _index)
   "State of the sessions TAB shows, or nil if none.
 `input', `done' or `busy': a request for input outranks a finished
 reply, which outranks working."
-  (when-let* ((waiting (kdb-claude--waiting))
+  (when-let* ((waiting kdb-claude--waiting-drawn)
               ;; Shown there, not just visited there once (tabspaces' list).
               (kinds (mapcar #'cdr
                              (seq-filter
                               (lambda (w)
-                                (if (eq (car tab) 'current-tab)
-                                    (get-buffer-window (car w))
-                                  (agent-shell-attention--tab-displays-buffer-p tab (car w))))
+                                (and (buffer-live-p (car w))
+                                     (if (eq (car tab) 'current-tab)
+                                         (get-buffer-window (car w))
+                                       (agent-shell-attention--tab-displays-buffer-p tab (car w)))))
                               waiting))))
     (seq-find (lambda (k) (memq k kinds)) '(input done busy))))
 
@@ -951,7 +958,11 @@ reply, which outranks working."
 The mark goes after the tab's number, on the tab's own face, so it is
 highlighted with the tab it belongs to.  For
 `tab-bar-tab-name-format-functions'."
-  (if-let* ((state (kdb-claude--tab-waiting tab (1- i)))
+  (if-let* (;; Where the tab's drawing shows its panes in these colors, the
+            ;; mark would say it twice: only on text frames, or without SVG.
+            ((not (and (memq 'kdb-tab-name-layout tab-bar-tab-name-format-functions)
+                       (display-graphic-p) (image-type-available-p 'svg))))
+            (state (kdb-claude--tab-waiting tab (1- i)))
             (mark (pcase state ('input "● ") ('done "✓ ") ('busy "◌ ")))
             (face (pcase state ('input 'kdb-claude-tab-input) ('done 'kdb-claude-tab-done)
                     ('busy 'kdb-claude-tab-busy))))
@@ -964,7 +975,7 @@ highlighted with the tab it belongs to.  For
 
 (defun kdb-claude--buffer-state (buf)
   "What session BUF is at: `input', `done', `busy', or nil (ready)."
-  (cdr (assq buf (kdb-claude--waiting))))
+  (cdr (assq buf kdb-claude--waiting-drawn)))
 
 ;;;###autoload
 (defun kdb-claude--mode-line-state ()
@@ -982,9 +993,6 @@ highlighted with the tab it belongs to.  For
 It isn't a file, so no modified mark either (see `mode-line-format')."
   (setq-local mode-line-position nil
               mode-line-modes nil))
-
-(defvar kdb-claude--waiting-drawn nil
-  "The sessions waiting for you, and on what, when the tab bar was last drawn.")
 
 ;;;###autoload
 (defun kdb-claude--redraw-tabs (&rest _)
@@ -1070,7 +1078,10 @@ window you have since used for something else is left alone."
 (defun kdb-claude--display-in-pane (buffer _alist)
   "Show BUFFER, a file a chat link opened, in the artifact pane beside the chat.
 A `display-buffer' action, for `agent-shell-file-display-action'."
-  (if-let* ((file (buffer-file-name buffer)))
+  (if-let* ((file (or (buffer-file-name buffer)
+                      ;; A folder link opens dired: the pane too, not a split chat.
+                      (with-current-buffer buffer
+                        (and (derived-mode-p 'dired-mode) default-directory)))))
       (kdb-claude--show-artifact file)
     (display-buffer-pop-up-window buffer nil)))
 
@@ -1091,91 +1102,137 @@ A reply names them by name alone (`report.sql'), wherever they are.")
         (setq kdb-claude--seen-files
               (seq-take (cons file (delete file kdb-claude--seen-files)) 500))))))
 
-(defvar-local kdb-claude--project-files nil
-  "(TIME ROOT . FILES): the session project's files, from git, and when.")
+(defvar kdb-claude--project-files (make-hash-table :test #'equal)
+  "Project root -> (TIME . INDEX): its files from git, and when.
+INDEX maps a downcased file name to the paths with that name.  One
+per root, shared by the sessions there.")
+
+(defvar kdb-claude--project-files-reading (make-hash-table :test #'equal)
+  "Project root -> the git process listing its files, while it runs.")
+
+(defvar-local kdb-claude--touched-cache nil
+  "(CALLS SEEN . FILES): `kdb-claude--touched-files', and what it came from.")
 
 (defun kdb-claude--touched-files ()
   "Files this session's tools read, wrote or edited, newest first.
 From agent-shell's own record of the tool calls, so a session opened
 before tracking began has them too."
-  (delete-dups
-   (append kdb-claude--seen-files
-           (seq-keep (lambda (tc) (ignore-errors (kdb-claude--tool-call-file (cdr tc))))
-                     (reverse (and (boundp 'agent-shell--state)
-                                   (map-elt agent-shell--state :tool-calls)))))))
+  (let ((calls (and (boundp 'agent-shell--state) (map-elt agent-shell--state :tool-calls))))
+    ;; Every render asks: made again only when a call or seen file was added.
+    (unless (and (eql (length calls) (car kdb-claude--touched-cache))
+                 (eq kdb-claude--seen-files (cadr kdb-claude--touched-cache)))
+      (setq kdb-claude--touched-cache
+            (cons (length calls)
+                  (cons kdb-claude--seen-files
+                        (delete-dups
+                         (append kdb-claude--seen-files
+                                 (seq-keep (lambda (tc) (ignore-errors (kdb-claude--tool-call-file (cdr tc))))
+                                           (reverse calls))))))))
+    (cddr kdb-claude--touched-cache)))
 
-(defvar-local kdb-claude--project-files-reading nil
-  "The git process listing this session's project files, while it runs.")
+(defun kdb-claude--project-files-read (root output)
+  "Note git's OUTPUT listing ROOT's files, nil when it failed.
+A failure keeps the last list but counts as a try: outside a repo git
+fails every time, and drawing would start it again on every chunk."
+  (let ((index (if output
+                   (make-hash-table :test #'equal)
+                 (or (cdr (gethash root kdb-claude--project-files))
+                     (make-hash-table :test #'equal)))))
+    (dolist (f (and output (split-string output "\0" t)))
+      (let ((file (expand-file-name f root)))
+        (push file (gethash (downcase (file-name-nondirectory file)) index))))
+    (puthash root (cons (current-time) index) kdb-claude--project-files)))
 
 (defun kdb-claude--refresh-project-files (&optional buf)
   "List session BUF's project files with git, in the background.
-At most once a minute: on a big repo it takes a while, and drawing a
-reply must never wait for it.  New files too: Claude's aren't committed."
+At most once a minute per project: on a big repo it takes a while, and
+drawing a reply must never wait for it.  New files too: Claude's
+aren't committed."
   (with-current-buffer (or buf (current-buffer))
-    (let ((root (kdb-claude--project-dir default-directory))
-          (session (current-buffer)))
-      (unless (or (process-live-p kdb-claude--project-files-reading)
+    (let ((root (kdb-claude--project-dir default-directory)))
+      (unless (or (process-live-p (gethash root kdb-claude--project-files-reading))
                   (file-remote-p root)
-                  (and kdb-claude--project-files
-                       (equal (cadr kdb-claude--project-files) root)
-                       (< (float-time (time-subtract nil (car kdb-claude--project-files))) 60)))
-        (let ((out (generate-new-buffer " *claude project files*"))
-              (default-directory root))
-          (setq kdb-claude--project-files-reading
-                (ignore-errors
-                  (make-process
-                   :name "claude-project-files" :buffer out :noquery t
-                   :command '("git" "ls-files" "--cached" "--others" "--exclude-standard")
-                   :sentinel
-                   (lambda (proc _)
-                     (unless (process-live-p proc)
-                       (when (and (zerop (process-exit-status proc)) (buffer-live-p session))
-                         (let ((files (with-current-buffer out
-                                        (mapcar (lambda (f) (expand-file-name f root))
-                                                (split-string (buffer-string) "\n" t "\r")))))
-                           (with-current-buffer session
-                             (setq kdb-claude--project-files
-                                   (cons (current-time) (cons root files))))))
-                       (kill-buffer out)))))))))))
+                  (when-let* ((known (gethash root kdb-claude--project-files)))
+                    (< (float-time (time-subtract nil (car known))) 60)))
+        (let* ((out (generate-new-buffer " *claude project files*"))
+               (default-directory root)
+               ;; git's warnings, thrown away: in OUT they'd read as a file name.
+               (err (make-pipe-process :name "claude-project-files stderr" :noquery t
+                                       :filter #'ignore :sentinel #'ignore)))
+          (condition-case nil
+              (puthash root
+                       (make-process
+                        :name "claude-project-files" :buffer out :stderr err :noquery t
+                        :coding 'utf-8-unix
+                        :command '("git" "ls-files" "-z" "--cached" "--others" "--exclude-standard")
+                        :sentinel
+                        (lambda (proc _)
+                          (unless (process-live-p proc)
+                            (delete-process err)
+                            (kdb-claude--project-files-read
+                             root (and (zerop (process-exit-status proc))
+                                       (with-current-buffer out (buffer-string))))
+                            (kill-buffer out))))
+                       kdb-claude--project-files-reading)
+            ;; No git on PATH.
+            (error (delete-process err)
+                   (kill-buffer out)
+                   (kdb-claude--project-files-read root nil))))))))
 
 (defun kdb-claude--session-project-files ()
-  "The session project's files as last listed; never waits for git.
+  "The session project's file index as last listed; never waits for git.
 A stale or missing list is refreshed in the background for next time."
   (kdb-claude--refresh-project-files)
-  (and (equal (cadr kdb-claude--project-files) (kdb-claude--project-dir default-directory))
-       (cddr kdb-claude--project-files)))
+  (cdr (gethash (kdb-claude--project-dir default-directory) kdb-claude--project-files)))
 
 (defun kdb-claude--resolve-file (name &optional touched project)
   "The existing file or folder a reply means by NAME, or nil.
 As written (absolute, ~), then in the session's folder, then by trailing
 path or name among the files its tools touched (newest first), then
 among its project's files: an artifact written elsewhere, or a file
-only talked about, is usually cited by name alone.  TOUCHED and PROJECT
-are those lists, when the caller has them already."
+only talked about, is usually cited by name alone.  A name several
+project files have (README.md) is the one under the folder of the file
+touched last, else none.  TOUCHED and PROJECT (an index, see
+`kdb-claude--project-files') are those, when the caller has them already."
   (let* ((name (string-trim-right name "[.:,;]"))
          (as-is (expand-file-name name))
          (tail (concat "/" (subst-char-in-string ?\\ ?/ name)))
-         (ends (lambda (f) (string-suffix-p tail (subst-char-in-string ?\\ ?/ f)
-                                            (memq system-type '(windows-nt darwin))))))
+         (fold (memq system-type '(windows-nt darwin)))
+         (ends (lambda (f) (string-suffix-p tail (subst-char-in-string ?\\ ?/ f) fold)))
+         (touched (or touched (kdb-claude--touched-files))))
     (cond ((file-regular-p as-is) as-is)
           ((and (string-match-p "[/\\]" name) (file-directory-p as-is)) as-is)
           ((file-name-absolute-p name) nil)
-          ((seq-find (lambda (f) (and (funcall ends f) (file-regular-p f)))
-                     (or touched (kdb-claude--touched-files))))
-          ((seq-find ends (or project (kdb-claude--session-project-files)))))))
+          ((seq-find (lambda (f) (and (funcall ends f) (file-regular-p f))) touched))
+          ((when-let* ((index (or project (kdb-claude--session-project-files)))
+                       (found (seq-filter ends (gethash (downcase (file-name-nondirectory tail))
+                                                        index))))
+             (if (cdr found)
+                 (when-let* ((dir (and (car touched) (file-name-directory (car touched)))))
+                   ;; The closest one there: a.md before sub/a.md.
+                   (car (sort (seq-filter (lambda (f) (string-prefix-p dir f fold)) found)
+                              :key #'length)))
+               (car found)))))))
 
-(defun kdb-claude--link-documents ()
-  "Link bare file paths in this (narrowed) reply, any file type.
+(defun kdb-claude--link-documents (&optional from complete)
+  "Link bare file paths in this (narrowed) reply, from FROM, any file type.
 agent-shell links a path only when it names a line; a file Claude wrote
 or read is usually cited whole, as `notes/plan.org', ~/report.md or just
 `query.sql', which `kdb-claude--resolve-file' finds wherever it is.
-Clicking one opens it in the pane beside the chat."
+Clicking one opens it in the pane beside the chat.  Unless COMPLETE, a
+name ending the text is left for later: more of it may still come
+\(lisp/ then init.el, x.el then .template)."
+  ;; shortcut: a path with spaces isn't linked (it reads as several words);
+  ;; quote-aware matching if Claude's paths with spaces come up often.
   (let ((case-fold-search t)
         ;; Once per draw, not once per word that might be a file name.
         (touched (kdb-claude--touched-files))
-        (project (kdb-claude--session-project-files)))
+        (project (kdb-claude--session-project-files))
+        ;; Each name resolved once per draw: a reply says package.json or
+        ;; e.g. many times, and each look-up checks the disk.
+        (resolved (make-hash-table :test #'equal)))
     (save-excursion
-      (goto-char (point-min))
+      (goto-char (or from (point-min)))
       ;; A word ending in a file extension (a dot, then a letter and up to 9
       ;; more), or a folder path ending in a slash.
       (while (re-search-forward "\\.[[:alpha:]][[:alnum:]]\\{0,9\\}\\_>\\|[[:alnum:]_.~-]/\\(?:[[:space:]]\\|\\'\\)" nil t)
@@ -1193,6 +1250,13 @@ Clicking one opens it in the pane beside the chat."
                       ((not (string-prefix-p "//" (buffer-substring-no-properties
                                                    start (min end (+ start 2))))))
                       ((not (get-text-property start 'agent-shell-markdown-source-block-body)))
+                      (full (save-excursion
+                              (goto-char end)
+                              (while (looking-at "\\.[[:alnum:]_-]+") (goto-char (match-end 0)))
+                              (point)))
+                      ;; Linked half, it would stay so: a link isn't redone.
+                      ((or complete
+                           (save-excursion (goto-char full) (skip-chars-forward ".") (not (eobp)))))
                       ;; More extensions may follow (x.el.template, a.tar.gz):
                       ;; the longest name that exists wins.
                       (found (seq-some
@@ -1201,16 +1265,14 @@ Clicking one opens it in the pane beside the chat."
                                             ;; Only where the path ends: .emacs.d in
                                             ;; ~/.emacs.d/init.el isn't the name.
                                             ((not (memq (char-after e) '(?/ ?\\))))
-                                            (file (kdb-claude--resolve-file
-                                                   (buffer-substring-no-properties start e)
-                                                   touched project)))
+                                            (name (buffer-substring-no-properties start e))
+                                            (file (let ((hit (gethash name resolved 'unseen)))
+                                                    (if (eq hit 'unseen)
+                                                        (puthash name (kdb-claude--resolve-file name touched project)
+                                                                 resolved)
+                                                      hit))))
                                   (cons e file)))
-                              (delete-dups
-                               (list (save-excursion
-                                       (goto-char end)
-                                       (while (looking-at "\\.[[:alnum:]_-]+") (goto-char (match-end 0)))
-                                       (point))
-                                     end)))))
+                              (delete-dups (list full end)))))
             (agent-shell-markdown--apply-link-properties :start start :end (car found) :url (cdr found))
             (goto-char (max (point) (car found)))))))))
 
@@ -1342,8 +1404,25 @@ Each turn's end also has `kdb-claude--scan-background' look at it."
                  (when (buffer-live-p buf)
                    (cl-pushnew buf kdb-claude--background-candidates)
                    (with-current-buffer buf
+                     (with-demoted-errors "Linking Claude reply: %S"
+                       (kdb-claude--link-reply-end))
                      (with-demoted-errors "Trimming Claude session: %S"
                        (kdb-claude--trim-buffer))))))))
+
+(declare-function text-property-search-backward "text-property-search")
+
+(defun kdb-claude--link-reply-end ()
+  "Link a file name ending the last reply, left for later while it streamed.
+agent-shell never renders a reply ending in prose as complete."
+  (save-excursion
+    (goto-char (point-max))
+    (when-let* ((match (text-property-search-backward 'agent-shell-ui-section 'body #'eq)))
+      (save-restriction
+        (narrow-to-region (prop-match-beginning match) (prop-match-end match))
+        (goto-char (point-max))
+        (skip-chars-backward " \t\n")
+        (let ((inhibit-read-only t))
+          (kdb-claude--link-documents (line-beginning-position) t))))))
 
 (defun kdb-claude--trim-buffer ()
   "Delete the turns before the prompt nearest half of the limit from the end.
@@ -1879,6 +1958,7 @@ first instead."
   (kdb-claude--block-at-label t))
 
 (declare-function agent-shell-markdown-replace-markup "agent-shell-markdown")
+(declare-function agent-shell-markdown--watermark-start "agent-shell-markdown")
 (declare-function org-babel-execute-src-block "ob-core")
 
 ;;;###autoload
@@ -1887,8 +1967,16 @@ first instead."
 Then code block labels also run their block, through org babel: x runs
 it, e opens it to edit first.  The label's hint names both next to
 RET's copy."
-  (apply #'agent-shell-markdown-replace-markup args)
-  (kdb-claude--link-documents)
+  ;; Links only in what this render adds: from agent-shell's watermark,
+  ;; whose line may still hold a name left for later.
+  (let ((from (copy-marker (if (plist-get args :force)
+                               (point-min)
+                             (save-excursion
+                               (goto-char (agent-shell-markdown--watermark-start))
+                               (line-beginning-position))))))
+    (apply #'agent-shell-markdown-replace-markup args)
+    (kdb-claude--link-documents from (or (plist-get args :complete) (plist-get args :force)))
+    (set-marker from nil))
   ;; Labels carry their own keymap (RET copies) and a hint sensor; the
   ;; ⧉ in each is tagged.  Streaming re-renders, so skip labels done.
   (let ((pos (point-min)))
@@ -2052,18 +2140,22 @@ ARGS has the session buffer under :buffer."
 ;;;###autoload
 (defun kdb-claude--keep-across-restart (restart &rest args)
   "Around RESTART, `agent-shell-restart' (ARGS), so `agent-shell-reload' too:
-the session keeps its id, model provider, tab and what it opened.  The
+the session keeps its id, model provider, tab, the files its tools
+touched (for chat links) and what it opened.  The
 restart kills the buffer and starts a new one under its name, which
 would otherwise close all that and start over as another session."
   (let* ((buf (agent-shell--current-shell))
          (id (and buf (buffer-local-value 'kdb-claude--id buf)))
          (tab-auto (and buf (buffer-local-value 'kdb-claude--tab-auto buf)))
+         (seen (and buf (buffer-local-value 'kdb-claude--seen-files buf)))
          (kdb-claude--restarting buf)
          (kdb-claude--next-id id)
          (kdb-claude--next-env (and buf (buffer-local-value 'kdb-claude--provider-env buf))))
     (prog1 (apply restart args)
       (when-let* ((id) (new (kdb-claude--session-buffer id)))
-        (with-current-buffer new (setq kdb-claude--tab-auto tab-auto))))))
+        (with-current-buffer new
+          (setq kdb-claude--tab-auto tab-auto
+                kdb-claude--seen-files seen))))))
 
 ;;; ============================================================
 ;;; Other models: Claude Code against any Anthropic-compatible API
