@@ -178,7 +178,10 @@ In the history list (`C-c l h`): `RET` open, `u` resume (imported chats continue
 ### Panes and tabs
 
 - `M-o` goes to the next pane; then `o` keeps going, and a digit goes to the pane with that number in its mode line (shown when a tab has more than one pane)
+- After `M-o`, `l` cycles the tab's layout: main + stack, columns, rows, grid (buffers stay put)
 - `M-1`…`M-9` go to a tab; `C-x t o`, then `o`, goes through them
+- Each tab shows a small drawing of its panes, colored by Claude state (needs you, done, working); the clock, battery and Claude count sit at the right of the tab bar, once for all panes
+- The mode line shows a chat's state (needs you / done / working / ready); `**` and `RO` only appear for files
 
 ### Eglot / LSP (`C-c c`)
 

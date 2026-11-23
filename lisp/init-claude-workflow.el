@@ -962,6 +962,27 @@ highlighted with the tab it belongs to.  For
                 (substring name at)))
     name))
 
+(defun kdb-claude--buffer-state (buf)
+  "What session BUF is at: `input', `done', `busy', or nil (ready)."
+  (cdr (assq buf (kdb-claude--waiting))))
+
+;;;###autoload
+(defun kdb-claude--mode-line-state ()
+  "This session's state, for its mode line: what it's at, in words."
+  (when (derived-mode-p 'agent-shell-mode)
+    (pcase (kdb-claude--buffer-state (current-buffer))
+      ('input (propertize "● needs you" 'face 'kdb-claude-tab-input))
+      ('done (propertize "✓ done" 'face 'kdb-claude-tab-done))
+      ('busy (propertize "◌ working" 'face 'kdb-claude-tab-busy))
+      (_ (propertize "ready" 'face 'shadow)))))
+
+;;;###autoload
+(defun kdb-claude--session-mode-line ()
+  "A session's mode line: its state instead of a mode name and line number.
+It isn't a file, so no modified mark either (see `mode-line-format')."
+  (setq-local mode-line-position nil
+              mode-line-modes nil))
+
 (defvar kdb-claude--waiting-drawn nil
   "The sessions waiting for you, and on what, when the tab bar was last drawn.")
 

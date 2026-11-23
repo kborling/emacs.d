@@ -929,4 +929,23 @@
                               (overlays-in (point-min) (point-max)))))
     (kill-buffer)))
 
+(ert-deftest session-mode-line-says-what-it-is-at ()
+  (require 'agent-shell-attention)
+  (let ((buf (generate-new-buffer "s"))
+        (agent-shell-attention--pending (make-hash-table :test #'eq))
+        (agent-shell-attention--busy (make-hash-table :test #'eq))
+        (kdb-claude--background nil))
+    (with-current-buffer buf
+      (setq major-mode 'agent-shell-mode)
+      (kdb-claude--session-mode-line)
+      (should (null mode-line-position))
+      (should (null mode-line-modes))
+      (should (equal (substring-no-properties (kdb-claude--mode-line-state)) "ready"))
+      (puthash buf 1 agent-shell-attention--busy)
+      (should (equal (substring-no-properties (kdb-claude--mode-line-state)) "◌ working"))
+      (puthash buf (list :label "Permission: ls" :timestamp 1.0) agent-shell-attention--pending)
+      (should (equal (substring-no-properties (kdb-claude--mode-line-state)) "● needs you")))
+    (with-temp-buffer (should-not (kdb-claude--mode-line-state)))
+    (kill-buffer buf)))
+
 ;;; claude-artifacts-test.el ends here

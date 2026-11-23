@@ -138,9 +138,10 @@ itself shows messages as usual.  For `set-message-functions'."
 ;; A new window takes its share from all those beside it, not half of one.
 (setq window-combination-resize t)
 
-;; Panes: M-o goes to the next one; then o keeps going, and a digit goes
-;; to the pane with that number in its mode line (shown when a tab has
-;; more than one).  Tabs: M-1..M-9, or C-x t o then o.
+;; Panes: M-o goes to the next one; then o keeps going, a digit goes to
+;; the pane with that number in its mode line (shown when a tab has more
+;; than one), and l arranges the tab's panes in the next layout.  Tabs:
+;; M-1..M-9, or C-x t o then o.
 (defun kdb-pane--windows ()
   "This tab's panes, in reading order: top left first."
   (window-list nil 'never (frame-first-window)))
@@ -163,10 +164,77 @@ itself shows messages as usual.  For `set-message-functions'."
   (select-window (or (nth (1- n) (kdb-pane--windows))
                      (user-error "No pane %d" n))))
 
+(defun kdb-pane--layout-now ()
+  "The tab's current arrangement: `main', `columns', `rows', `grid' or nil."
+  (cl-flet ((kids (w) (let (k (c (window-child w)))
+                        (while c (push c k) (setq c (window-right c)))
+                        (nreverse k))))
+    (let ((main (window-main-window)))
+      (unless (window-live-p main)
+        (let* ((kids (kids main))
+               (side-by-side (window-combined-p (car kids) t))
+               (stack (cadr kids)))
+          (cond ((seq-every-p #'window-live-p kids) (if side-by-side 'columns 'rows))
+                ((and side-by-side (= (length kids) 2) (window-live-p (car kids))
+                      (not (window-combined-p (window-child stack) t))
+                      (seq-every-p #'window-live-p (kids stack)))
+                 'main)
+                (t 'grid)))))))
+
+(defun kdb-pane-layout ()
+  "Arrange this tab's panes in the next layout: main + stack, columns,
+rows, grid.  The panes keep their buffers, in reading order, and where
+they were in them; side panels stay put."
+  (interactive)
+  (let* ((wins (seq-remove (lambda (w) (window-parameter w 'window-side)) (kdb-pane--windows)))
+         (n (length wins))
+         (shown (mapcar (lambda (w) (list (window-buffer w) (window-point w) (window-start w))) wins))
+         (here (seq-position wins (selected-window)))
+         ;; Two panes: main + stack and grid would just be columns again.
+         (cycle (if (< n 3) '(columns rows) '(main columns rows grid)))
+         (layout (car (or (cdr (memq (kdb-pane--layout-now) cycle)) cycle))))
+    (when (< n 2) (user-error "One pane: nothing to arrange"))
+    (select-window (car wins))
+    (delete-other-windows)
+    (let ((new
+           (pcase layout
+             ('columns (let ((ws (list (selected-window))))
+                         (dotimes (_ (1- n)) (push (split-window (car ws) nil 'right) ws))
+                         (nreverse ws)))
+             ('rows (let ((ws (list (selected-window))))
+                      (dotimes (_ (1- n)) (push (split-window (car ws) nil 'below) ws))
+                      (nreverse ws)))
+             ('main (let* ((first (selected-window))
+                           (stack (split-window first (round (* 0.6 (window-total-width first))) 'right))
+                           (ws (list stack)))
+                      (dotimes (_ (- n 2)) (push (split-window (car ws) nil 'below) ws))
+                      (cons first (nreverse ws))))
+             ('grid (let* ((cols (ceiling (sqrt n))) (rows (ceiling n (float cols)))
+                           (row-wins (let ((ws (list (selected-window))))
+                                       (dotimes (_ (1- rows)) (push (split-window (car ws) nil 'below) ws))
+                                       (nreverse ws)))
+                           all)
+                      (dolist (r row-wins)
+                        (let ((ws (list r)))
+                          (dotimes (_ (1- (min cols (- n (length all))))) (push (split-window (car ws) nil 'right) ws))
+                          (setq all (append all (nreverse ws)))))
+                      all)))))
+      (balance-windows (window-main-window))
+      (when (eq layout 'main)
+        (window-resize (car new) (- (round (* 0.6 (window-total-width (window-main-window))))
+                                    (window-total-width (car new)))
+                       t t))
+      (cl-mapc (lambda (w s) (set-window-buffer w (nth 0 s))
+                 (set-window-start w (nth 2 s)) (set-window-point w (nth 1 s)))
+               new shown)
+      (select-window (nth (or here 0) new))
+      (message "Layout: %s" (pcase layout ('main "main + stack") (_ layout))))))
+
 (defvar-keymap kdb-pane-map
   ;; A digit picks a pane and ends it, so a number typed next is typed.
   :repeat (:exit (kdb-pane-select))
   "o" #'kdb-pane-next
+  "l" #'kdb-pane-layout
   "1" #'kdb-pane-select "2" #'kdb-pane-select "3" #'kdb-pane-select
   "4" #'kdb-pane-select "5" #'kdb-pane-select "6" #'kdb-pane-select
   "7" #'kdb-pane-select "8" #'kdb-pane-select "9" #'kdb-pane-select)
@@ -270,20 +338,32 @@ itself shows messages as usual.  For `set-message-functions'."
 (setq mode-line-compact 'long
       mode-line-position-column-format nil)    ; hide column, line is enough
 
+(defun kdb-mode-line-file-state ()
+  "** for a file with unsaved changes, RO for a read-only one; else blank.
+A chat or a shell isn't a file: changed all the time, and nothing to save."
+  (cond ((and buffer-file-name (buffer-modified-p)) (propertize " ** " 'face 'warning))
+        ((and buffer-file-name buffer-read-only) (propertize " RO " 'face 'mode-line-emphasis))
+        (t "    ")))
+
+(defun kdb-mode-line-misc ()
+  "`mode-line-misc-info' without what's on the tab bar once for all panes."
+  (format-mode-line
+   (seq-remove (lambda (e) (or (eq (car-safe e) 'global-mode-string)
+                               (equal e '(:eval (agent-shell-attention--indicator)))))
+               mode-line-misc-info)))
+
 (setq-default mode-line-format
               '("%e"
                 mode-line-front-space
                 ;; Pane number, for M-o then a digit, when the tab has more than one
                 (:eval (kdb-pane-number))
-                ;; Modified / read-only indicator
-                (:eval (cond (buffer-read-only
-                              (propertize " RO " 'face 'mode-line-emphasis))
-                             ((buffer-modified-p)
-                              (propertize " ** " 'face 'warning))
-                             (t "    ")))
+                ;; Modified / read-only indicator: a file's, not a chat's or a shell's
+                (:eval (kdb-mode-line-file-state))
                 ;; Buffer name
                 mode-line-buffer-identification
                 "  "
+                ;; A Claude session: what it's at (needs you, done, working)
+                (:eval (and (fboundp 'kdb-claude--mode-line-state) (kdb-claude--mode-line-state)))
                 ;; Major mode
                 mode-line-modes
                 "  "
@@ -297,8 +377,9 @@ itself shows messages as usual.  For `set-message-functions'."
                 ;; Position (line number)
                 mode-line-position
                 "  "
-                ;; Misc (time, battery, etc.)
-                mode-line-misc-info
+                ;; Misc (language server, ...); the time, battery and Claude
+                ;; count are once, on the tab bar
+                (:eval (kdb-mode-line-misc))
                 mode-line-end-spaces))
 
 ;;; ============================================================
@@ -1889,6 +1970,100 @@ again when eat's source changes; kept out of eat's own checkout."
 
 ;; Tab Bar (Workspaces) ==================================== ;;
 
+(defun kdb-tab-bar-status ()
+  "The tab bar's right end: Claude's count, then `global-mode-string'."
+  `((global menu-item
+            ,(string-trim
+              (concat (and (fboundp 'agent-shell-attention--indicator)
+                           (format-mode-line (agent-shell-attention--indicator)))
+                      " " (format-mode-line global-mode-string) " "))
+            ignore)))
+
+(defun kdb-tab--layout-panes (tab)
+  "TAB's panes as (X Y W H BUFFER SELECTED) in 0..1, reading order.
+The current tab's from its windows; another's from its saved layout."
+  (if (eq (car tab) 'current-tab)
+      (pcase-let ((`(,rx ,ry ,rx2 ,ry2) (window-pixel-edges (frame-root-window))))
+        (mapcar (lambda (w)
+                  (pcase-let ((`(,x ,y ,x2 ,y2) (window-pixel-edges w)))
+                    (list (/ (float (- x rx)) (- rx2 rx)) (/ (float (- y ry)) (- ry2 ry))
+                          (/ (float (- x2 x)) (- rx2 rx)) (/ (float (- y2 y)) (- ry2 ry))
+                          (window-buffer w) (eq w (selected-window)))))
+                (kdb-pane--windows)))
+    (let (panes)
+      (cl-labels ((walk (node x y w h)
+                    (let* ((type (car node))
+                           (kids (seq-filter (lambda (e) (memq (car-safe e) '(leaf hc vc)))
+                                             (cdr node))))
+                      (if (eq type 'leaf)
+                          (let ((buffer (alist-get 'buffer (cdr node))))
+                            (push (list x y w h (get-buffer (car-safe buffer))
+                                        (eq (alist-get 'selected (cdr-safe buffer)) t))
+                                  panes))
+                        (let ((at 0.0))
+                          (dolist (kid kids)
+                            (let ((share (or (alist-get (if (eq type 'hc) 'normal-width 'normal-height)
+                                                        (cdr kid))
+                                             (/ 1.0 (length kids)))))
+                              (if (eq type 'hc)
+                                  (walk kid (+ x (* at w)) y (* share w) h)
+                                (walk kid x (+ y (* at h)) w (* share h)))
+                              (setq at (+ at share)))))))))
+        (when-let* ((ws (alist-get 'ws tab)))
+          (walk (cdr ws) 0.0 0.0 1.0 1.0)))
+      (nreverse panes))))
+
+(defvar kdb-tab--layout-images (make-hash-table :test #'equal)
+  "Drawn tab layouts, by what was drawn: redrawing the tab bar reuses them.")
+
+(defun kdb-tab--layout-image (panes)
+  "A small drawing of PANES, each filled by its Claude session's state."
+  (let* ((h (max 10 (round (* 0.8 (frame-char-height)))))
+         (w (round (* 1.8 h)))
+         (stroke (or (face-attribute 'tab-bar :foreground nil t) "gray60"))
+         (states (and (fboundp 'kdb-claude--waiting) (kdb-claude--waiting)))
+         (fill (lambda (buf)
+                 (pcase (cdr (assq buf states))
+                   ('input (face-foreground 'warning nil t))
+                   ('done (face-foreground 'success nil t))
+                   ('busy (face-foreground 'shadow nil t)))))
+         (cells (mapcar (lambda (p)
+                          (pcase-let ((`(,x ,y ,pw ,ph ,buf ,sel) p))
+                            (list (+ 0.5 (* x (1- w))) (+ 0.5 (* y (1- h)))
+                                  (max 1.5 (- (* pw (1- w)) 1.5)) (max 1.5 (- (* ph (1- h)) 1.5))
+                                  (funcall fill buf) sel)))
+                        panes))
+         (key (list w h stroke cells)))
+    (or (gethash key kdb-tab--layout-images)
+        (progn
+          (when (> (hash-table-count kdb-tab--layout-images) 300)
+            (clrhash kdb-tab--layout-images))
+          (puthash key
+                   (create-image
+                    (concat (format "<svg xmlns='http://www.w3.org/2000/svg' width='%d' height='%d'>" w h)
+                            (mapconcat
+                             (pcase-lambda (`(,x ,y ,cw ,ch ,fill ,sel))
+                               (format "<rect x='%.1f' y='%.1f' width='%.1f' height='%.1f' rx='1.5' fill='%s' fill-opacity='%s' stroke='%s' stroke-width='%s'/>"
+                                       x y cw ch (or fill "none") (if fill "0.9" "0")
+                                       stroke (if sel "1.6" "0.8")))
+                             cells "")
+                            "</svg>")
+                    'svg t :ascent 'center)
+                   kdb-tab--layout-images)))))
+
+(defun kdb-tab-name-layout (name tab _i)
+  "NAME with a drawing of TAB's panes after its number.
+For `tab-bar-tab-name-format-functions'; graphical frames only."
+  (if-let* (((and (display-graphic-p) (image-type-available-p 'svg)))
+            (panes (ignore-errors (kdb-tab--layout-panes tab))))
+      (let ((at (if (string-match "\\`[0-9]+ " name) (match-end 0) 0))
+            (face (get-text-property 0 'face name)))
+        (concat (substring name 0 at)
+                (propertize " " 'display (kdb-tab--layout-image panes) 'face face)
+                (propertize " " 'face face)
+                (substring name at)))
+    name))
+
 (use-package tab-bar
   :ensure nil
   :hook (after-init . tab-bar-mode)
@@ -1896,9 +2071,13 @@ again when eat's source changes; kept out of eat's own checkout."
   (setq tab-bar-close-button-show nil
         tab-bar-new-button-show nil
         tab-bar-tab-hints t)           ; Show tab numbers in tab names
+  ;; Tabs, then on the right, once: Claude's count, the time, battery.
   ;; Unless EXWM already put its workspace and clock there.
   (unless (memq 'kdb-exwm-tab-bar-workspace-name tab-bar-format)
-    (setq tab-bar-format '(tab-bar-format-tabs tab-bar-separator)))
+    (setq tab-bar-format '(tab-bar-format-tabs tab-bar-separator
+                           tab-bar-format-align-right kdb-tab-bar-status)))
+  ;; Each tab: a drawing of its panes, coloured by what their sessions are at.
+  (add-to-list 'tab-bar-tab-name-format-functions #'kdb-tab-name-layout t)
   ;; M-1..M-8 go to that tab, M-9 the last, M-0 the one you were just in.
   ;; Not in terminal Emacs, where M-digits split windows (init-terminal).
   (unless (bound-and-true-p kdb-terminal-mode)

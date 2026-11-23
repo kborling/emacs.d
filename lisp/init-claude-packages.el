@@ -19,6 +19,7 @@
               kdb-claude-show kdb-claude-run kdb-claude-output kdb-claude-cleanup
               kdb-claude--rename-keeps-tab kdb-claude--permission-message
               kdb-claude--link-copy-key kdb-claude--link-hint kdb-claude--link-context-menu
+              kdb-claude--mode-line-state kdb-claude--session-mode-line
               kdb-claude--permission-title
               kdb-claude--tag-client kdb-claude--render-markdown
               kdb-claude--track-artifacts kdb-claude--track-emacs-session
@@ -103,6 +104,7 @@ paragraph for its direction, which is costly in long sessions."
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-artifacts)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--track-emacs-session)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--close-session-window)
+  (add-hook 'agent-shell-mode-hook #'kdb-claude--session-mode-line)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--trim-session)
   (add-hook 'agent-shell-mode-hook #'kdb-claude--left-to-right)
   ;; An agent that dies between turns says so, instead of the session just stopping.
