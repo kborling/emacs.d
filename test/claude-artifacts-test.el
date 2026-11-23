@@ -789,7 +789,8 @@
 (ert-deftest reply-files-of-any-type-are-links ()
   (require 'agent-shell)
   (require 'agent-shell-markdown)
-  (let* ((dir (file-name-as-directory (make-temp-file "session" t)))
+  (let* ((processes (process-list))
+         (dir (file-name-as-directory (make-temp-file "session" t)))
          (elsewhere (file-name-as-directory (make-temp-file "artifacts" t)))
          (query (expand-file-name "out/query.sql" elsewhere))
          (plan (expand-file-name "notes/plan.org" dir)))
@@ -832,7 +833,14 @@
                   ((symbol-function 'posn-point) (lambda (_) (match-beginning 0))))
           (kdb-claude--link-context-menu menu 'click))
         (should (lookup-key menu [kdb-claude-copy-link]))))
-    (delete-directory dir t)
+    ;; The project's file list is read in the background, in DIR: Windows
+    ;; won't delete a folder a process is still in.
+    (dolist (p (seq-difference (process-list) processes))
+      (delete-process p))
+    (let ((end (+ (float-time) 3)))
+      (while (and (file-directory-p dir) (< (float-time) end))
+        (ignore-errors (delete-directory dir t))
+        (accept-process-output nil 0.1)))
     (delete-directory elsewhere t)))
 
 (ert-deftest seen-files-newest-first ()
@@ -840,7 +848,9 @@
     (kdb-claude--note-seen-file buf '((:raw-input . ((file_path . "/a/x.sql")))))
     (kdb-claude--note-seen-file buf '((:raw-input . ((file_path . "/b/x.sql")))))
     (kdb-claude--note-seen-file buf '((:raw-input . ((file_path . "/a/x.sql")))))
-    (should (equal (buffer-local-value 'kdb-claude--seen-files buf) '("/a/x.sql" "/b/x.sql")))
+    ;; Expanded: on Windows /a/x.sql is c:/a/x.sql.
+    (should (equal (buffer-local-value 'kdb-claude--seen-files buf)
+                   (mapcar #'expand-file-name '("/a/x.sql" "/b/x.sql"))))
     (kill-buffer buf)))
 
 (ert-deftest reply-files-found-by-tool-calls-project-and-folders ()

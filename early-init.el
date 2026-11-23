@@ -39,7 +39,10 @@ PATH, which shell commands use, gets Windows-style backslashes on Windows."
 
 ;; ELPA's old csharp-mode 2.0 shadows the built-in one, which has
 ;; csharp-ts-mode; `package-install-upgrade-built-in' keeps reinstalling it.
-(setq package-load-list '(all (csharp-mode nil)))
+;; Never loaded, and pinned to an archive that doesn't exist, so upgrading
+;; all packages doesn't bring it back.
+(setq package-load-list '(all (csharp-mode nil))
+      package-pinned-packages '((csharp-mode . "none")))
 
 ;; Windows: file and process I/O is the bottleneck there
 (when (eq system-type 'windows-nt)
