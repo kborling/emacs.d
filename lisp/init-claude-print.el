@@ -332,7 +332,9 @@ RESUME non-nil continues the buffer's session id."
       (with-current-buffer buf
         (setq kdb-claude-print--stdout-acc
               (concat kdb-claude-print--stdout-acc chunk))
-        (let ((lines (split-string kdb-claude-print--stdout-acc "\n")))
+        ;; Split only when a line ended: a line can be MBs, in many chunks.
+        (when-let* (((string-search "\n" chunk))
+                    (lines (split-string kdb-claude-print--stdout-acc "\n")))
           ;; Last element is an incomplete line; keep it for next chunk.
           (setq kdb-claude-print--stdout-acc (car (last lines)))
           (dolist (line (butlast lines))

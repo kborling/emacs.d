@@ -77,20 +77,33 @@ Signals an error naming PROGRAM when it fails or isn't installed."
       (split-string (buffer-string) "[\r\n]+" t "[ \t]+"))))
 
 (defvar kdb-sql--token nil
-  "(TIME . TOKEN): the last Azure CLI token, reused for a few minutes.")
+  "(UNTIL . TOKEN): the last Azure CLI token, and when to stop reusing it.")
 
 (defun kdb-sql--az-token ()
   "An Entra ID token for Azure Database for PostgreSQL, from the Azure CLI.
-Kept 5 minutes, so listing databases and then connecting asks az once."
-  (if (and kdb-sql--token (< (float-time (time-since (car kdb-sql--token))) 300))
+Kept until a minute before it expires (5 minutes if az doesn't say when):
+each az call takes seconds."
+  (if (and kdb-sql--token (time-less-p nil (car kdb-sql--token)))
       (cdr kdb-sql--token)
-    (let ((token (condition-case nil
-                     (car (kdb-sql--lines "az" "account" "get-access-token" "--resource-type"
-                                          "oss-rdbms" "--query" "accessToken" "-o" "tsv"))
-                   (error nil))))
+    (pcase-let ((`(,token ,expires)
+                 ;; One line with a tab, or a line each, depending on az.
+                 (split-string
+                  (string-join
+                   (condition-case err
+                       (kdb-sql--lines "az" "account" "get-access-token" "--resource-type"
+                                       "oss-rdbms" "--query" "[accessToken,expires_on]" "-o" "tsv")
+                     (user-error (signal (car err) (cdr err)))   ; az isn't installed
+                     (error nil))
+                   "\n")
+                  "[\t\n]+" t)))
       (unless token
         (user-error "No token from the Azure CLI: run az login, then connect again"))
-      (setq kdb-sql--token (cons (current-time) token))
+      ;; expires_on: seconds since 1970; older az has none.
+      (setq kdb-sql--token
+            (cons (if (and expires (string-match-p "\\`[0-9]+\\'" expires))
+                      (- (string-to-number expires) 60)
+                    (time-add nil 300))
+                  token))
       token)))
 
 (defun kdb-sql--pg-environment ()
@@ -103,17 +116,18 @@ Kept 5 minutes, so listing databases and then connecting asks az once."
   "In a SQLi buffer, the connection it was started with, database included.")
 
 (defun kdb-sql--databases (product server user)
-  "The databases on SERVER that USER can open, or nil if they can't be listed.
+  "The databases on SERVER that USER can open; signals if they can't be listed.
 A SQL login (ms with USER) isn't listed: it would ask for the password twice."
-  (ignore-errors
+  (unless (and (eq product 'ms) user)
+    ;; It takes seconds, with nothing else to show for it.
+    (message "Listing databases on %s..." server)
     (pcase product
-      ('ms (unless user
-             (kdb-sql--lines (or (bound-and-true-p sql-ms-program) "sqlcmd")
-                             (concat "--server=" server)
-                             "--authentication-method=ActiveDirectoryAzCli" "--login-timeOut=5"
-                             (concat "--query=SET NOCOUNT ON; SELECT name FROM sys.databases"
-                                     " WHERE state_desc = 'ONLINE' ORDER BY name")
-                             "-h" "-1" "-W")))
+      ('ms (kdb-sql--lines (or (bound-and-true-p sql-ms-program) "sqlcmd")
+                           (concat "--server=" server)
+                           "--authentication-method=ActiveDirectoryAzCli" "--login-timeOut=5"
+                           (concat "--query=SET NOCOUNT ON; SELECT name FROM sys.databases"
+                                   " WHERE state_desc = 'ONLINE' ORDER BY name")
+                           "-h" "-1" "-W"))
       ('postgres
        (let ((process-environment (kdb-sql--pg-environment)))
          (kdb-sql--lines "psql" "-X" "-At" "-h" server "-U" user "-d" "postgres" "-c"
@@ -122,9 +136,17 @@ A SQL login (ms with USER) isn't listed: it would ask for the password twice."
 
 (defun kdb-sql--pick-database (product server user)
   "Ask for a database on SERVER, from its list when it can be read."
-  (if-let* ((dbs (kdb-sql--databases product server user)))
-      (completing-read (format "Database on %s: " server) dbs)
-    (read-string (format "Database on %s (RET for its default): " server))))
+  (let* ((failed nil)
+         (dbs (condition-case err (kdb-sql--databases product server user)
+                (error (setq failed (error-message-string err)) nil))))
+    (if dbs
+        (completing-read (format "Database on %s: " server) dbs)
+      ;; In the prompt: a message would be gone as soon as it shows.
+      (read-string (format "Database on %s (%sRET for its default): " server
+                           (if failed
+                               (format "couldn't list them: %s; "
+                                       (truncate-string-to-width failed 80 nil nil "…"))
+                             ""))))))
 
 (defun kdb-sql-connect (name)
   "Connect to the saved database NAME, or a new one typed in.
@@ -347,7 +369,8 @@ On the database a \"-- database: NAME\" line names, as `kdb-sql-send-dwim'."
 (defun kdb-sql--parse (product output)
   "PRODUCT's machine-read OUTPUT as a list of (table HEADER ROWS) and (text STRING)."
   (let ((split (lambda (rec) (split-string rec kdb-sql--us)))
-        (output (string-replace "\r\n" "\n" output)))
+        ;; Usually none: the process decodes CRLF.  Not copied for nothing.
+        (output (if (string-search "\r" output) (string-replace "\r\n" "\n" output) output)))
     (if (eq product 'postgres)
         ;; header RS row RS ... RS (N rows) LF: one result set after another.
         ;; The LF, which psql always ends the footer with, tells it from a
@@ -449,7 +472,9 @@ notices) last, as text."
 (defun kdb-sql--show-results (name results title)
   "Show RESULTS in org buffer NAME, under TITLE; return the buffer."
   (with-current-buffer (get-buffer-create name)
-    (let ((inhibit-read-only t) (n 0))
+    ;; Org's change hooks, per insert, are most of the time on a big
+    ;; result; its element cache is rebuilt once, after.
+    (let ((inhibit-read-only t) (inhibit-modification-hooks t) (n 0))
       (erase-buffer)
       (unless (derived-mode-p 'org-mode) (org-mode))
       (insert "#+TITLE: " title "\n"
@@ -465,13 +490,14 @@ notices) last, as text."
                (insert "| " (mapconcat #'kdb-sql--org-cell row " | ") " |\n")
                (when (eq row header) (insert "|-\n")))
              ;; Aligning is slow on big results; unaligned, it's still a table.
-             (when (< (length rows) 2000)
+             (when (< (* (1+ (length rows)) (length header)) 20000)
                (save-excursion (goto-char start) (org-table-align)))))
           (`(text ,text)
            (insert "\n#+begin_example\n" text "\n#+end_example\n"))))
       ;; The Go sqlcmd prints nothing at all for a result set without rows.
       (unless results
         (insert "\nNo rows.\n"))
+      (org-element-cache-reset)
       (goto-char (point-min))
       (re-search-forward "^|" nil t)
       (set-buffer-modified-p nil)

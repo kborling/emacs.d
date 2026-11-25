@@ -106,10 +106,14 @@ code page."
 (declare-function org-fold-show-entry "org-fold")
 
 (defun kdb-claude--session-jsonl (id)
-  "Claude Code's transcript of session ID, or nil."
+  "Claude Code's transcript of session ID, or nil.
+It is always right under a project folder: deeper ones are subagents'."
   (let ((dir (kdb-claude--projects-dir)))
     (and (file-directory-p dir)
-         (car (directory-files-recursively dir (concat "\\`" (regexp-quote id) "\\.jsonl\\'"))))))
+         (seq-some (lambda (proj)
+                     (let ((f (expand-file-name (concat id ".jsonl") proj)))
+                       (and (file-exists-p f) f)))
+                   (directory-files dir t "\\`[^.]")))))
 
 ;;;###autoload
 (defun kdb-claude-transcript ()
@@ -150,7 +154,8 @@ A long project name is cut down and given a hash, so it stays unique.
 Windows also limits directories to 12 characters below files."
   (let ((file (expand-file-name (format "%s/%s.org" project-name session-id) dest)))
     (if (not (and kdb-claude--max-path
-                  (or (kdb-claude--path-too-long-p file)
+                  ;; Its .tmp sibling, written first, must fit too.
+                  (or (kdb-claude--path-too-long-p (concat file ".tmp"))
                       (> (length (file-name-directory file)) (- kdb-claude--max-path 12)))))
         file
       (expand-file-name (format "%s-%s/%s.org"
@@ -168,7 +173,12 @@ reconvert every session."
          (dest (expand-file-name "code-sessions/" archive))
          (source (kdb-claude--projects-dir))
          (count 0)
-         (skipped 0))
+         (skipped 0)
+         ;; Orgs from before #+CLIENT get upgraded by one full check per
+         ;; clone; after that, only Emacs sessions' CLIENT is read.  In .git,
+         ;; so it isn't committed: each clone upgrades its own.
+         (upgraded (expand-file-name ".git/kdb-claude-client-upgraded" archive))
+         (upgrade (not (file-exists-p upgraded))))
     (make-directory dest t)
     (when (file-directory-p source)
       (let* ((files (seq-remove (lambda (f) (string-match-p "/subagents/" f))
@@ -193,13 +203,14 @@ reconvert every session."
                   (message "Skipped %s: path too long, and copying it failed" jsonl))
                  ;; Only convert if org file doesn't exist or jsonl is newer
                  ((or force
-                      (not (file-exists-p org-file))
-                      (let ((client (kdb-claude--org-keyword org-file "CLIENT")))
-                        (or (null client) (and emacs (not (equal client "emacs")))))
-                      (time-less-p (file-attribute-modification-time
-                                    (file-attributes org-file))
-                                   (file-attribute-modification-time
-                                    (file-attributes readable))))
+                      (let ((org-attrs (file-attributes org-file)))
+                        (or (null org-attrs)
+                            (time-less-p (file-attribute-modification-time org-attrs)
+                                         (file-attribute-modification-time
+                                          (file-attributes readable)))))
+                      (and (or upgrade emacs)
+                           (let ((client (kdb-claude--org-keyword org-file "CLIENT")))
+                             (or (null client) (and emacs (not (equal client "emacs")))))))
                   (condition-case err
                       (progn
                         (make-directory (file-name-directory org-file) t)
@@ -208,7 +219,9 @@ reconvert every session."
                     (file-error
                      (cl-incf skipped)
                      (message "Skipped %s: %s" jsonl (error-message-string err))))))))
-          (when tmp (delete-directory tmp t)))))
+          (when tmp (delete-directory tmp t)))
+        (when (and upgrade (zerop skipped) (file-directory-p (file-name-directory upgraded)))
+          (write-region "" nil upgraded nil 'silent))))
     (message "Synced %d Claude Code sessions%s" count
              (if (> skipped 0) (format " (%d unreadable, skipped)" skipped) ""))))
 
@@ -220,6 +233,8 @@ reconvert every session."
   "Non-nil if the next sync should also commit the archive.")
 (defvar kdb-claude--sync-command nil
   "How the sync starts its background Emacs, up to what it evaluates.")
+(defvar kdb-claude--sync-failed nil
+  "Non-nil while the callbacks of a sync that failed run.")
 
 (defun kdb-claude-sync-code-sessions-async (&optional callback commit)
   "Sync Claude Code sessions in a background Emacs, then call CALLBACK.
@@ -248,18 +263,25 @@ is served by a fresh run right after it."
                         (or (executable-find emacs) emacs)) ; adds .exe on Windows
                       "--batch" "-Q" "-L" (file-name-directory (locate-library "init-claude"))
                       "-l" "init-claude"))
+              ;; -Q keeps Windows' slow true file attributes and a GC sized
+              ;; for small files, while transcripts can be hundreds of MB.
               (list "--eval" (format "(progn (set-language-environment \"UTF-8\") \
+(setq gc-cons-threshold (* 256 1024 1024))%s \
 (setq kdb-claude-archive-dir %S) (kdb-claude-sync-code-sessions)%s)"
+                                     (if (eq system-type 'windows-nt)
+                                         " (setq w32-get-true-file-attributes nil)"
+                                       "")
                                      (expand-file-name kdb-claude-archive-dir)
                                      (if commit " (kdb-claude--commit-archive)" ""))))
              :sentinel
              (lambda (p _)
                (unless (process-live-p p)
                  (setq kdb-claude--sync-process nil)
-                 (unless (zerop (process-exit-status p))
-                   (message "Claude archive sync failed; see buffer \" *claude-archive-sync*\""))
-                 (dolist (cb (delq nil callbacks))
-                   (with-demoted-errors "Claude archive sync callback: %S" (funcall cb)))
+                 (let ((kdb-claude--sync-failed (not (eql 0 (process-exit-status p)))))
+                   (when kdb-claude--sync-failed
+                     (message "Claude archive sync failed; see buffer \" *claude-archive-sync*\""))
+                   (dolist (cb (delq nil callbacks))
+                     (with-demoted-errors "Claude archive sync callback: %S" (funcall cb))))
                  (when kdb-claude--sync-next
                    (kdb-claude-sync-code-sessions-async)))))))))
 
@@ -302,9 +324,11 @@ converting make the JSONL newer and are picked up next sync."
       (goto-char (point-min))
       (while (not (eobp))
         (condition-case nil
-            (let* ((obj (json-parse-string
-                         (buffer-substring (line-beginning-position) (line-end-position))
-                         :object-type 'alist :array-type 'list :null-object nil))
+            (let* ((obj (save-restriction
+                          ;; In place, not copied out: lines can be MBs.
+                          (narrow-to-region (point) (line-end-position))
+                          (json-parse-buffer :object-type 'alist :array-type 'list
+                                             :null-object nil)))
                    (msg (alist-get 'message obj))
                    (role (alist-get 'role msg))
                    ;; By entry type: api-request-blob entries repeat messages
@@ -371,15 +395,18 @@ Windows here, they find any two folders equal."
   (or (kdb-claude--org-keyword file "TITLE") (file-name-base file)))
 
 (defvar kdb-claude--header-cache (make-hash-table :test #'equal)
-  "FILE -> (MTIME . HEADER), so redraws only reread changed files.")
+  "FILE -> ((MTIME . SIZE) . HEADER), so redraws only reread changed files.
+Size too: reconverting keeps a file's mtime, and a CLIENT relabel changes
+its size.")
 
 (defun kdb-claude--org-header (file)
   "Return an alist of the #+KEYWORD values in the header of org FILE."
-  (let ((mtime (file-attribute-modification-time (file-attributes file)))
-        (hit (gethash file kdb-claude--header-cache)))
-    (if (equal (car hit) mtime)
+  (let* ((attrs (file-attributes file))
+         (key (cons (file-attribute-modification-time attrs) (file-attribute-size attrs)))
+         (hit (gethash file kdb-claude--header-cache)))
+    (if (equal (car hit) key)
         (cdr hit)
-      (cdr (puthash file (cons mtime (kdb-claude--read-org-header file))
+      (cdr (puthash file (cons key (kdb-claude--read-org-header file))
                     kdb-claude--header-cache)))))
 
 (defun kdb-claude--read-org-header (file)
@@ -402,6 +429,10 @@ Windows here, they find any two folders equal."
     (when (re-search-forward "\"cwd\":\\(\"\\(?:[^\"\\\\]\\|\\\\.\\)*\"\\)" nil t)
       (json-parse-string (match-string 1)))))
 
+(defvar kdb-claude--jsonl-cwd-cache (make-hash-table :test #'equal)
+  "FILE -> its first recorded cwd.  By name alone: transcripts are only
+appended to, so the first cwd stays, however the mtime moves.")
+
 (defun kdb-claude--session-dirs ()
   "Return (DIR . TIME) for directories with Claude Code sessions, newest first."
   (let (dirs)
@@ -410,7 +441,8 @@ Windows here, they find any two folders equal."
                   (newest (car (sort (directory-files-and-attributes proj t "\\.jsonl\\'" t)
                                      (lambda (a b) (time-less-p (file-attribute-modification-time (cdr b))
                                                                 (file-attribute-modification-time (cdr a)))))))
-                  (cwd (ignore-errors (kdb-claude--jsonl-cwd (car newest)))))
+                  (cwd (ignore-errors (with-memoization (gethash (car newest) kdb-claude--jsonl-cwd-cache)
+                                        (kdb-claude--jsonl-cwd (car newest))))))
         (push (cons (file-name-as-directory (expand-file-name cwd))
                     (file-attribute-modification-time (cdr newest)))
               dirs)))
@@ -642,8 +674,6 @@ Shows the archive as it is, then redraws once a background sync is done."
   (let ((buf (current-buffer)))
     (kdb-claude-sync-code-sessions-async
      (lambda ()
-       ;; Reconverting keeps a file's mtime, so cached headers can be stale.
-       (clrhash kdb-claude--header-cache)
        (when (buffer-live-p buf)
          (with-current-buffer buf (tabulated-list-print t)))))))
 
@@ -742,7 +772,7 @@ share that one live from its buffer with C-c l D instead."
 (declare-function icomplete--vertical-minibuffer-setup "icomplete")
 
 (defvar kdb-claude-recent-count 40
-  "How many sessions `kdb-claude-recent' offers.")
+  "How many sessions `kdb-claude-recent' offers, besides open ones.")
 
 (defun kdb-claude--age (time)
   "TIME as a short age: 5m, 3h, 2d."
@@ -760,20 +790,33 @@ sessions in temporary folders are left out."
          ;; Both spellings: Windows gives the temp folder as KEVINB~1.
          (tmps (list (expand-file-name temporary-file-directory)
                      (file-truename temporary-file-directory)))
-         (rows (seq-keep
-                (lambda (f)
-                  (let* ((h (kdb-claude--org-header f))
-                         (cwd (cdr (assoc "CWD" h))))
-                    (unless (or (equal (kdb-claude--history-source f h) "claude -p")
-                                (and cwd (seq-some (lambda (tmp) (kdb-claude--path-within-p cwd tmp))
-                                                   tmps)))
-                      (list f h (or (cdr (assoc "UPDATED" h)) (cdr (assoc "DATE" h)) "")))))
-                (kdb-claude--archived-orgs)))
-         (rows (seq-take (sort rows (lambda (a b) (string> (nth 2 a) (nth 2 b))))
-                         kdb-claude-recent-count))
-         (rows (append (seq-filter (lambda (r) (assoc (file-name-base (car r)) live)) rows)
-                       (seq-remove (lambda (r) (assoc (file-name-base (car r)) live)) rows)))
-         (seen (make-hash-table :test #'equal)))
+         (row (lambda (f)
+                (let* ((h (kdb-claude--org-header f))
+                       (cwd (cdr (assoc "CWD" h))))
+                  (unless (or (equal (kdb-claude--history-source f h) "claude -p")
+                              (and cwd (seq-some (lambda (tmp) (kdb-claude--path-within-p cwd tmp))
+                                                 tmps)))
+                    (list f h (or (cdr (assoc "UPDATED" h)) (cdr (assoc "DATE" h)) ""))))))
+         (newest (lambda (rows) (sort rows (lambda (a b) (string> (nth 2 a) (nth 2 b))))))
+         (files (sort (mapcar (lambda (f) (cons (file-attribute-modification-time (file-attributes f)) f))
+                              (kdb-claude--archived-orgs))
+                      (lambda (a b) (time-less-p (car b) (car a)))))
+         (open (funcall newest (seq-keep (lambda (m) (and (assoc (file-name-base (cdr m)) live)
+                                                          (funcall row (cdr m))))
+                                         files)))
+         (seen (make-hash-table :test #'equal))
+         rows)
+    ;; Headers by mtime, newest first, only as far as needed: a file's date
+    ;; is never after its mtime (the sync sets one from the other), so once
+    ;; the next mtime is before the oldest date kept, no file left gets in.
+    (while (and files
+                (not (and (>= (length rows) kdb-claude-recent-count)
+                          (string< (format-time-string "%Y-%m-%d %H:%M" (caar files))
+                                   (nth 2 (car (last rows)))))))
+      (let ((f (cdr (pop files))))
+        (unless (assoc (file-name-base f) live)
+          (when-let* ((r (funcall row f)))
+            (setq rows (seq-take (funcall newest (cons r rows)) kdb-claude-recent-count))))))
     (mapcar
      (lambda (r)
        (pcase-let* ((`(,f ,h ,updated) r)
@@ -798,7 +841,7 @@ sessions in temporary folders are left out."
                                  (and cwd (abbreviate-file-name cwd))))
                  "  "))
                f)))
-     rows)))
+     (append open rows))))
 
 ;;;###autoload
 (defun kdb-claude-recent ()
@@ -806,7 +849,7 @@ sessions in temporary folders are left out."
 Ones open in Emacs are on top and are gone to, not restarted.  For older
 sessions, or to search what was said, see `kdb-claude-history'."
   (interactive)
-  (kdb-claude-sync-code-sessions-async (lambda () (clrhash kdb-claude--header-cache)))
+  (kdb-claude-sync-code-sessions-async)
   (let* ((cands (or (kdb-claude--recent-candidates) (user-error "No sessions archived yet")))
          ;; One per line, even when the minibuffer is horizontal.
          (icomplete-vertical-mode t)
@@ -936,7 +979,11 @@ Id-like keys are skipped."
                              (or (alist-get 'content msg) (alist-get 'text msg) ""))))
                   (insert (format "* %s\n\n%s\n\n"
                                   (if (equal sender "human") "You" "Claude")
-                                  text)))))))
+                                  text))))))
+          ;; Its mtime is when it was last active, as for code sessions,
+          ;; which `kdb-claude--recent-candidates' relies on.
+          (when-let* ((updated (ignore-errors (encode-time (iso8601-parse (alist-get 'updated_at conv))))))
+            (set-file-times org-file updated)))
         (cl-incf count)))
     (message "Synced %d Claude Desktop conversations" count)))
 
@@ -949,15 +996,24 @@ Id-like keys are skipped."
   "Sync and commit the archive in the background, then push it."
   (interactive)
   (message "Claude archive syncing...")
-  (kdb-claude-sync-code-sessions-async #'kdb-claude--push-archive t))
+  ;; Not after a failure: it may not have committed, and its message stays.
+  (kdb-claude-sync-code-sessions-async
+   (lambda () (unless kdb-claude--sync-failed (kdb-claude--push-archive))) t))
 
 (defun kdb-claude--commit-archive ()
   "Stage and commit everything in the archive (run in the batch Emacs)."
-  (let ((default-directory (kdb-claude--ensure-archive)))
+  (let ((default-directory (kdb-claude--ensure-archive))
+        (git (lambda (&rest args) (apply #'call-process "git" nil nil nil args))))
     ;; Not a half-written org.tmp left by a killed sync.
-    (call-process "git" nil nil nil "add" "-A" "--" "." ":!*.tmp")
-    (call-process "git" nil nil nil "commit" "-q" "-m"
-                  (format "Sync %s" (format-time-string "%Y-%m-%d %H:%M")))))
+    (unless (eql 0 (funcall git "add" "-A" "--" "." ":!*.tmp"))
+      (error "git add failed in %s (a stale index.lock?)" default-directory))
+    ;; Exit 1: something is staged.  Nothing staged is no failure.
+    (pcase (funcall git "diff" "--cached" "--quiet")
+      (0 nil)
+      (1 (unless (eql 0 (funcall git "commit" "-q" "-m"
+                                 (format "Sync %s" (format-time-string "%Y-%m-%d %H:%M"))))
+           (error "git commit failed in %s" default-directory)))
+      (s (error "git diff failed (%s) in %s" s default-directory)))))
 
 (defun kdb-claude--push-archive ()
   "Push the archive in the background if it has a remote."
