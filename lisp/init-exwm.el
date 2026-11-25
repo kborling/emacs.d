@@ -229,16 +229,7 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
                           (exwm-workspace-switch-create ,workspace)))))
                   (number-sequence 0 9))
 
-        ;; Move window to workspace with Super+Shift+number
-        ,@(mapcar (lambda (i)
-                    (let ((workspace (if (= i 0) 9 (1- i))))
-                      `(,(kbd (format "s-S-%d" i)) .
-                        (lambda ()
-                          (interactive)
-                          (exwm-workspace-move-window ,workspace)))))
-                  (number-sequence 0 9))
-
-        ;; Alternative bindings for shifted numbers (!, @, #, etc.) - map to workspaces 0-8
+        ;; Move window to workspace with Super+Shift+number: X sends s-!, s-@, ...
         ([?\s-!] . (lambda () (interactive) (exwm-workspace-move-window 0)))
         ([?\s-@] . (lambda () (interactive) (exwm-workspace-move-window 1)))
         ([?\s-#] . (lambda () (interactive) (exwm-workspace-move-window 2)))
@@ -403,7 +394,7 @@ Toggle with `kdb-exwm-toggle-panel-mode'.")
 
 ;;; Audio Control ========================================================
 
-(defvar kdb-pactl (executable-find "pactl")
+(defvar kdb-pactl (or (executable-find "pactl") "pactl")
   "Full path to pactl — needed since EXWM shells don't inherit the login PATH.")
 
 (defun kdb-exwm-volume-up ()

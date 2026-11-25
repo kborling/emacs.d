@@ -28,7 +28,9 @@
                     ((executable-find "xclip") "xclip -selection clipboard -o")
                     ((executable-find "xsel") "xsel --clipboard --output")
                     ((executable-find "wl-paste") "wl-paste --no-newline")
-                    ((executable-find "powershell.exe") "powershell.exe -command Get-Clipboard"))))
+                    ;; Last, WSL only: a second or two per yank.
+                    ((and (getenv "WSL_DISTRO_NAME") (executable-find "powershell.exe"))
+                     "powershell.exe -NoProfile -Command Get-Clipboard"))))
     (when copy-cmd
       (setq interprogram-cut-function
             (lambda (text)

@@ -99,3 +99,45 @@
       (set-buffer-modified-p nil)
       (kill-buffer))
     (delete-directory kdb/people-dir t)))
+
+(ert-deftest org-agenda-files-flat-and-folders ()
+  ;; Flat files on one machine, folders on another; only those that exist.
+  (let ((dir (file-name-as-directory (make-temp-file "orgdir" t))))
+    (unwind-protect
+        (progn
+          (should-not (kdb/org-agenda-files dir))
+          (should (equal (kdb/org-inbox-file dir) (expand-file-name "inbox.org" dir)))
+          (make-directory (expand-file-name "inbox" dir))
+          (make-directory (expand-file-name "people" dir))
+          (make-directory (expand-file-name "other" dir))
+          (with-temp-file (expand-file-name "notes.org" dir))
+          (should (equal (kdb/org-agenda-files dir)
+                         (mapcar (lambda (f) (expand-file-name f dir))
+                                 '("notes.org" "inbox/" "people/"))))
+          ;; No flat inbox: the folder's, not created until a capture.
+          (should (equal (kdb/org-inbox-file dir) (expand-file-name "inbox/inbox.org" dir)))
+          (should-not (file-exists-p (expand-file-name "inbox/inbox.org" dir)))
+          (with-temp-file (expand-file-name "inbox.org" dir))
+          (should (equal (kdb/org-inbox-file dir) (expand-file-name "inbox.org" dir))))
+      (delete-directory dir t))))
+
+(defun test-agenda-match (key)
+  "The match string of the first block of agenda command KEY."
+  (nth 1 (car (nth 2 (assoc key org-agenda-custom-commands)))))
+
+(defun test-matching-headings (text match)
+  (with-temp-buffer
+    (insert text)
+    (org-mode)
+    (org-map-entries (lambda () (org-get-heading t t t t)) match)))
+
+(ert-deftest org-agenda-tag-matchers ()
+  ;; People: any tag starting with @.
+  (should (equal (test-matching-headings "* TODO Call :@anna:\n* TODO Other :work:\n* TODO Ask :x:@bob:\n"
+                                         (test-agenda-match "p"))
+                 '("Call" "Ask")))
+  ;; Reviews: level-2 headlines named Weekly Review.
+  (should (equal (test-matching-headings
+                  "* Reviews\n** Weekly Review 2026-W47\n** Other\n*** Weekly Review\n* Weekly Review\n"
+                  (test-agenda-match "r"))
+                 '("Weekly Review 2026-W47"))))

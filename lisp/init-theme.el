@@ -99,10 +99,9 @@ desktop wallpaper."
   ;; acme: authentic Plan 9 true-black text (must be set before the theme loads).
   (setq acme-theme-black-fg t)
   (mapc #'disable-theme custom-enabled-themes)
-  (load-theme theme t)
-  ;; Dark-on-light reads thinner than light-on-dark: heavier weight for light.
-  (set-face-attribute 'default nil :weight
-                      (if (memq theme kdb-light-themes) 'medium 'normal))
+  ;; Loaded once; a switch only re-enables it.  The default weight stays
+  ;; the font setup's: changing it re-realizes every font.
+  (if (custom-theme-p theme) (enable-theme theme) (load-theme theme t))
   (setq kdb-current-theme theme)
   (unless (memq theme kdb-light-themes)
     (setq kdb-last-dark-theme theme))

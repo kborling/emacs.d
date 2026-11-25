@@ -5,6 +5,27 @@
 
 ;;; Code:
 
+(defvar org-directory)
+
+(defun kdb/org-agenda-files (&optional dir)
+  "The agenda files and folders under DIR (default `org-directory') that exist.
+Some machines keep flat files, others folders; a folder's subfolders aren't
+read.  Only existing ones: missing ones make the agenda prompt for each."
+  (seq-filter #'file-exists-p
+              (mapcar (lambda (f) (expand-file-name f (or dir org-directory)))
+                      '("inbox.org" "todo.org" "notes.org" "projects.org" "work.org"
+                        "inbox/" "notes/" "people/" "performance/" "staffing/"))))
+
+(defun kdb/org-inbox-file (&optional dir)
+  "The inbox under DIR (default `org-directory'): inbox.org, else inbox/inbox.org.
+The folder's file is created by the first capture into it."
+  (let* ((dir (or dir org-directory))
+         (flat (expand-file-name "inbox.org" dir)))
+    (if (or (file-exists-p flat)
+            (not (file-directory-p (expand-file-name "inbox/" dir))))
+        flat
+      (expand-file-name "inbox/inbox.org" dir))))
+
 (use-package org
   ;; :ensure nil
   :config
@@ -38,14 +59,9 @@
   (setq org-todo-keywords
         '((sequence "TODO(t)" "WAITING(w)" "FOLLOWUP(f)" "|" "DONE(d)" "CANCELLED(c)")))
 
-  ;; Check for encrypted version first, fall back to regular org file
-  ;; Only existing files: missing ones make the agenda prompt for each.
-  (setq org-agenda-files
-        (append (seq-filter #'file-exists-p
-                            '("~/.org/inbox.org" "~/.org/todo.org" "~/.org/notes.org"
-                              "~/.org/projects.org" "~/.org/work.org"))
-                (when (file-directory-p "~/.org/people/")
-                  '("~/.org/people/")))
+  (setq org-agenda-files (kdb/org-agenda-files)
+        ;; Agenda builds skip each file's startup (folding, inline images).
+        org-agenda-inhibit-startup t
         org-log-done 'time
         org-agenda-include-diary nil
         org-agenda-start-on-weekday nil
@@ -62,13 +78,13 @@
             (tags "PROJECT={.+}"
                   ((org-agenda-overriding-header "Active Projects")))))
           ("p" "People Focus"
-           ((tags-todo "@.*:"
+           ((tags-todo "{^@}"
                        ((org-agenda-overriding-header "People-related TODOs")))
             (agenda "" ((org-agenda-span 3)
                         (org-agenda-entry-types '(:scheduled))
                         (org-agenda-overriding-header "Upcoming Meetings/Reviews")))))
           ("r" "Weekly Review"
-           ((tags "LEVEL=2+Weekly Review"
+           ((tags "LEVEL=2+ITEM={Weekly Review}"
                   ((org-agenda-overriding-header "Recent Reviews")))
             (todo "DONE"
                   ((org-agenda-overriding-header "This Week's Accomplishments")
@@ -107,19 +123,19 @@
 
   ;; Capture templates
   (setq org-capture-templates
-        '(("t" "Todo" entry (file "~/.org/inbox.org")
+        '(("t" "Todo" entry (file kdb/org-inbox-file)
            "* TODO %?\nDEADLINE: %^{Due}t\n%U\n" :empty-lines 1)
-          ("T" "Todo (no deadline)" entry (file "~/.org/inbox.org")
+          ("T" "Todo (no deadline)" entry (file kdb/org-inbox-file)
            "* TODO %?\n%U\n" :empty-lines 1)
-          ("n" "Note" entry (file "~/.org/inbox.org")
+          ("n" "Note" entry (file kdb/org-inbox-file)
            "* %?\n%U\n" :empty-lines 1)
           ("j" "Journal" entry (file+olp+datetree "~/.org/journal.org")
            "* %?\n%U\n" :empty-lines 1)
           ("w" "Work note" entry (file+olp+datetree "~/.org/work.org")
            "* %?\n%U\n" :empty-lines 1)
-          ("l" "Link" entry (file "~/.org/inbox.org")
+          ("l" "Link" entry (file kdb/org-inbox-file)
            "* %?\n%U\n%a\n" :empty-lines 1)
-          ("c" "Claude artifact" entry (file "~/.org/inbox.org")
+          ("c" "Claude artifact" entry (file kdb/org-inbox-file)
            "* %?\n%U\n#+begin_src markdown\n%x\n#+end_src\n" :empty-lines 1)
           ;; Management
           ("m" "Meeting" entry (file+olp+datetree "~/.org/work.org")
@@ -130,16 +146,13 @@
            "* %?\nDEADLINE: %^{Target date}t\n:PROPERTIES:\n:STATUS: planning\n:OWNER: \n:END:\n%U\n** Overview\n\n** Requirements\n\n** Tasks\n- [ ] \n" :empty-lines 1)
           ("d" "Decision" entry (file "~/.org/decisions.org")
            "* %?\nDEADLINE: %^{Decide by}t\n%U\n** Context\n\n** Options Considered\n1. \n2. \n\n** Decision\n\n** Rationale\n" :empty-lines 1)
-          ("s" "Spec/Doc" entry (file "~/.org/inbox.org")
+          ("s" "Spec/Doc" entry (file kdb/org-inbox-file)
            "* %?\n%U\n** Purpose\n\n** Requirements\n\n** Design\n\n** Implementation\n\n** Open Questions\n- \n" :empty-lines 1)
-          ("a" "Ask Claude" entry (file "~/.org/inbox.org")
+          ("a" "Ask Claude" entry (file kdb/org-inbox-file)
            "* %? :claude:\n%U\n** Source\n\n** Thoughts\n\n** Next Actions\n- [ ] \n** Prompt\n" :empty-lines 1)))
 
-  (setq org-refile-targets (seq-filter (lambda (target) (file-exists-p (car target)))
-                                       '(("~/.org/notes.org" :maxlevel . 3)
-                                         ("~/.org/todo.org" :maxlevel . 2)
-                                         ("~/.org/work.org" :maxlevel . 2)
-                                         ("~/.org/projects.org" :maxlevel . 2)))
+  ;; The agenda's org files, its folders' too.
+  (setq org-refile-targets '((org-agenda-files :maxlevel . 3))
         org-refile-use-outline-path 'file
         org-outline-path-complete-in-steps nil)
 
@@ -182,7 +195,10 @@
         org-modern-block-fringe 4))
 
 
+;; Not on Windows: with markers and entities shown there, it would only
+;; reveal links, at a cost on every command.
 (use-package org-appear
+  :if (not (eq system-type 'windows-nt))
   :hook (org-mode . org-appear-mode)
   :config
   (setq org-appear-autolinks t
@@ -256,7 +272,7 @@ Kills the buffer afterwards unless KEEP (prefix arg) is non-nil."
                       (read-string "Heading: " (kdb/note--default-title raw))
                       (format-time-string "[%Y-%m-%d %a %H:%M]")
                       raw)))
-           (org-refile-targets (cons '("~/.org/inbox.org" :maxlevel . 1)
+           (org-refile-targets (cons `(,(kdb/org-inbox-file) :maxlevel . 1)
                                      org-refile-targets))
            (loc (org-refile-get-location "File note in"))
            (file (nth 1 loc))

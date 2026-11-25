@@ -17,7 +17,7 @@
         vc-git-log-edit-summary-target-len 50
         vc-git-log-edit-summary-max-len 70
         vc-suppress-confirm t
-        vc-command-messages t)
+        vc-command-messages 'log)   ; *Messages* only, not the echo area
   ;; No custom `vc-git-log-switches': a --pretty format leaves log-view no
   ;; "commit HASH" lines, so n/p, diff, annotate and find-revision in a log
   ;; find nothing.  The branch log (L) is one line per commit already.
@@ -160,9 +160,13 @@
 (use-package diff-hl
   :ensure t
   :demand t
-  :hook (dired-mode . diff-hl-dired-mode)
   :config
   (global-diff-hl-mode 1)
+  ;; Extra indicators cost another repo-wide git run per listing.
+  (setq diff-hl-dired-extra-indicators nil)
+  ;; Not on Windows: repo-wide git runs on every dired listing.
+  (unless (eq system-type 'windows-nt)
+    (add-hook 'dired-mode-hook #'diff-hl-dired-mode))
   (if (eq system-type 'windows-nt)
       ;; flydiff runs git on every idle pause; process startup is slow there
       (setq diff-hl-update-async t)
@@ -592,18 +596,21 @@ For history surgery vc doesn't cover: interactive rebase, cherry-pick."
     (vc-dir-hide-state 'unregistered))
   
   ;; Toggle showing all files
+  (defvar-local kdb-vc-dir-showing-all nil
+    "Non-nil when this vc-dir shows all files, after `kdb-vc-dir-toggle-all'.")
+
   (defun kdb-vc-dir-toggle-all ()
     "Toggle between showing all files and only modified files."
     (interactive)
-    (if (get 'kdb-vc-dir-toggle-all 'showing-all)
+    (if kdb-vc-dir-showing-all
         (progn
           (kdb-vc-dir-show-only-modified)
-          (put 'kdb-vc-dir-toggle-all 'showing-all nil)
+          (setq kdb-vc-dir-showing-all nil)
           (message "Showing only modified files"))
       (progn
         (vc-dir-unmark-all-files t)
         (revert-buffer)
-        (put 'kdb-vc-dir-toggle-all 'showing-all t)
+        (setq kdb-vc-dir-showing-all t)
         (message "Showing all files"))))
   
   ;; Quick commit with message

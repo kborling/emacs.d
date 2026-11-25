@@ -89,4 +89,20 @@
   (require 'vc-git)
   (should-not (seq-some (lambda (s) (string-prefix-p "--pretty" s)) vc-git-log-switches)))
 
+(ert-deftest diff-hl-dired-off-on-windows ()
+  (should-not diff-hl-dired-extra-indicators)
+  (should (eq (eq system-type 'windows-nt)
+              (not (memq 'diff-hl-dired-mode dired-mode-hook)))))
+
+(ert-deftest vc-dir-toggle-all-is-per-buffer ()
+  (require 'vc-dir)
+  (let (calls)
+    (cl-letf (((symbol-function 'kdb-vc-dir-show-only-modified) (lambda () (push 'modified calls)))
+              ((symbol-function 'vc-dir-unmark-all-files) #'ignore)
+              ((symbol-function 'revert-buffer) (lambda (&rest _) (push 'all calls))))
+      (with-temp-buffer (kdb-vc-dir-toggle-all))
+      ;; Another vc-dir starts from its own state, not the first one's.
+      (with-temp-buffer (kdb-vc-dir-toggle-all)))
+    (should (equal calls '(all all)))))
+
 ;;; vc-test.el ends here
