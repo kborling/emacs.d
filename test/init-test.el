@@ -862,4 +862,64 @@
       (should (member global-mode-string seen))))
   (should (memq 'kdb-tab-bar-status tab-bar-format)))
 
+(ert-deftest completion-preview-waits-for-a-pause ()
+  (should (numberp completion-preview-idle-delay)))
+
+(ert-deftest vc-state-not-refreshed-by-auto-revert ()
+  ;; No git runs from a revert; only the file's state is forgotten, for
+  ;; diff-hl to ask again.  Any other caller still refreshes.
+  (let (asked)
+    (cl-letf (((symbol-function 'vc-backend) (lambda (f) (push f asked) nil)))
+      (with-temp-buffer
+        (setq buffer-file-name (expand-file-name "kdb-vc-test.el" temporary-file-directory))
+        (vc-file-setprop buffer-file-name 'vc-state 'up-to-date)
+        (let ((auto-revert-buffer-in-progress t))
+          (vc-refresh-state))
+        (should-not asked)
+        (should-not (vc-file-getprop buffer-file-name 'vc-state))
+        (vc-refresh-state)
+        (should asked)
+        (setq buffer-file-name nil)))))
+
+(ert-deftest eglot-without-semantic-tokens-or-inlay-hints ()
+  (require 'eglot)
+  (should (memq :semanticTokensProvider eglot-ignored-server-capabilities))
+  (should (memq :inlayHintProvider eglot-ignored-server-capabilities))
+  (should (> eglot-send-changes-idle-time 0)))
+
+(ert-deftest treesit-grammar-found-by-its-file ()
+  (let* ((dir (make-temp-file "kdb-ts" t))
+         (treesit-extra-load-path (list dir))
+         loaded)
+    (cl-letf (((symbol-function 'treesit-language-available-p)
+               (lambda (lang &rest _) (push lang loaded) nil)))
+      (unwind-protect
+          (progn
+            (write-region "" nil (expand-file-name (concat "libtree-sitter-kdbfake" module-file-suffix) dir))
+            (should (kdb-treesit-grammar-p 'kdbfake))
+            (should-not (kdb-treesit-grammar-p 'kdbnone))
+            (should-not (memq 'kdbfake loaded))
+            (when (eq system-type 'windows-nt)
+              (should-not loaded)))
+        (delete-directory dir t)))))
+
+(ert-deftest backups-in-their-own-folder ()
+  (should (equal backup-directory-alist
+                 `((".*" . ,(expand-file-name "backup/" user-emacs-var-directory))))))
+
+(ert-deftest project-exclusions-added-once ()
+  ;; The project settings run again on a reload of init.el.
+  (require 'project)
+  (let ((vc-directory-exclusion-list (copy-sequence vc-directory-exclusion-list))
+        (form (with-temp-buffer
+                (insert-file-contents (symbol-file 'kdb-spell-setup 'defun))
+                (let (f)
+                  (while (not (and (eq (car-safe f) 'use-package) (eq (cadr f) 'project)))
+                    (setq f (read (current-buffer))))
+                  f))))
+    (eval form t)
+    (let ((once (copy-sequence vc-directory-exclusion-list)))
+      (eval form t)
+      (should (equal vc-directory-exclusion-list once)))))
+
 ;;; init-test.el ends here

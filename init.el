@@ -38,7 +38,8 @@
 
 ;; Native compilation settings
 (setq native-comp-async-report-warnings-errors nil
-      native-comp-async-jobs-number 4)
+      ;; One on Windows: the host's cores are shared with other sessions.
+      native-comp-async-jobs-number (if (eq system-type 'windows-nt) 1 4))
 
 ;; Rendering optimizations
 (setq fast-but-imprecise-scrolling t
@@ -48,6 +49,8 @@
       ;; multi-MB Claude sessions included, allocating as it goes.
       jit-lock-stealth-time nil
       bidi-inhibit-bpa t)
+;; No scan of each paragraph for its direction on every redisplay.
+(setq-default bidi-paragraph-direction 'left-to-right)
 
 ;; Timers (auto-revert, Claude sessions finishing, theme switches, agent
 ;; output) that message while you type a file name or command append
@@ -299,10 +302,12 @@ they were in them; side panels stay put."
 (unless (file-directory-p user-emacs-var-directory)
   (make-directory user-emacs-var-directory t))
 
-;; Backup stored in /tmp
+;; Backups in their own folder (Emacs creates it): with numbered versions,
+;; each buffer's first save lists the folder, and %TEMP% is huge.
+;; Auto-saves stay in /tmp: writing one lists nothing.
 (setq
  backup-directory-alist
- `((".*" . ,temporary-file-directory))
+ `((".*" . ,(expand-file-name "backup/" user-emacs-var-directory)))
  auto-save-file-name-transforms
  `((".*" , temporary-file-directory t))
 
@@ -518,6 +523,9 @@ A chat or a shell isn't a file: changed all the time, and nothing to save."
 (add-hook 'after-init-hook #'repeat-mode)
 
 ;; Inline completion preview (ghost text)
+;; After a pause, not every key: eglot's completion is a request that
+;; blocks redisplay until the server answers.
+(setq completion-preview-idle-delay 0.2)
 (add-hook 'prog-mode-hook #'completion-preview-mode)
 
 ;; Spell checking — only when the checker actually works (a binary without
@@ -956,7 +964,18 @@ If point is at the end of the line, kill the whole line including the newline."
   :hook (after-init . global-auto-revert-mode)
   :init
   ;; File notifications instead of stat-ing every buffer's file every 5s.
-  (setq auto-revert-avoid-polling t))
+  (setq auto-revert-avoid-polling t)
+  ;; Each revert refreshes the VC state: several git runs, and agents
+  ;; rewrite open files all the time.  Only the file's state is dropped,
+  ;; for diff-hl to ask again; the branch in the mode line can lag after a
+  ;; checkout until the file is saved or visited again.
+  (defun kdb-vc-refresh-unless-auto-revert ()
+    "Let `vc-refresh-state' run, except when auto-revert calls it."
+    (or (not auto-revert-buffer-in-progress)
+        (progn (when buffer-file-name
+                 (vc-file-setprop buffer-file-name 'vc-state nil))
+               nil)))
+  (advice-add 'vc-refresh-state :before-while #'kdb-vc-refresh-unless-auto-revert))
 
 
 ;; Grep ==================================================== ;;
@@ -1223,7 +1242,7 @@ If point is at the end of the line, kill the whole line including the newline."
   :defer t
   :config
   (setq
-   vc-directory-exclusion-list (nconc vc-directory-exclusion-list '("node_modules" "elpa" ".sl"))
+   vc-directory-exclusion-list (seq-union vc-directory-exclusion-list '("node_modules" "elpa" ".sl"))
    project-vc-extra-root-markers '(".envrc" "package.json" ".project" ".sl")
    project-prune-zombie-projects '((prompt . project-prune-zombies-default)))
 
@@ -1389,11 +1408,15 @@ and refresh it in the background."
   :config
   (setq
    eglot-sync-connect 0
-   eglot-send-changes-idle-time 0
+   ;; Changes batched per pause, not sent per key; a request such as
+   ;; completion sends the pending ones first.
+   eglot-send-changes-idle-time 0.3
    eglot-autoshutdown t
    eglot-extend-to-xref t
    eglot-ignored-server-capabilities '(:hoverProvider
-                                       :documentHighlightProvider))
+                                       :documentHighlightProvider
+                                       :semanticTokensProvider
+                                       :inlayHintProvider))
 
   ;; Language Servers
   (add-to-list 'eglot-server-programs '((csharp-mode csharp-ts-mode) . ("csharp-ls")))
@@ -1420,10 +1443,7 @@ and refresh it in the background."
             (lambda ()
               "Make sure Eldoc will show us all of the feedback at point."
               (setq-local eldoc-documentation-strategy
-                          #'eldoc-documentation-compose)))
-
-  ;; Remove inlay hints
-  (add-hook 'eglot-managed-mode-hook (lambda () (eglot-inlay-hints-mode -1))))
+                          #'eldoc-documentation-compose))))
 
 ;; NOTE: Be sure to grab the latest release 'https://github.com/blahgeek/emacs-lsp-booster/releases'
 ;; and place in PATH
@@ -1484,8 +1504,7 @@ and refresh it in the background."
               ("C-c f q" . kdb-flymake-quickfix)
               ("M-n" . flymake-goto-next-error)
               ("M-p" . flymake-goto-prev-error))
-  :hook ((prog-mode . flymake-mode)
-         (text-mode . flymake-mode))
+  :hook (prog-mode . flymake-mode)
   :init
   (add-hook 'flymake-mode-hook
             (lambda ()
@@ -1498,10 +1517,7 @@ and refresh it in the background."
 
 (use-package eldoc
   :ensure nil
-  :hook (after-init . global-eldoc-mode)
-  :config
-  (setq
-   eldoc-echo-area-use-multiline-p t))
+  :hook (after-init . global-eldoc-mode))
 
 ;; Exec Path From Shell ==================================== ;;
 
@@ -1510,7 +1526,10 @@ and refresh it in the background."
   (use-package exec-path-from-shell
     :ensure t
     :init
+    ;; A login shell, not an interactive one: .zshrc's prompt and plugins
+    ;; would load for nothing.
     (setq exec-path-from-shell-variables '("PATH" "SSH_AUTH_SOCK")
+          exec-path-from-shell-arguments '("-l")
           exec-path-from-shell-check-startup-files nil)
     :config
     (exec-path-from-shell-initialize)))
@@ -1726,12 +1745,26 @@ and refresh it in the background."
 ;; `setq' skips the variable's :set, which is what adds the remaps; and t
 ;; would remap languages without a grammar too, which then ask to install
 ;; one on every visit.  Calling the setter directly avoids loading cus-edit.
+(defun kdb-treesit-grammar-p (lang)
+  "Non-nil if LANG's grammar is installed.
+Looks for the file where Emacs installs grammars rather than loading it
+as `treesit-language-available-p' does: on Windows that's a virus scan
+of each one, and a missing one is searched for on all of PATH.
+Elsewhere system-wide grammars count too."
+  (or (locate-file (or (car (alist-get lang treesit-load-name-override-list))
+                       (format "libtree-sitter-%s" lang))
+                   (append treesit-extra-load-path
+                           (list (locate-user-emacs-file "tree-sitter")))
+                   (list module-file-suffix))
+      (and (not (eq system-type 'windows-nt))
+           (treesit-language-available-p lang))))
+
 (when (and (require 'treesit nil t) (treesit-available-p))
   (let* ((langs '((csharp . c-sharp) (js . javascript) (c++ . cpp) (c-or-c++ . cpp)
                   (mhtml . html) (go-mod . gomod) (go-work . gowork)))
          (grammar-p (lambda (mode)
                       (let ((name (intern (string-remove-suffix "-ts-mode" (symbol-name mode)))))
-                        (and (fboundp mode) (treesit-language-available-p (alist-get name langs name)))))))
+                        (and (fboundp mode) (kdb-treesit-grammar-p (alist-get name langs name)))))))
     (if (boundp 'treesit-major-mode-remap-alist)
         (funcall (get 'treesit-enabled-modes 'custom-set) 'treesit-enabled-modes
                  (seq-filter grammar-p (seq-uniq (mapcar #'cdr treesit-major-mode-remap-alist))))
@@ -1783,7 +1816,8 @@ and refresh it in the background."
 
 (use-package markdown-mode
   :mode ("README\\.md\\'" . gfm-mode)
-  :init (setq markdown-command (if (executable-find "multimarkdown") "multimarkdown" "pandoc"))
+  ;; On load, not at startup: a miss searches the whole PATH.
+  :config (setq markdown-command (if (executable-find "multimarkdown") "multimarkdown" "pandoc"))
   :bind (:map markdown-mode-map
               ("C-c C-e" . markdown-do)
               ;; Export through org (C-c C-c e); the native one needs multimarkdown

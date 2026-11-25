@@ -19,8 +19,10 @@
 
 (add-hook 'emacs-startup-hook
           (lambda ()
+            ;; 0.2, not more: a percentage of a 1.5 GB heap is what may
+            ;; pile up before a collection, which then pauses that much longer.
             (setq gc-cons-threshold (* 128 1024 1024)
-                  gc-cons-percentage 0.5)
+                  gc-cons-percentage 0.2)
             ;; Collect while you pause, so long-running sessions' GC
             ;; pauses land between keystrokes instead of during them;
             ;; only once a quarter of the threshold is allocated, since
@@ -48,6 +50,9 @@ PATH, which shell commands use, gets Windows-style backslashes on Windows."
 (when (eq system-type 'windows-nt)
   (setq w32-pipe-read-delay 0
         w32-pipe-buffer-size (* 64 1024)
+        ;; A read never gets more than the pipe holds; a bigger buffer is
+        ;; only allocated and freed on every read of every process.
+        read-process-output-max w32-pipe-buffer-size
         ;; Skip the slow security-descriptor lookup on every file stat
         w32-get-true-file-attributes nil
         ;; Don't compact font caches on GC; costly with many fonts
