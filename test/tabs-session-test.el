@@ -434,10 +434,16 @@
 
 (ert-deftest bash-is-never-wsl ()
   ;; On Windows, System32\bash.exe starts WSL, not Git Bash.
-  (cl-letf (((symbol-function 'executable-find) (lambda (_) "C:\\Windows\\System32\\bash.exe")))
-    (should-not (kdb-claude--bash)))
-  (cl-letf (((symbol-function 'executable-find) (lambda (_) "C:/Program Files/Git/bin/bash.exe")))
-    (should (equal (kdb-claude--bash) "C:/Program Files/Git/bin/bash.exe"))))
+  (let ((kdb-claude--bash 'unseen) (looked 0))
+    (cl-letf (((symbol-function 'executable-find)
+               (lambda (_) (cl-incf looked) "C:\\Windows\\System32\\bash.exe")))
+      (should-not (kdb-claude--bash))
+      ;; Looked up once, a miss too: slow on Windows, and every block asks.
+      (should-not (kdb-claude--bash))
+      (should (= looked 1))))
+  (let ((kdb-claude--bash 'unseen))
+    (cl-letf (((symbol-function 'executable-find) (lambda (_) "C:/Program Files/Git/bin/bash.exe")))
+      (should (equal (kdb-claude--bash) "C:/Program Files/Git/bin/bash.exe")))))
 
 (ert-deftest sessions-sharing-a-project-dont-close-each-others-things ()
   (test-with-tabs

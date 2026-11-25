@@ -630,7 +630,12 @@
      (unwind-protect
          (cl-letf (((symbol-function 'process-id) (lambda (p) (if (eq p agent) 100 (error "Not ours"))))
                    ((symbol-function 'list-system-processes) (lambda () (mapcar #'car tree)))
-                   ((symbol-function 'process-attributes) (lambda (pid) (cdr (assq pid tree)))))
+                   ((symbol-function 'process-attributes) (lambda (pid) (cdr (assq pid tree))))
+                   ;; Windows' PowerShell read: the same table, at once.
+                   ((symbol-function 'kdb-claude--read-processes)
+                    (lambda (&optional then)
+                      (if then (ignore (funcall then (kdb-claude--process-table)))
+                        (kdb-claude--process-table)))))
            (with-current-buffer ,buf
              (setq-local agent-shell--state (list (cons :client (list (cons :process agent))))))
            ,@body)
@@ -1189,5 +1194,138 @@
     (should (equal (buffer-local-value 'kdb-claude--seen-files new)
                    (list (expand-file-name "/a/x.sql"))))
     (kill-buffer new)))
+
+(ert-deftest open-code-block-isnt-scanned-while-it-streams ()
+  ;; agent-shell leaves an open block raw and its watermark at the fence:
+  ;; its dotted words aren't file names, nor scanned again each chunk.
+  (require 'agent-shell-markdown)
+  (let (asked)
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'kdb-claude--session-project-files) #'ignore)
+                ((symbol-function 'kdb-claude--resolve-file)
+                 (lambda (name &rest _) (push name asked) (and (equal name "a.el") "/x/a.el"))))
+        (insert "See a.el:\n\n```js\nthis.state = config.Get();\n")
+        (kdb-claude--render-markdown)
+        (insert "const x = this.props;\n")
+        (kdb-claude--render-markdown)
+        (should (equal asked '("a.el")))
+        (goto-char (point-min))
+        (search-forward "this.state")
+        (should-not (text-property-not-all (match-beginning 0) (match-end 0) 'agent-shell-markdown-url nil))
+        ;; Closed, it's a rendered block: still not linked inside.
+        (goto-char (point-max))
+        (insert "```\n\nDone.\n")
+        (kdb-claude--render-markdown)
+        (should-not (seq-some (lambda (n) (string-match-p "this\\|config" n)) asked))))))
+
+(ert-deftest resolved-names-kept-for-the-turn ()
+  ;; Each draw rescans the last line: its names aren't looked up again
+  ;; until the files touched change, or the turn ends.
+  (require 'text-property-search)
+  (let ((asked 0))
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'kdb-claude--session-project-files) #'ignore)
+                ((symbol-function 'kdb-claude--resolve-file) (lambda (&rest _) (cl-incf asked) nil)))
+        (insert "Read a.el and b.el.\n")
+        (kdb-claude--link-documents)
+        (kdb-claude--link-documents)
+        (should (= asked 2))
+        (setq kdb-claude--seen-files (list (expand-file-name "/x/new.el")))
+        (kdb-claude--link-documents)
+        (should (= asked 4))
+        (kdb-claude--link-reply-end)
+        (should-not kdb-claude--resolved)
+        (kdb-claude--link-documents)
+        (should (= asked 6))))))
+
+(ert-deftest background-scan-reads-processes-once-for-all-sessions ()
+  ;; Windows: one PowerShell lists every process, command lines too, in the
+  ;; background; `process-attributes' per PID takes seconds there.
+  (require 'agent-shell-attention)
+  (let* ((a (generate-new-buffer "a")) (b (generate-new-buffer "b"))
+         (agents (list (make-process :name "agent" :command (list "sleep" "30") :noquery t)
+                       (make-process :name "agent" :command (list "sleep" "30") :noquery t)))
+         (start (time-subtract nil 600))
+         (table (make-hash-table))
+         (lines (make-hash-table))
+         (system-type 'windows-nt)
+         (agent-shell-attention--busy (make-hash-table :test #'eq))
+         (kdb-claude--background nil)
+         (kdb-claude--background-candidates (list a b))
+         (kdb-claude--processes-reading nil)
+         (kdb-claude--command-lines-reading nil)
+         (kdb-claude--command-lines (make-hash-table))
+         (reads 0) (asked 0))
+    (pcase-dolist (`(,pid ,ppid ,comm ,line) '((101 100 "claude.exe" nil) (102 101 "bash.exe" "bash.exe -c \"npm test\"")
+                                               (201 200 "claude.exe" nil) (202 201 "node.exe" "node.exe server.js")))
+      (puthash pid `((ppid . ,ppid) (comm . ,comm) (start . ,start)) table)
+      (puthash pid (cons start line) lines))
+    (cl-mapc (lambda (buf agent)
+               (with-current-buffer buf
+                 (setq-local agent-shell--state (list (cons :client (list (cons :process agent)))))))
+             (list a b) agents)
+    (cl-letf (((symbol-function 'process-id) (lambda (p) (if (eq p (car agents)) 100 200)))
+              ((symbol-function 'kdb-claude--process-table) (lambda () (error "Read per process")))
+              ((symbol-function 'kdb-claude--read-command-lines) (lambda (&rest _) (cl-incf asked)))
+              ((symbol-function 'kdb-claude--read-processes)
+               (lambda (then) (cl-incf reads) (setq kdb-claude--command-lines lines)
+                 (ignore (funcall then table)))))
+      (kdb-claude--scan-background))
+    (should (= reads 1))
+    (should (= asked 0))
+    (should (equal (cdr kdb-claude--background) (list a b)))
+    (mapc #'delete-process agents)
+    (kill-buffer a) (kill-buffer b)))
+
+(ert-deftest processes-read-from-powershell ()
+  (let* ((kdb-claude--command-lines (make-hash-table))
+         (table (kdb-claude--processes-read
+                 (concat "0\t0\tSystem Idle Process\t\t\r\n"
+                         "1234\t100\tnode.exe\t1795621646810\t\"C:\\node.exe\" server.js\r\n"
+                         "WARNING: not a process\r\n"))))
+    (should (= (hash-table-count table) 2))
+    (should (equal (gethash 1234 table)
+                   '((ppid . 100) (comm . "node.exe") (start 1795621646810 . 1000))))
+    (should (equal (kdb-claude--args 1234 (gethash 1234 table)) "\"C:\\node.exe\" server.js"))
+    (should (eq (kdb-claude--args 0 (gethash 0 table)) 'unreadable))
+    (should-not (kdb-claude--processes-read ""))))
+
+(ert-deftest project-files-same-list-kept-and-dead-projects-dropped ()
+  (let* ((kdb-claude--project-files (make-hash-table :test #'equal))
+         (root (file-name-as-directory (make-temp-file "proj" t)))
+         (gone (file-name-as-directory (make-temp-file "gone" t)))
+         (session (generate-new-buffer "s")))
+    (with-current-buffer session (setq default-directory root))
+    (puthash gone (list (current-time) (make-hash-table :test #'equal)) kdb-claude--project-files)
+    (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (list session))))
+      (kdb-claude--project-files-read root "x.el\0lisp/y.el\0")
+      (let ((index (cadr (gethash root kdb-claude--project-files))))
+        (should (equal (gethash "y.el" index) (list (expand-file-name "lisp/y.el" root))))
+        (should-not (gethash gone kdb-claude--project-files))     ; no session there
+        ;; The same list: the same index, not built again.
+        (kdb-claude--project-files-read root "x.el\0lisp/y.el\0")
+        (should (eq (cadr (gethash root kdb-claude--project-files)) index))
+        ;; A failed read keeps it; a new list makes a new one.
+        (kdb-claude--project-files-read root nil)
+        (should (eq (cadr (gethash root kdb-claude--project-files)) index))
+        (kdb-claude--project-files-read root "x.el\0")
+        (should-not (eq (cadr (gethash root kdb-claude--project-files)) index))))
+    (kill-buffer session)
+    (delete-directory root t) (delete-directory gone t)))
+
+(ert-deftest logo-without-its-icon-never-downloads-per-frame ()
+  ;; No icon and no network: agent-shell's own fetch tries once, and a
+  ;; frame's made-up name never reaches it.
+  (require 'agent-shell)
+  (let* ((cache (make-temp-file "cache" t))
+         (process-environment (cons (concat "XDG_CACHE_HOME=" cache) process-environment))
+         (kdb-claude--logo-files (make-hash-table :test #'equal))
+         urls)
+    (cl-letf (((symbol-function 'url-retrieve-synchronously) (lambda (url &rest _) (push url urls) nil)))
+      (dolist (step '(1 2 3 1))
+        (should (agent-shell--fetch-agent-icon (format "kdb-logo-%d|kdb-missing-icon.png" step)))))
+    (should (= (length urls) 1))
+    (should-not (seq-some (lambda (u) (string-match-p "kdb-logo" u)) urls))
+    (delete-directory cache t)))
 
 ;;; claude-artifacts-test.el ends here

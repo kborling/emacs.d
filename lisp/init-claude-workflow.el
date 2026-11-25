@@ -801,19 +801,32 @@ kdb-logo-STEP|ICON, ICON being the name agent-shell would fetch."
     (with-memoization (gethash name kdb-claude--logo-files)
       (kdb-claude--logo-file name))))
 
+(declare-function agent-shell--make-agent-fallback-icon "agent-shell")
+
 (defun kdb-claude--logo-file (name)
-  "Write the hop frame NAME (kdb-logo-STEP|ICON) names; return its file."
-  (when (string-match "\\`kdb-logo-\\([0-9]+\\)|\\(.+\\)" name)
-    (let ((step (min (string-to-number (match-string 1 name)) (1- (length kdb-claude--logo-hop)))))
-      (when-let* ((icon (agent-shell--fetch-agent-icon (match-string 2 name))))
-        (let* ((svg (kdb-claude--logo-svg icon step))
-               ;; Named by content, so a new icon never shows a stale copy.
-               (file (expand-file-name (format "kdb-logo-%d-%x.svg" step (sxhash-equal svg))
-                                       (expand-file-name "kdb-claude-logo" temporary-file-directory))))
-          (unless (file-exists-p file)
-            (make-directory (file-name-directory file) t)
-            (with-temp-file file (insert svg)))
-          file)))))
+  "Write the hop frame NAME (kdb-logo-STEP|ICON) names; return its file.
+Never nil: agent-shell would then download NAME itself, 5 seconds a
+frame with no network.  Without ICON, agent-shell's lettered one."
+  (let* ((parts (and (string-match "\\`kdb-logo-\\([0-9]+\\)|\\(.+\\)" name)
+                     (cons (string-to-number (match-string 1 name)) (match-string 2 name))))
+         (base (or (cdr parts) name))
+         ;; Once per icon, a miss too: not a download per frame.
+         (icon (let ((hit (gethash (list base) kdb-claude--logo-files 'unseen)))
+                 (if (eq hit 'unseen)
+                     (puthash (list base) (and parts (agent-shell--fetch-agent-icon base))
+                              kdb-claude--logo-files)
+                   hit))))
+    (if (not icon)
+        (agent-shell--make-agent-fallback-icon base 100)
+      (let* ((step (min (car parts) (1- (length kdb-claude--logo-hop))))
+             (svg (kdb-claude--logo-svg icon step))
+             ;; Named by content, so a new icon never shows a stale copy.
+             (file (expand-file-name (format "kdb-logo-%d-%x.svg" step (sxhash-equal svg))
+                                     (expand-file-name "kdb-claude-logo" temporary-file-directory))))
+        (unless (file-exists-p file)
+          (make-directory (file-name-directory file) t)
+          (with-temp-file file (insert svg)))
+        file))))
 
 ;;;###autoload
 (defun kdb-claude--logo-header (model)
@@ -1103,9 +1116,10 @@ A reply names them by name alone (`report.sql'), wherever they are.")
               (seq-take (cons file (delete file kdb-claude--seen-files)) 500))))))
 
 (defvar kdb-claude--project-files (make-hash-table :test #'equal)
-  "Project root -> (TIME . INDEX): its files from git, and when.
-INDEX maps a downcased file name to the paths with that name.  One
-per root, shared by the sessions there.")
+  "Project root -> (TIME INDEX . OUTPUT): its files from git, and when.
+INDEX maps a downcased file name to the paths with that name; OUTPUT
+is git's, to tell when the list changed.  One per root, shared by the
+sessions there.")
 
 (defvar kdb-claude--project-files-reading (make-hash-table :test #'equal)
   "Project root -> the git process listing its files, while it runs.")
@@ -1133,15 +1147,27 @@ before tracking began has them too."
 (defun kdb-claude--project-files-read (root output)
   "Note git's OUTPUT listing ROOT's files, nil when it failed.
 A failure keeps the last list but counts as a try: outside a repo git
-fails every time, and drawing would start it again on every chunk."
-  (let ((index (if output
-                   (make-hash-table :test #'equal)
-                 (or (cdr (gethash root kdb-claude--project-files))
-                     (make-hash-table :test #'equal)))))
-    (dolist (f (and output (split-string output "\0" t)))
-      (let ((file (expand-file-name f root)))
-        (push file (gethash (downcase (file-name-nondirectory file)) index))))
-    (puthash root (cons (current-time) index) kdb-claude--project-files)))
+fails every time, and drawing would start it again on every chunk.
+The same list as last time keeps its index: a big repo's takes a while."
+  (let* ((known (gethash root kdb-claude--project-files))
+         (index (if (and output (not (equal output (cddr known))))
+                    (let ((index (make-hash-table :test #'equal))
+                          (dir (file-name-as-directory (expand-file-name root))))
+                      (dolist (f (split-string output "\0" t))
+                        (let ((file (concat dir f)))
+                          (push file (gethash (downcase (file-name-nondirectory file)) index))))
+                      index)
+                  (or (cadr known) (make-hash-table :test #'equal)))))
+    (puthash root (cons (current-time) (cons index (or output (cddr known))))
+             kdb-claude--project-files)
+    ;; Projects no session is in any more.
+    (when (fboundp 'agent-shell-buffers)
+      (let ((live (cons root (seq-keep (lambda (b)
+                                         (let ((dir (buffer-local-value 'default-directory b)))
+                                           (unless (file-remote-p dir) (kdb-claude--project-dir dir))))
+                                       (agent-shell-buffers)))))
+        (maphash (lambda (r _) (unless (member r live) (remhash r kdb-claude--project-files)))
+                 kdb-claude--project-files)))))
 
 (defun kdb-claude--refresh-project-files (&optional buf)
   "List session BUF's project files with git, in the background.
@@ -1183,7 +1209,7 @@ aren't committed."
   "The session project's file index as last listed; never waits for git.
 A stale or missing list is refreshed in the background for next time."
   (kdb-claude--refresh-project-files)
-  (cdr (gethash (kdb-claude--project-dir default-directory) kdb-claude--project-files)))
+  (cadr (gethash (kdb-claude--project-dir default-directory) kdb-claude--project-files)))
 
 (defun kdb-claude--resolve-file (name &optional touched project)
   "The existing file or folder a reply means by NAME, or nil.
@@ -1214,8 +1240,13 @@ touched last, else none.  TOUCHED and PROJECT (an index, see
                               :key #'length)))
                (car found)))))))
 
-(defun kdb-claude--link-documents (&optional from complete)
-  "Link bare file paths in this (narrowed) reply, from FROM, any file type.
+(defvar-local kdb-claude--resolved nil
+  "(TOUCHED PROJECT . NAMES): names resolved this turn, and from what.
+NAMES maps a name to its file or nil; made anew when the files touched
+or the project's list change, and at the turn's end.")
+
+(defun kdb-claude--link-documents (&optional from complete to)
+  "Link bare file paths in this (narrowed) reply, from FROM to TO, any file type.
 agent-shell links a path only when it names a line; a file Claude wrote
 or read is usually cited whole, as `notes/plan.org', ~/report.md or just
 `query.sql', which `kdb-claude--resolve-file' finds wherever it is.
@@ -1224,18 +1255,24 @@ name ending the text is left for later: more of it may still come
 \(lisp/ then init.el, x.el then .template)."
   ;; shortcut: a path with spaces isn't linked (it reads as several words);
   ;; quote-aware matching if Claude's paths with spaces come up often.
-  (let ((case-fold-search t)
-        ;; Once per draw, not once per word that might be a file name.
-        (touched (kdb-claude--touched-files))
-        (project (kdb-claude--session-project-files))
-        ;; Each name resolved once per draw: a reply says package.json or
-        ;; e.g. many times, and each look-up checks the disk.
-        (resolved (make-hash-table :test #'equal)))
+  (let* ((case-fold-search t)
+         ;; Once per draw, not once per word that might be a file name.
+         (touched (kdb-claude--touched-files))
+         (project (kdb-claude--session-project-files))
+         ;; Each name resolved once per turn: a reply says package.json or
+         ;; e.g. many times, across many draws, and each look-up checks the disk.
+         (resolved (progn
+                     (unless (and kdb-claude--resolved
+                                  (eq (car kdb-claude--resolved) touched)
+                                  (eq (cadr kdb-claude--resolved) project))
+                       (setq kdb-claude--resolved
+                             (cons touched (cons project (make-hash-table :test #'equal)))))
+                     (cddr kdb-claude--resolved))))
     (save-excursion
       (goto-char (or from (point-min)))
       ;; A word ending in a file extension (a dot, then a letter and up to 9
       ;; more), or a folder path ending in a slash.
-      (while (re-search-forward "\\.[[:alpha:]][[:alnum:]]\\{0,9\\}\\_>\\|[[:alnum:]_.~-]/\\(?:[[:space:]]\\|\\'\\)" nil t)
+      (while (re-search-forward "\\.[[:alpha:]][[:alnum:]]\\{0,9\\}\\_>\\|[[:alnum:]_.~-]/\\(?:[[:space:]]\\|\\'\\)" to t)
         (let ((end (if (memq (char-before) '(?\s ?\t ?\n)) (1- (point)) (point))) start)
           (save-excursion
             (goto-char end)
@@ -1422,7 +1459,9 @@ agent-shell never renders a reply ending in prose as complete."
         (goto-char (point-max))
         (skip-chars-backward " \t\n")
         (let ((inhibit-read-only t))
-          (kdb-claude--link-documents (line-beginning-position) t))))))
+          (kdb-claude--link-documents (line-beginning-position) t)))))
+  ;; A new turn may name files made since.
+  (setq kdb-claude--resolved nil))
 
 (defun kdb-claude--trim-buffer ()
   "Delete the turns before the prompt nearest half of the limit from the end.
@@ -1772,11 +1811,17 @@ better in Emacs than PowerShell), or pwsh where there's no bash."
   "(KIND . DIR) of the project shell this buffer is.")
 (put 'kdb-claude--shell-for 'permanent-local t)
 
+(defvar kdb-claude--bash 'unseen
+  "Bash's path as last looked up: on Windows that takes a while.")
+
 (defun kdb-claude--bash ()
   "Bash's path, or nil.  Not Windows' System32\\bash.exe: that one runs WSL."
-  (when-let* ((bash (executable-find "bash")))
-    (unless (string-match-p "/system32/" (downcase (subst-char-in-string ?\\ ?/ bash)))
-      bash)))
+  (when (eq kdb-claude--bash 'unseen)
+    (setq kdb-claude--bash
+          (when-let* ((bash (executable-find "bash")))
+            (unless (string-match-p "/system32/" (downcase (subst-char-in-string ?\\ ?/ bash)))
+              bash))))
+  kdb-claude--bash)
 
 (defun kdb-claude--shell-at-prompt-p (buf)
   "Non-nil if shell BUF waits at its prompt (\"$ \", pwsh's \"> \", \"? \").
@@ -1807,8 +1852,8 @@ there would only run once that ends, and a server never does."
   (let* ((mine (seq-filter (lambda (b) (equal (buffer-local-value 'kdb-claude--shell-for b)
                                               (cons kind dir)))
                            (buffer-list)))
-         ;; One free now first; else up to a second, shared, for one to finish.
-         (deadline (+ (float-time) 1))
+         ;; One free now first; else up to 0.3 seconds, shared, for one to finish.
+         (deadline (+ (float-time) 0.3))
          (buf (or (seq-find #'kdb-claude--shell-free-p mine)
                   (seq-find (lambda (b) (and (buffer-live-p b) (kdb-claude--shell-free-p b deadline)))
                             mine)
@@ -1975,7 +2020,14 @@ RET's copy."
                                (goto-char (agent-shell-markdown--watermark-start))
                                (line-beginning-position))))))
     (apply #'agent-shell-markdown-replace-markup args)
-    (kdb-claude--link-documents from (or (plist-get args :complete) (plist-get args :force)))
+    ;; Not past an open code block or a table still growing, which hold the
+    ;; watermark back: unrendered yet, so its dotted words aren't file names,
+    ;; and every chunk would scan it again from its start.
+    (kdb-claude--link-documents
+     from (or (plist-get args :complete) (plist-get args :force))
+     (let ((frontier (agent-shell-markdown--watermark-start)))
+       (and (< frontier (save-excursion (goto-char (point-max)) (line-beginning-position)))
+            (max from frontier))))
     (set-marker from nil))
   ;; Labels carry their own keymap (RET copies) and a hint sensor; the
   ;; ⧉ in each is tagged.  Streaming re-renders, so skip labels done.
@@ -2402,6 +2454,58 @@ LINE is nil when it couldn't be read; START tells a reused PID apart.")
 (defvar kdb-claude--command-lines-reading nil
   "The PowerShell process reading command lines, while it runs.")
 
+(defconst kdb-claude--processes-query
+  (concat "Get-CimInstance Win32_Process | % { \"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.Name)`t"
+          "$(if ($_.CreationDate) { ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() })`t"
+          "$($_.CommandLine -replace '[\\r\\n]+', ' ')\" }")
+  "PowerShell printing PID, parent, name, start (ms) and command line of
+every process, tab-separated.")
+
+(defun kdb-claude--processes-read (output)
+  "PID -> attributes from OUTPUT of `kdb-claude--processes-query', or nil.
+Their command lines replace `kdb-claude--command-lines': all are there."
+  (let ((table (make-hash-table)) (lines (make-hash-table)))
+    (dolist (line (split-string (or output "") "\n" t "\r"))
+      (when (string-match "\\`\\([0-9]+\\)\t\\([0-9]*\\)\t\\([^\t]*\\)\t\\([0-9]*\\)\t\\(.*\\)" line)
+        (let ((pid (string-to-number (match-string 1 line)))
+              (start (and (< (match-beginning 4) (match-end 4))
+                          (cons (string-to-number (match-string 4 line)) 1000)))
+              (args (match-string 5 line)))
+          (puthash pid `((ppid . ,(string-to-number (match-string 2 line)))
+                         (comm . ,(match-string 3 line)) (start . ,start))
+                   table)
+          (puthash pid (cons start (and (not (string-empty-p args)) args)) lines))))
+    (unless (hash-table-empty-p table)
+      (setq kdb-claude--command-lines lines)
+      table)))
+
+(defun kdb-claude--read-processes (&optional then)
+  "Every process's attributes, from one PowerShell (Windows), or nil.
+`process-attributes' there takes a snapshot of all processes per call,
+which for all of them is seconds.  With THEN, in the background: call
+THEN with the table (nil if it failed), and return the process."
+  (let ((command (list "powershell" "-NoProfile" "-NonInteractive" "-Command"
+                       kdb-claude--processes-query)))
+    (if (not then)
+        (kdb-claude--processes-read
+         (ignore-errors
+           (with-output-to-string
+             (apply #'call-process (car command) nil standard-output nil (cdr command)))))
+      (let ((out (generate-new-buffer " *claude processes*")))
+        (condition-case nil
+            (make-process
+             :name "claude-processes" :buffer out :noquery t :command command
+             :sentinel (lambda (proc _)
+                         (unless (process-live-p proc)
+                           (let ((output (with-current-buffer out (buffer-string))))
+                             (kill-buffer out)
+                             (funcall then (and (zerop (process-exit-status proc))
+                                                (kdb-claude--processes-read output)))))))
+          (error (kill-buffer out) nil))))))
+
+(defvar kdb-claude--processes-reading nil
+  "The PowerShell process reading every process for a scan, while it runs.")
+
 (defun kdb-claude--args (pid attrs)
   "PID's command line: a string, `unreadable', or nil if not known yet.
 Windows doesn't give Emacs command lines; those come from
@@ -2540,19 +2644,33 @@ It reads every process, so only on the tab bar's own timer, and only
 while a session that is ready may have left something running."
   (setq kdb-claude--background-candidates
         (seq-filter #'buffer-live-p kdb-claude--background-candidates))
-  (unless (and kdb-claude--background
-               (< (float-time (time-subtract nil (car kdb-claude--background))) 10))
-    (let* ((idle (seq-remove (lambda (b) (and (boundp 'agent-shell-attention--busy)
-                                              (gethash b agent-shell-attention--busy)))
-                             kdb-claude--background-candidates))
-           (table (and idle (kdb-claude--process-table)))
-           (working (seq-filter (lambda (b) (kdb-claude--session-work b table)) idle)))
-      ;; While PowerShell reads command lines, an empty result isn't nothing.
-      (unless (process-live-p kdb-claude--command-lines-reading)
-        (setq kdb-claude--background-candidates
-              (seq-remove (lambda (b) (and (memq b idle) (not (memq b working))))
-                          kdb-claude--background-candidates)))
-      (setq kdb-claude--background (cons (current-time) working)))))
+  (unless (or (process-live-p kdb-claude--processes-reading)
+              (and kdb-claude--background
+                   (< (float-time (time-subtract nil (car kdb-claude--background))) 10)))
+    (let ((idle (seq-remove (lambda (b) (and (boundp 'agent-shell-attention--busy)
+                                             (gethash b agent-shell-attention--busy)))
+                            kdb-claude--background-candidates)))
+      (if (and idle (eq system-type 'windows-nt))
+          (let ((later (lambda () (setq kdb-claude--background
+                                        (cons (current-time) (cdr kdb-claude--background))))))
+            ;; In the background: the tab bar's timer must never wait for it.
+            (unless (setq kdb-claude--processes-reading
+                          (kdb-claude--read-processes
+                           (lambda (table)
+                             (if table (kdb-claude--note-background idle table) (funcall later)))))
+              (funcall later)))
+        (kdb-claude--note-background idle (and idle (kdb-claude--process-table)))))))
+
+(defun kdb-claude--note-background (idle table)
+  "Note which of the IDLE sessions run work in process TABLE."
+  (let* ((idle (seq-filter #'buffer-live-p idle))
+         (working (seq-filter (lambda (b) (kdb-claude--session-work b table)) idle)))
+    ;; While PowerShell reads command lines, an empty result isn't nothing.
+    (unless (process-live-p kdb-claude--command-lines-reading)
+      (setq kdb-claude--background-candidates
+            (seq-remove (lambda (b) (and (memq b idle) (not (memq b working))))
+                        kdb-claude--background-candidates)))
+    (setq kdb-claude--background (cons (current-time) working))))
 
 (defun kdb-claude--task-outputs (buf)
   "Output files of session BUF's background tasks, newest first."
@@ -2590,7 +2708,8 @@ Busy or not: a background command (tests, a server) outlives its turn.
 MCP servers, language servers and browsers a session keeps are left out."
   (interactive)
   (require 'agent-shell)
-  (let* ((table (kdb-claude--process-table))
+  (let* ((table (or (and (eq system-type 'windows-nt) (kdb-claude--read-processes))
+                    (kdb-claude--process-table)))
          (sessions (mapcar (lambda (b) (cons b (kdb-claude--session-work b table t)))
                            (agent-shell-buffers))))
     ;; Windows: the command lines of what's shown, read now.
