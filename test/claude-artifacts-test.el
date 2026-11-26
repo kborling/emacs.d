@@ -784,6 +784,43 @@
     (delete-process agent)
     (kill-buffer buf)))
 
+(ert-deftest commit-hashes-link-to-their-diff ()
+  (skip-unless (executable-find "git"))
+  ;; Loaded first: loading them later would redefine the stubbed viewer.
+  (dolist (feature '(agent-shell agent-shell-markdown browse-url init-vc vc log-view))
+    (require feature))
+  (let* ((repo (file-name-as-directory (make-temp-file "commits" t)))
+         (default-directory repo)
+         opened)
+    (unwind-protect
+        (progn
+          (dolist (args '(("init" "-q") ("-c" "user.name=t" "-c" "user.email=t@t" "commit"
+                                         "-q" "--allow-empty" "-m" "first")))
+            (apply #'call-process "git" nil nil nil args))
+          (let ((hash (car (process-lines "git" "rev-parse" "--short=7" "HEAD"))))
+            (with-temp-buffer
+              (insert (format "See %s, not abc1234 or 2026112 or deadbeefcafe. Last: %s" hash hash))
+              (let ((resolved (make-hash-table :test #'equal)))
+                ;; Streaming: the hash ending the text waits, it may go on.
+                (kdb-claude--link-commits nil nil nil resolved)
+                (should (equal (get-text-property 5 'agent-shell-markdown-url)
+                               (concat "commit:" (expand-file-name repo) "#" hash)))
+                (should-not (get-text-property (- (point-max) 2) 'agent-shell-markdown-url))
+                (dolist (word '("abc1234" "2026112" "deadbeefcafe"))
+                  (goto-char (point-min))
+                  (search-forward word)
+                  (should-not (get-text-property (match-beginning 0) 'agent-shell-markdown-url)))
+                (kdb-claude--link-commits nil nil t resolved)
+                (should (get-text-property (- (point-max) 2) 'agent-shell-markdown-url)))
+              ;; w copies just the hash; opening shows the commit's diff.
+              (kdb-claude-copy-link 5)
+              (should (equal (car kill-ring) hash))
+              (cl-letf (((symbol-function 'kdb-vc-commit-show-diff-in-buffer)
+                         (lambda (h) (setq opened (list h default-directory)))))
+                (browse-url (get-text-property 5 'agent-shell-markdown-url)))
+              (should (equal opened (list hash (expand-file-name repo)))))))
+      (delete-directory repo t))))
+
 (ert-deftest command-lines-read-and-kept ()
   (let ((kdb-claude--command-lines (make-hash-table))
         (table (make-hash-table))

@@ -1311,7 +1311,71 @@ name ending the text is left for later: more of it may still come
                                   (cons e file)))
                               (delete-dups (list full end)))))
             (agent-shell-markdown--apply-link-properties :start start :end (car found) :url (cdr found))
-            (goto-char (max (point) (car found)))))))))
+            (goto-char (max (point) (car found)))))))
+    (kdb-claude--link-commits from to complete resolved)))
+
+(defun kdb-claude--link-commits (from to complete resolved)
+  "Link this repository's commit hashes, from FROM to TO, to their diffs.
+A word of 7 to 40 hex digits, with a letter and a digit, that git knows
+as a commit; the new ones asked in one git process.  RESOLVED keeps the
+answers for the turn.  Unless COMPLETE, a hash ending the text waits."
+  (let ((case-fold-search nil) found new)
+    (save-excursion
+      (goto-char (or from (point-min)))
+      (while (re-search-forward "\\_<[0-9a-f]\\{7,40\\}\\_>" to t)
+        (let ((start (match-beginning 0)) (end (match-end 0))
+              (hash (match-string-no-properties 0)))
+          (when (and (string-match-p "[a-f]" hash) (string-match-p "[0-9]" hash)
+                     (or complete (not (eobp)))
+                     (not (get-text-property start 'agent-shell-markdown-source-block-body))
+                     (not (text-property-not-all start end 'agent-shell-markdown-url nil)))
+            (push (list start end hash) found)
+            (when (eq (gethash (cons 'commit hash) resolved 'unseen) 'unseen)
+              (push hash new))))))
+    (when-let* ((found)
+                (root (let ((r (gethash 'git-root resolved 'unseen)))
+                        (if (eq r 'unseen)
+                            (puthash 'git-root
+                                     (and (not (file-remote-p default-directory))
+                                          (locate-dominating-file default-directory ".git"))
+                                     resolved)
+                          r))))
+      (when new
+        (let ((known (kdb-claude--commits root (delete-dups new))))
+          (dolist (hash new)
+            (puthash (cons 'commit hash) (and (member hash known) t) resolved))))
+      (pcase-dolist (`(,start ,end ,hash) found)
+        (when (gethash (cons 'commit hash) resolved)
+          (agent-shell-markdown--apply-link-properties
+           :start start :end end
+           :url (concat "commit:" (expand-file-name root) "#" hash)))))))
+
+(defun kdb-claude--commits (root hashes)
+  "Those of HASHES that name a commit in ROOT's repository."
+  (with-temp-buffer
+    (let ((default-directory root))
+      (insert (mapconcat (lambda (hash) (concat hash "^{commit}\n")) hashes ""))
+      (when (eql 0 (ignore-errors
+                     (call-process-region (point-min) (point-max) "git" t t nil
+                                          "cat-file" "--batch-check=%(objectname)")))
+        ;; A line per hash, in order: its full name, or what went wrong.
+        (seq-filter #'identity
+                    (seq-mapn (lambda (hash line)
+                                (and (string-match-p "\\`[0-9a-f]+\\'" line) hash))
+                              hashes (split-string (buffer-string) "\n")))))))
+
+;;;###autoload
+(defun kdb-claude-show-commit (url &rest _)
+  "Open a commit link, commit:ROOT#HASH: its message, files and diff.
+The view a vc log shows on RET, with N and P for the next and previous."
+  (unless (string-match "\\`commit:\\(.+\\)#\\([0-9a-f]+\\)\\'" url)
+    (user-error "Not a commit link: %s" url))
+  (let ((default-directory (match-string 1 url))
+        (hash (match-string 2 url)))
+    (require 'init-vc)
+    (require 'vc)
+    (require 'log-view)
+    (kdb-vc-commit-show-diff-in-buffer hash)))
 
 ;;;###autoload
 (defun kdb-claude-copy-link (&optional pos)
@@ -1319,6 +1383,8 @@ name ending the text is left for later: more of it may still come
   (interactive)
   (let ((url (or (get-text-property (or pos (point)) 'agent-shell-markdown-url)
                  (user-error "No link here"))))
+    (when (string-match "\\`commit:.*#\\(.+\\)" url)    ; a commit: just its hash
+      (setq url (match-string 1 url)))
     (kill-new url)
     (message "Copied %s" url)))
 

@@ -19,6 +19,7 @@
               kdb-claude-show kdb-claude-run kdb-claude-output kdb-claude-cleanup
               kdb-claude--rename-keeps-tab kdb-claude--permission-message
               kdb-claude--link-copy-key kdb-claude--link-hint kdb-claude--link-context-menu
+              kdb-claude-show-commit
               kdb-claude--mode-line-state kdb-claude--session-mode-line
               kdb-claude--permission-title
               kdb-claude--tag-client kdb-claude--render-markdown
@@ -121,6 +122,9 @@ paragraph for its direction, which is costly in long sessions."
   (with-eval-after-load 'agent-shell-markdown
     (advice-add 'agent-shell-markdown--apply-link-properties :after #'kdb-claude--link-copy-key)
     (advice-add 'agent-shell-markdown--action-hint :around #'kdb-claude--link-hint))
+  ;; A commit hash in a reply opens its diff.
+  (with-eval-after-load 'browse-url
+    (add-to-list 'browse-url-handlers '("\\`commit:" . kdb-claude-show-commit)))
   (advice-add 'agent-shell--fetch-agent-icon :before-until #'kdb-claude--logo-icon)
   (dolist (fn '(agent-shell--make-header-model agent-shell--header-model-refresh-frame))
     (advice-add fn :filter-return #'kdb-claude--logo-header))
