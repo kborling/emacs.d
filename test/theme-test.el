@@ -16,8 +16,10 @@
               ((symbol-function 'custom-theme-p) (lambda (theme) (eq theme 'fleury)))
               ((symbol-function 'enable-theme) (lambda (theme) (push (list 'enable theme) calls)))
               ((symbol-function 'load-theme) (lambda (theme &rest _) (push (list 'load theme) calls)))
+              ;; Only the default face: a library loading meanwhile sets its own.
               ((symbol-function 'set-face-attribute)
-               (lambda (face _frame &rest args) (push (cons face args) calls))))
+               (lambda (face _frame &rest args)
+                 (when (eq face 'default) (push (cons face args) calls)))))
       (kdb/theme-set 'fleury)
       (kdb/theme-set 'acme))
     ;; A loaded theme is only enabled; the font is left alone.

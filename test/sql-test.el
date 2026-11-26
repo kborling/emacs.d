@@ -33,7 +33,7 @@
   (let ((kdb-sql--token nil))
     (cl-letf (((symbol-function 'call-process)
                (lambda (&rest _) (signal 'file-missing '("Searching for program" "No such file" "az")))))
-      (should (string-match-p "az isn't installed"
+      (should (string-match-p "az isn.t installed"   ; ' or ’: user-error curves it
                               (cadr (should-error (kdb-sql--az-token) :type 'user-error)))))
     (cl-letf (((symbol-function 'call-process) (lambda (&rest _) 1)))  ; signed out
       (should (string-match-p "run az login"
